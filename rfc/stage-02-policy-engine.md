@@ -12,7 +12,7 @@
 - [x] DSL grammar & parser aligned with Spec §14 evaluation order (see `crates/policy-dsl`, `config/policies.json`).
 - [x] Policy storage schema & migrations created (Spec §20 entities `policies`, `policy_rules`).
 - [x] Decision API enriched with policy metadata (policy listing + reload/create endpoints).
-- [x] Auth scaffolding via admin token + middleware (Spec §14, §18) – HS256 JWT/RBAC guard live on Admin API; policy-engine endpoints still need the same enforcement.
+- [x] Auth scaffolding via admin token + middleware (Spec §14, §18) – HS256 JWT/RBAC guard now live on both Admin API and Policy Engine endpoints.
 - [x] Policy simulation endpoint returning decision + matched rule (Spec §14 auditability) – trace/audit logging TBD.
 - [ ] Unit/integration tests covering precedence, overrides, error paths (Spec §24–26).
 - [x] Audit logging for policy changes (Spec §17). *(Policy versions recorded in `policy_versions` table via Admin API + CLI workflows.)*
