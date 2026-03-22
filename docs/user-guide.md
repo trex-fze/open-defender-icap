@@ -38,8 +38,9 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - Cache invalidation: when `redis_url` is configured (or `OD_CACHE_REDIS_URL` env var is set) the Admin API publishes override/review updates to the `cache_channel` (defaults to `od:cache:invalidate`) and deletes the matching Redis keys before returning to the client. Without Redis configured the API logs a warning and skips invalidation, which means cached policy decisions may take up to 5 minutes to expire.
 - Admin authentication: set `admin_token` in the config or provide `OD_ADMIN_TOKEN` (the CLI already reads this variable). Requests must include header `X-Admin-Token` when any token is configured.
 - OIDC/RBAC: set `OD_OIDC_ISSUER`, `OD_OIDC_AUDIENCE`, and `OD_OIDC_HS256_SECRET` (or configure the `auth` block in `config/admin-api.json`) to validate HS256 JWT bearer tokens. Roles extracted from the token (`policy-admin`, `policy-editor`, `policy-viewer`, `review-approver`, `auditor`) determine access; static tokens inherit the roles listed in `auth.static_roles`.
+- Audit logging: every override create/update/delete and review resolution writes to `audit_events` (Postgres) and, when `audit.elastic_url`/`audit.index` (or the `OD_AUDIT_ELASTIC_*` env vars) are set, also ships JSON documents to Elasticsearch for downstream dashboards.
 - Service startup: `cargo run -p admin-api` applies migrations in `services/admin-api/migrations/` and exposes overrides + review queue routes under `/api/v1`. Operators can also run inside Docker by adding the same env vars to the container spec.
-- Audit logging: every override create/update/delete and review resolution writes to `audit_events` (Postgres). Each entry captures actor (from `created_by`/`decided_by` or `X-Admin-Actor` in future), action, target type/ID, and JSON payload; this table feeds SOC reporting and future Elasticsearch replication.
+- Metrics: `GET /metrics` exposes Prometheus gauges/counters for review queue depth and SLA compliance. Configure `metrics.review_sla_seconds` (or `OD_REVIEW_SLA_SECONDS`) to adjust the SLA threshold (default 4 hours).
 - Health checks: `curl http://localhost:19000/health/ready` (readiness) and `/health/live` (liveness). Use `OD_ADMIN_URL` (default `http://localhost:19000`) to point `odctl override ...` commands at the service.
 
 ## 6. CLI (`odctl`) Usage
@@ -76,6 +77,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - **CI/integration**: `docker compose -f docker-compose.yml -f docker-compose.test.yml up --abort-on-container-exit` runs the same smoke harness but can skip heavy services via profiles.
 - **Health checks**: `curl http://localhost:19000/health/ready`, `curl http://localhost:19010/health/ready`, `redis-cli -h localhost ping`, `curl http://localhost:5601/status` (Kibana), `curl http://localhost:9090/-/ready` (Prometheus).
 - **Shutdown**: `docker compose down` keeps volumes, `docker compose down -v` wipes Postgres/Redis/ES data.
+- **Workers**: `llm-worker` and `reclass-worker` subscribe to `cache_channel` using the `redis_url` specified in their configs. They log every override/review invalidation so downstream classification caches can react; ensure these values are set when running the stack.
 
 ## 9. Troubleshooting
 - **ICAP errors**: Check adaptor logs for parse errors; ensure Squid metadata headers present; verify `policy_endpoint` reachable.

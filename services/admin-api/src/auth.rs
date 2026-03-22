@@ -8,8 +8,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use serde::Deserialize;
+use sha2::Sha256;
 use std::{collections::HashSet, env, sync::Arc};
 
 type HmacSha256 = Hmac<Sha256>;

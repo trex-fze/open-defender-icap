@@ -1,9 +1,10 @@
 mod audit;
 mod auth;
 mod cache;
+mod metrics;
 
 use anyhow::{Context, Result};
-use audit::{AuditEvent, AuditLogger};
+use audit::{AuditEvent, AuditLogger, ElasticExporter};
 use auth::{
     enforce_admin, require_roles, AdminAuth, AuthSettings, UserContext, ROLE_OVERRIDES_DELETE,
     ROLE_OVERRIDES_VIEW, ROLE_OVERRIDES_WRITE, ROLE_REVIEW_RESOLVE, ROLE_REVIEW_VIEW,
@@ -28,6 +29,7 @@ use tracing::{error, info, warn, Level};
 use uuid::Uuid;
 
 use cache::CacheInvalidator;
+use metrics::ReviewMetrics;
 
 #[derive(Debug, Clone, Deserialize)]
 struct AdminApiConfig {
@@ -39,6 +41,61 @@ struct AdminApiConfig {
     pub cache_channel: Option<String>,
     #[serde(default)]
     pub auth: AuthSettings,
+    #[serde(default)]
+    pub audit: AuditExportConfig,
+    #[serde(default)]
+    pub metrics: MetricsConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct AuditExportConfig {
+    pub elastic_url: Option<String>,
+    pub index: Option<String>,
+    pub api_key: Option<String>,
+}
+
+impl AuditExportConfig {
+    fn merge_env(mut self) -> Self {
+        if let Ok(url) = env::var("OD_AUDIT_ELASTIC_URL") {
+            self.elastic_url = Some(url);
+        }
+        if let Ok(index) = env::var("OD_AUDIT_ELASTIC_INDEX") {
+            self.index = Some(index);
+        }
+        if let Ok(key) = env::var("OD_AUDIT_ELASTIC_API_KEY") {
+            self.api_key = Some(key);
+        }
+        self
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct MetricsConfig {
+    #[serde(default = "default_review_sla_seconds")]
+    pub review_sla_seconds: u64,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            review_sla_seconds: default_review_sla_seconds(),
+        }
+    }
+}
+
+impl MetricsConfig {
+    fn merge_env(mut self) -> Self {
+        if let Ok(value) = env::var("OD_REVIEW_SLA_SECONDS") {
+            if let Ok(parsed) = value.parse::<u64>() {
+                self.review_sla_seconds = parsed;
+            }
+        }
+        self
+    }
+}
+
+fn default_review_sla_seconds() -> u64 {
+    4 * 60 * 60
 }
 
 #[derive(Clone)]
@@ -46,6 +103,7 @@ struct AppState {
     pool: PgPool,
     cache_invalidator: Option<Arc<CacheInvalidator>>,
     audit_logger: AuditLogger,
+    metrics: ReviewMetrics,
 }
 
 impl AppState {
@@ -164,6 +222,25 @@ async fn main() -> Result<()> {
         .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
 
+    let audit_cfg = cfg.audit.clone().merge_env();
+    let metrics_cfg = cfg.metrics.clone().merge_env();
+
+    let elastic_exporter = if let (Some(url), Some(index)) =
+        (audit_cfg.elastic_url.clone(), audit_cfg.index.clone())
+    {
+        Some(
+            ElasticExporter::new(url, index, audit_cfg.api_key.clone())
+                .context("failed to initialize elastic exporter")?,
+        )
+    } else {
+        None
+    };
+
+    let review_metrics = ReviewMetrics::new(metrics_cfg.review_sla_seconds);
+    if let Err(err) = review_metrics.sync_from_db(&pool).await {
+        warn!(target = "svc-admin", %err, "failed to initialize review metrics gauge");
+    }
+
     if redis_url.is_none() {
         warn!(
             target = "svc-admin",
@@ -180,7 +257,8 @@ async fn main() -> Result<()> {
     let state = AppState {
         pool: pool.clone(),
         cache_invalidator,
-        audit_logger: AuditLogger::new(pool.clone()),
+        audit_logger: AuditLogger::new(pool.clone(), elastic_exporter),
+        metrics: review_metrics,
     };
 
     let auth_layer = {
@@ -211,6 +289,7 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/health/ready", get(health))
         .route("/health/live", get(health))
+        .route("/metrics", get(metrics_endpoint))
         .with_state(state)
         .merge(admin_routes);
 
@@ -223,6 +302,19 @@ async fn main() -> Result<()> {
 
 async fn health() -> &'static str {
     "OK"
+}
+
+async fn metrics_endpoint(
+    State(state): State<AppState>,
+) -> Result<(StatusCode, String), StatusCode> {
+    if let Err(err) = state.metrics.sync_from_db(&state.pool).await {
+        error!(target = "svc-admin", %err, "failed to sync review metrics gauge");
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    state.metrics.render().map(|body| (StatusCode::OK, body)).map_err(|err| {
+        error!(target = "svc-admin", %err, "failed to render metrics");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 async fn list_overrides(
@@ -491,6 +583,11 @@ async fn list_review_queue(
             StatusCode::INTERNAL_SERVER_ERROR
         })?);
     }
+    let pending = records
+        .iter()
+        .filter(|r| r.status.eq_ignore_ascii_case("pending"))
+        .count() as i64;
+    state.metrics.set_open_count(pending);
 
     Ok(Json(records))
 }
@@ -561,6 +658,15 @@ async fn resolve_review_item(
             &mapped,
         )
         .await;
+    let duration = mapped
+        .updated_at
+        .signed_duration_since(mapped.created_at)
+        .num_seconds()
+        .max(0) as f64;
+    state.metrics.record_resolution(duration);
+    if let Err(err) = state.metrics.sync_from_db(&state.pool).await {
+        warn!(target = "svc-admin", %err, "failed to refresh review metrics gauge");
+    }
 
     Ok(Json(mapped))
 }

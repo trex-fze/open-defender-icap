@@ -11,3 +11,5 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 common-types = { path = "../../crates/common-types" }
 config-core = { path = "../../crates/config-core" }
+redis = { workspace = true }
+tokio-stream = "0.1"

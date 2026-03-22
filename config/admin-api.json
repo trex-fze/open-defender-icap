@@ -10,5 +10,13 @@
     "oidc_issuer": null,
     "oidc_audience": null,
     "oidc_hs256_secret": null
+  },
+  "audit": {
+    "elastic_url": null,
+    "index": "audit-events",
+    "api_key": null
+  },
+  "metrics": {
+    "review_sla_seconds": 14400
   }
 }

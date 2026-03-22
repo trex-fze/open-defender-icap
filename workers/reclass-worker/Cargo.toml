@@ -10,3 +10,5 @@ serde = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 config-core = { path = "../../crates/config-core" }
+redis = { workspace = true }
+tokio-stream = "0.1"

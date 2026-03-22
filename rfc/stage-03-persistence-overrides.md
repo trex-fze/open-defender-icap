@@ -9,11 +9,11 @@
 4. Introduce audit logging + evidence capture for policy/override actions.
 
 ## Checklist
-- [ ] Schema + migrations for entities listed in Spec §20 (`classifications`, `overrides`, `review_queue`, etc.). *(Overrides/review tables + classifications/versions now defined; audit artifacts still open.)*
+- [ ] Schema + migrations for entities listed in Spec §20 (`classifications`, `overrides`, `review_queue`, etc.). *(Overrides/review tables + classifications/versions now defined; remaining audit artifacts still open.)*
 - [x] Override APIs (create/update/delete, scope validation) – Spec §23.4. *(Admin API now validates scopes/actions, supports PUT + DELETE, and emits cache invalidations; CLI/UI follow-ups pending.)*
-- [ ] Review queue endpoints & SLA metrics – Spec §§14, 16. *(List + resolve endpoints wired; SLA metrics + worker hooks TBD.)*
-- [x] Cache invalidation hooks on DB changes – Spec §11. *(Admin API purges Redis keys + publishes events; ICAP adaptor subscribes and clears local caches.)*
-- [x] Audit event pipeline (DB + Elasticsearch) – Spec §17. *(Admin API now writes audit_events table; ES hookup pending.)*
+- [x] Review queue endpoints & SLA metrics – Spec §§14, 16. *(List + resolve endpoints wired; Prometheus `/metrics` exposes queue depth + SLA counters.)*
+- [x] Cache invalidation hooks on DB changes – Spec §11. *(Admin API purges Redis keys + publishes events; ICAP adaptor and workers subscribe and react.)*
+- [x] Audit event pipeline (DB + Elasticsearch) – Spec §17. *(Admin API writes audit_events and streams to Elasticsearch when configured.)*
 - [ ] Unit/integration tests for persistence logic – Spec §24–26.
 
 ## Traceability Plan

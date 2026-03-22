@@ -1,10 +1,14 @@
 use anyhow::Result;
 use serde::Deserialize;
-use tracing::{info, Level};
+use tokio::signal;
+use tokio_stream::StreamExt;
+use tracing::{error, info, Level};
 
 #[derive(Debug, Deserialize)]
 struct ReclassConfig {
     pub schedule: String,
+    pub redis_url: String,
+    pub cache_channel: String,
 }
 
 #[tokio::main]
@@ -16,7 +20,60 @@ async fn main() -> Result<()> {
         .init();
 
     let cfg: ReclassConfig = config_core::load_config("config/reclass-worker.json")?;
-    info!(target = "svc-reclass", schedule = %cfg.schedule, "reclassification worker placeholder running");
+    info!(
+        target = "svc-reclass",
+        schedule = %cfg.schedule,
+        channel = %cfg.cache_channel,
+        "reclass worker watching cache channel"
+    );
 
+    let listener = CacheListener::new(&cfg.redis_url, &cfg.cache_channel).await?;
+    tokio::spawn(listener.run());
+
+    signal::ctrl_c().await?;
     Ok(())
+}
+
+struct CacheListener {
+    redis_url: String,
+    channel: String,
+}
+
+impl CacheListener {
+    async fn new(redis_url: &str, channel: &str) -> Result<Self> {
+        Ok(Self {
+            redis_url: redis_url.to_string(),
+            channel: channel.to_string(),
+        })
+    }
+
+    async fn run(self) {
+        loop {
+            match redis::Client::open(self.redis_url.clone()) {
+                Ok(client) => {
+                    if let Err(err) = self.listen(client).await {
+                        error!(target = "svc-reclass", %err, "cache listener error");
+                    }
+                }
+                Err(err) => error!(target = "svc-reclass", %err, "failed to connect to redis"),
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    }
+
+    async fn listen(&self, client: redis::Client) -> Result<(), redis::RedisError> {
+        let conn = client.get_async_connection().await?;
+        let mut pubsub = conn.into_pubsub();
+        pubsub.subscribe(&self.channel).await?;
+        let mut stream = pubsub.on_message();
+        while let Some(msg) = stream.next().await {
+            let payload: String = msg.get_payload()?;
+            info!(
+                target = "svc-reclass",
+                event = payload,
+                "cache invalidation received"
+            );
+        }
+        Ok(())
+    }
 }
