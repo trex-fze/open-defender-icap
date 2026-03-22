@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EntityLevel {
@@ -16,6 +17,20 @@ pub enum PolicyAction {
     Monitor,
     Review,
     RequireApproval,
+}
+
+impl fmt::Display for PolicyAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            PolicyAction::Allow => "Allow",
+            PolicyAction::Block => "Block",
+            PolicyAction::Warn => "Warn",
+            PolicyAction::Monitor => "Monitor",
+            PolicyAction::Review => "Review",
+            PolicyAction::RequireApproval => "RequireApproval",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

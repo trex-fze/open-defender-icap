@@ -82,9 +82,10 @@ flowchart LR
 - **Metrics**: `squid_to_icap_latency`, `cache_hit_ratio`, `policy_decision_latency`, `llm_invocation_count` (future), etc.
 
 ### 2.2 Policy Engine (`svc-policy`)
-- **Current State**: Axum service exposing `/api/v1/decision`; simple evaluator stub.
+- **Current State**: Axum service exposing `/api/v1/decision` plus admin endpoints.
 - **Current Enhancements**: Loads policy DSL from `config/policies.json`, exposes `/api/v1/policies` (list) and `/api/v1/policies/reload` to refresh without restart.
-- **Future Enhancements**: Postgres persistence, policy CRUD, simulation endpoint, RBAC, audit events.
+- **Database Option**: When `database_url` is configured, the service applies migrations in `services/policy-engine/migrations/`, seeds policies from the DSL file if the DB is empty, and serves policy list/create routes backed by Postgres (`policies`, `policy_rules` tables).
+- **Future Enhancements**: Persistent policy CRUD UI/CLI with approvals, simulation endpoint, RBAC, audit events.
 - **Interfaces**: REST (JSON) for ICAP adaptor + admin tools; eventually gRPC for low-latency decision path.
 
 ### 2.3 Cache Layer (Redis + Memory)

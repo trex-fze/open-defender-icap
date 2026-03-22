@@ -27,9 +27,9 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - Monitoring: tail `target/debug/icap-adaptor` logs and scrape Prometheus metrics from `http://<metrics_host>:<metrics_port>/metrics` (default `19005`).
 
 ## 4. Using the Policy Engine
-- Config file: `config/policy-engine.json` (host/port + path to DSL file).
-- Policies reside in `config/policies.json`; call `GET /api/v1/policies` to view rules and `POST /api/v1/policies/reload` to hot-reload after edits.
-- `cargo run -p policy-engine` starts REST API with `/api/v1/decision` + health endpoints.
+- Config file: `config/policy-engine.json` (host/port, DSL path, optional `database_url`). Leave `database_url` as `null` for file-backed mode; set to a Postgres connection string to enable persistent storage.
+- Policies reside in `config/policies.json`; `GET /api/v1/policies` lists active rules, `POST /api/v1/policies/reload` hot-reloads from the DSL/DB, and `POST /api/v1/policies` (DB mode only) creates a new policy document.
+- `cargo run -p policy-engine` starts REST API with `/api/v1/decision` + health endpoints. On startup the service applies migrations in `services/policy-engine/migrations/` and seeds from the DSL file if the database is empty.
 - Future operations: manage policies via Admin API/UI/CLI; run simulations for policy changes.
 
 ## 5. CLI (`odctl`) Usage

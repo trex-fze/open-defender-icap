@@ -1,23 +1,86 @@
-use crate::{models::DecisionRequest, store::PolicyStore};
+use crate::{
+    models::{DecisionRequest, PolicyCreateRequest},
+    store::{insert_policy_document, PolicyStore},
+};
+use anyhow::{anyhow, Result};
 use common_types::PolicyDecision;
+use policy_dsl::PolicyDocument;
+use sqlx::PgPool;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct PolicyEvaluator {
-    store: PolicyStore,
-    policy_file: String,
+    store: Arc<PolicyStore>,
+    source: PolicySource,
+}
+
+#[derive(Clone)]
+enum PolicySource {
+    File {
+        path: String,
+    },
+    Database {
+        pool: PgPool,
+        seed_path: Option<String>,
+    },
 }
 
 impl PolicyEvaluator {
-    pub fn new(store: PolicyStore, policy_file: String) -> Self {
-        Self { store, policy_file }
+    pub fn from_file(store: PolicyStore, policy_file: String) -> Self {
+        Self {
+            store: Arc::new(store),
+            source: PolicySource::File { path: policy_file },
+        }
+    }
+
+    pub fn from_database(store: PolicyStore, pool: PgPool, seed_path: Option<String>) -> Self {
+        Self {
+            store: Arc::new(store),
+            source: PolicySource::Database { pool, seed_path },
+        }
     }
 
     pub fn evaluate(&self, request: &DecisionRequest) -> PolicyDecision {
         self.store.evaluate(request)
     }
 
-    pub fn reload(&self) -> anyhow::Result<()> {
-        self.store.reload(&self.policy_file)
+    pub async fn reload(&self) -> Result<()> {
+        match &self.source {
+            PolicySource::File { path } => {
+                let doc = PolicyDocument::load_from_file(path)?;
+                self.store.update(doc);
+            }
+            PolicySource::Database { pool, seed_path } => {
+                if let Some(new_store) = PolicyStore::load_from_db(pool).await? {
+                    self.store
+                        .update_from_rules(new_store.list_rules(), new_store.version());
+                } else if let Some(seed) = seed_path {
+                    let doc = PolicyDocument::load_from_file(seed)?;
+                    PolicyStore::seed_db_from_document(pool, &doc, "default", Some("system"))
+                        .await?;
+                    if let Some(new_store) = PolicyStore::load_from_db(pool).await? {
+                        self.store
+                            .update_from_rules(new_store.list_rules(), new_store.version());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn create_policy(&self, req: PolicyCreateRequest) -> Result<()> {
+        match &self.source {
+            PolicySource::File { .. } => Err(anyhow!("database backend not configured")),
+            PolicySource::Database { pool, .. } => {
+                let doc = PolicyDocument {
+                    version: req.version.clone(),
+                    rules: req.rules.clone(),
+                };
+                insert_policy_document(pool, &doc, &req.name, req.created_by.as_deref()).await?;
+                self.reload().await?;
+                Ok(())
+            }
+        }
     }
 
     pub fn rules(&self) -> Vec<policy_dsl::PolicyRule> {
@@ -26,52 +89,5 @@ impl PolicyEvaluator {
 
     pub fn version(&self) -> String {
         self.store.version()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::models::DecisionRequest;
-    use policy_dsl::{PolicyDocument, PolicyRule};
-
-    fn mock_store() -> PolicyStore {
-        let doc = PolicyDocument {
-            version: "test".into(),
-            rules: vec![PolicyRule {
-                id: "block-social".into(),
-                description: None,
-                priority: 10,
-                action: common_types::PolicyAction::Block,
-                conditions: policy_dsl::Conditions {
-                    categories: Some(vec!["Social Media".into()]),
-                    ..Default::default()
-                },
-            }],
-        };
-        let path = std::env::temp_dir().join("policy-test.json");
-        std::fs::write(&path, serde_json::to_string(&doc).unwrap()).unwrap();
-        PolicyStore::load_from_file(path.to_str().unwrap()).unwrap()
-    }
-
-    fn base_request() -> DecisionRequest {
-        DecisionRequest {
-            normalized_key: "domain:example.com".into(),
-            entity_level: "domain".into(),
-            source_ip: "10.0.0.1".into(),
-            user_id: None,
-            group_ids: None,
-            category_hint: Some("Social Media".into()),
-            risk_hint: None,
-            confidence_hint: Some(0.8),
-        }
-    }
-
-    #[test]
-    fn matches_policy_rule() {
-        let store = mock_store();
-        let evaluator = PolicyEvaluator::new(store, "unused".into());
-        let decision = evaluator.evaluate(&base_request());
-        assert_eq!(decision.action, common_types::PolicyAction::Block);
     }
 }

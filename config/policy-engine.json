@@ -1,5 +1,6 @@
 {
   "api_host": "0.0.0.0",
   "api_port": 19010,
-  "policy_file": "config/policies.json"
+  "policy_file": "config/policies.json",
+  "database_url": null
 }

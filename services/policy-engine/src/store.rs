@@ -1,8 +1,12 @@
 use crate::models::DecisionRequest;
-use common_types::{PolicyAction, PolicyDecision};
+use anyhow::{anyhow, Result};
+use common_types::{ClassificationVerdict, PolicyAction, PolicyDecision};
 use parking_lot::RwLock;
 use policy_dsl::{Conditions, PolicyDocument, PolicyRule};
+use serde_json::Value;
+use sqlx::{PgPool, Row};
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct PolicyStore {
@@ -11,14 +15,100 @@ pub struct PolicyStore {
 }
 
 impl PolicyStore {
-    pub fn load_from_file(path: &str) -> anyhow::Result<Self> {
-        let doc = PolicyDocument::load_from_file(path)?;
+    pub fn from_document(doc: PolicyDocument) -> Self {
         let mut rules = doc.rules;
         rules.sort_by_key(|r| r.priority);
-        Ok(Self {
+        Self {
             inner: Arc::new(RwLock::new(rules)),
             version: Arc::new(RwLock::new(doc.version)),
-        })
+        }
+    }
+
+    pub fn load_from_file(path: &str) -> Result<Self> {
+        let doc = PolicyDocument::load_from_file(path)?;
+        Ok(Self::from_document(doc))
+    }
+
+    pub async fn load_from_db(pool: &PgPool) -> Result<Option<Self>> {
+        let policy = sqlx::query(
+            "SELECT id, name, version FROM policies WHERE status = 'active' ORDER BY created_at DESC LIMIT 1",
+        )
+        .fetch_optional(pool)
+        .await?;
+
+        let Some(policy) = policy else {
+            return Ok(None);
+        };
+
+        let policy_id: Uuid = policy.get("id");
+        let version: String = policy.get("version");
+
+        let rules = sqlx::query(
+            "SELECT priority, action, description, conditions FROM policy_rules WHERE policy_id = $1 ORDER BY priority ASC",
+        )
+        .bind(policy_id)
+        .fetch_all(pool)
+        .await?;
+
+        let mut parsed_rules = Vec::with_capacity(rules.len());
+        for row in rules {
+            let priority: i32 = row.get("priority");
+            let action: String = row.get("action");
+            let description: Option<String> = row.get("description");
+            let conditions: Value = row.get("conditions");
+            parsed_rules.push(db_row_to_rule(&action, description, priority, conditions)?);
+        }
+
+        Ok(Some(Self {
+            inner: Arc::new(RwLock::new(parsed_rules)),
+            version: Arc::new(RwLock::new(version)),
+        }))
+    }
+
+    pub async fn seed_db_from_document(
+        pool: &PgPool,
+        doc: &PolicyDocument,
+        name: &str,
+        created_by: Option<&str>,
+    ) -> Result<Uuid> {
+        let policy_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO policies (id, name, version, status, created_by) VALUES ($1, $2, $3, 'active', $4)",
+        )
+        .bind(policy_id)
+        .bind(name)
+        .bind(&doc.version)
+        .bind(created_by)
+        .execute(pool)
+        .await?;
+
+        for rule in &doc.rules {
+            sqlx::query(
+                "INSERT INTO policy_rules (id, policy_id, priority, action, description, conditions) VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(policy_id)
+            .bind(rule.priority as i32)
+            .bind(rule.action.to_string())
+            .bind(&rule.description)
+            .bind(serde_json::to_value(&rule.conditions)?)
+            .execute(pool)
+            .await?;
+        }
+
+        Ok(policy_id)
+    }
+
+    pub fn update(&self, doc: PolicyDocument) {
+        let mut rules = doc.rules;
+        rules.sort_by_key(|r| r.priority);
+        *self.inner.write() = rules;
+        *self.version.write() = doc.version;
+    }
+
+    pub fn update_from_rules(&self, rules: Vec<PolicyRule>, version: String) {
+        *self.inner.write() = rules;
+        *self.version.write() = version;
     }
 
     pub fn evaluate(&self, request: &DecisionRequest) -> PolicyDecision {
@@ -46,15 +136,66 @@ impl PolicyStore {
     pub fn version(&self) -> String {
         self.version.read().clone()
     }
+}
 
-    pub fn reload(&self, path: &str) -> anyhow::Result<()> {
-        let doc = PolicyDocument::load_from_file(path)?;
-        let mut rules = doc.rules;
-        rules.sort_by_key(|r| r.priority);
-        *self.inner.write() = rules;
-        *self.version.write() = doc.version;
-        Ok(())
+pub async fn insert_policy_document(
+    pool: &PgPool,
+    doc: &PolicyDocument,
+    name: &str,
+    created_by: Option<&str>,
+) -> Result<()> {
+    let policy_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO policies (id, name, version, status, created_by) VALUES ($1, $2, $3, 'active', $4)",
+    )
+    .bind(policy_id)
+    .bind(name)
+    .bind(&doc.version)
+    .bind(created_by)
+    .execute(pool)
+    .await?;
+
+    for rule in &doc.rules {
+        sqlx::query(
+            "INSERT INTO policy_rules (id, policy_id, priority, action, description, conditions) VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(policy_id)
+        .bind(rule.priority as i32)
+        .bind(rule.action.to_string())
+        .bind(&rule.description)
+        .bind(serde_json::to_value(&rule.conditions)?)
+        .execute(pool)
+        .await?;
     }
+
+    Ok(())
+}
+
+fn db_row_to_rule(
+    action: &str,
+    description: Option<String>,
+    priority: i32,
+    conditions: Value,
+) -> Result<PolicyRule> {
+    let action_enum = match action {
+        "Allow" => PolicyAction::Allow,
+        "Block" => PolicyAction::Block,
+        "Warn" => PolicyAction::Warn,
+        "Monitor" => PolicyAction::Monitor,
+        "Review" => PolicyAction::Review,
+        "RequireApproval" => PolicyAction::RequireApproval,
+        other => return Err(anyhow!("unknown action {other}")),
+    };
+
+    let cond: Conditions = serde_json::from_value(conditions)?;
+    Ok(PolicyRule {
+        id: Uuid::new_v4().to_string(),
+        description,
+        priority: priority as u32,
+        action: action_enum,
+        conditions: cond,
+    })
 }
 
 fn matches_conditions(cond: &Conditions, request: &DecisionRequest) -> bool {
@@ -99,13 +240,13 @@ fn matches_conditions(cond: &Conditions, request: &DecisionRequest) -> bool {
 }
 
 trait ToVerdict {
-    fn to_verdict(&self, rule: &PolicyRule) -> Option<common_types::ClassificationVerdict>;
-    fn to_verdict_default(&self) -> Option<common_types::ClassificationVerdict>;
+    fn to_verdict(&self, rule: &PolicyRule) -> Option<ClassificationVerdict>;
+    fn to_verdict_default(&self) -> Option<ClassificationVerdict>;
 }
 
 impl ToVerdict for DecisionRequest {
-    fn to_verdict(&self, rule: &PolicyRule) -> Option<common_types::ClassificationVerdict> {
-        Some(common_types::ClassificationVerdict {
+    fn to_verdict(&self, rule: &PolicyRule) -> Option<ClassificationVerdict> {
+        Some(ClassificationVerdict {
             primary_category: self
                 .category_hint
                 .clone()
@@ -117,8 +258,8 @@ impl ToVerdict for DecisionRequest {
         })
     }
 
-    fn to_verdict_default(&self) -> Option<common_types::ClassificationVerdict> {
-        Some(common_types::ClassificationVerdict {
+    fn to_verdict_default(&self) -> Option<ClassificationVerdict> {
+        Some(ClassificationVerdict {
             primary_category: self
                 .category_hint
                 .clone()

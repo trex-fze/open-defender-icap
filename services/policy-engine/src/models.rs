@@ -1,4 +1,5 @@
 use common_types::PolicyAction;
+use policy_dsl::PolicyDocument;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Clone)]
@@ -51,6 +52,24 @@ impl PolicyListResponse {
         Self {
             version,
             rules: summaries,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PolicyCreateRequest {
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub created_by: Option<String>,
+    pub rules: Vec<policy_dsl::PolicyRule>,
+}
+
+impl PolicyCreateRequest {
+    pub fn into_document(self) -> PolicyDocument {
+        PolicyDocument {
+            version: self.version,
+            rules: self.rules,
         }
     }
 }

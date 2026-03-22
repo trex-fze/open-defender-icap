@@ -11,7 +11,9 @@ use axum::{
     Json, Router,
 };
 use evaluator::PolicyEvaluator;
-use models::{DecisionRequest, ErrorResponse, PolicyListResponse};
+use models::{DecisionRequest, ErrorResponse, PolicyCreateRequest, PolicyListResponse};
+use policy_dsl::PolicyDocument;
+use sqlx::postgres::PgPoolOptions;
 use std::{net::SocketAddr, sync::Arc};
 use store::PolicyStore;
 use tokio::net::TcpListener;
@@ -31,14 +33,33 @@ async fn main() -> Result<()> {
         .init();
 
     let cfg = config::load()?;
-    let store = PolicyStore::load_from_file(&cfg.policy_file)?;
-    let evaluator = PolicyEvaluator::new(store, cfg.policy_file.clone());
+    let evaluator = if let Some(db_url) = cfg.database_url.clone() {
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&db_url)
+            .await?;
+        sqlx::migrate!("./migrations").run(&pool).await?;
+        let store = match PolicyStore::load_from_db(&pool).await? {
+            Some(store) => store,
+            None => {
+                let doc = PolicyDocument::load_from_file(&cfg.policy_file)?;
+                PolicyStore::seed_db_from_document(&pool, &doc, "default", Some("system")).await?;
+                PolicyStore::load_from_db(&pool)
+                    .await?
+                    .expect("seeded policy must exist")
+            }
+        };
+        PolicyEvaluator::from_database(store, pool, Some(cfg.policy_file.clone()))
+    } else {
+        let store = PolicyStore::load_from_file(&cfg.policy_file)?;
+        PolicyEvaluator::from_file(store, cfg.policy_file.clone())
+    };
     let state = AppState {
         evaluator: Arc::new(evaluator),
     };
     let app = Router::new()
         .route("/api/v1/decision", post(handle_decision))
-        .route("/api/v1/policies", get(list_policies))
+        .route("/api/v1/policies", get(list_policies).post(create_policy))
         .route("/api/v1/policies/reload", post(reload_policies))
         .route("/health/ready", get(health))
         .with_state(state);
@@ -77,7 +98,7 @@ async fn list_policies(State(state): State<AppState>) -> Json<PolicyListResponse
 async fn reload_policies(
     State(state): State<AppState>,
 ) -> Result<Json<PolicyListResponse>, (StatusCode, Json<ErrorResponse>)> {
-    state.evaluator.reload().map_err(|err| {
+    state.evaluator.reload().await.map_err(|err| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
@@ -86,6 +107,33 @@ async fn reload_policies(
             }),
         )
     })?;
+    let rules = state.evaluator.rules();
+    let version = state.evaluator.version();
+    Ok(Json(PolicyListResponse::from_rules(version, rules)))
+}
+
+async fn create_policy(
+    State(state): State<AppState>,
+    Json(payload): Json<PolicyCreateRequest>,
+) -> Result<Json<PolicyListResponse>, (StatusCode, Json<ErrorResponse>)> {
+    state
+        .evaluator
+        .create_policy(payload)
+        .await
+        .map_err(|err| {
+            let status = if err.to_string().contains("database backend not configured") {
+                StatusCode::NOT_IMPLEMENTED
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (
+                status,
+                Json(ErrorResponse {
+                    error_code: "POLICY_CREATE_FAILED",
+                    message: err.to_string(),
+                }),
+            )
+        })?;
     let rules = state.evaluator.rules();
     let version = state.evaluator.version();
     Ok(Json(PolicyListResponse::from_rules(version, rules)))
@@ -101,6 +149,7 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
+    use uuid::Uuid;
 
     fn test_app() -> Router {
         let doc = policy_dsl::PolicyDocument {
@@ -116,10 +165,13 @@ mod tests {
                 },
             }],
         };
-        let tmp = std::env::temp_dir().join("policy-app-test.json");
+        let tmp = std::env::temp_dir().join(format!(
+            "policy-app-test-{}.json",
+            Uuid::new_v4()
+        ));
         std::fs::write(&tmp, serde_json::to_string(&doc).unwrap()).unwrap();
         let store = PolicyStore::load_from_file(tmp.to_str().unwrap()).unwrap();
-        let evaluator = PolicyEvaluator::new(store, tmp.to_str().unwrap().into());
+        let evaluator = PolicyEvaluator::from_file(store, tmp.to_str().unwrap().into());
         let state = AppState {
             evaluator: Arc::new(evaluator),
         };
