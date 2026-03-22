@@ -4,16 +4,19 @@ mod cache;
 
 use anyhow::{Context, Result};
 use audit::{AuditEvent, AuditLogger};
-use auth::{enforce_admin, AdminAuth};
+use auth::{
+    enforce_admin, require_roles, AdminAuth, AuthSettings, UserContext, ROLE_OVERRIDES_DELETE,
+    ROLE_OVERRIDES_VIEW, ROLE_OVERRIDES_WRITE, ROLE_REVIEW_RESOLVE, ROLE_REVIEW_VIEW,
+};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     middleware,
     routing::{delete, get, post},
-    Json, Router,
+    Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{self, Value};
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::{
     postgres::{PgPoolOptions, PgRow},
@@ -26,7 +29,7 @@ use uuid::Uuid;
 
 use cache::CacheInvalidator;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct AdminApiConfig {
     pub host: String,
     pub port: u16,
@@ -34,6 +37,8 @@ struct AdminApiConfig {
     pub admin_token: Option<String>,
     pub redis_url: Option<String>,
     pub cache_channel: Option<String>,
+    #[serde(default)]
+    pub auth: AuthSettings,
 }
 
 #[derive(Clone)]
@@ -147,6 +152,11 @@ async fn main() -> Result<()> {
         .transpose()
         .context("failed to initialize cache invalidator")?
         .map(Arc::new);
+    let admin_auth = Arc::new(
+        AdminAuth::from_config(admin_token.clone(), cfg.auth.clone())
+            .await
+            .context("failed to initialize auth")?,
+    );
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -173,6 +183,14 @@ async fn main() -> Result<()> {
         audit_logger: AuditLogger::new(pool.clone()),
     };
 
+    let auth_layer = {
+        let auth = admin_auth.clone();
+        middleware::from_fn(move |req, next| {
+            let auth = auth.clone();
+            async move { enforce_admin(auth, req, next).await }
+        })
+    };
+
     let admin_routes = Router::new()
         .route(
             "/api/v1/overrides",
@@ -188,10 +206,7 @@ async fn main() -> Result<()> {
             post(resolve_review_item),
         )
         .with_state(state.clone())
-        .layer(middleware::from_fn_with_state(
-            AdminAuth { token: admin_token },
-            enforce_admin,
-        ));
+        .layer(auth_layer);
 
     let app = Router::new()
         .route("/health/ready", get(health))
@@ -211,8 +226,10 @@ async fn health() -> &'static str {
 }
 
 async fn list_overrides(
+    Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<OverrideRecord>>, StatusCode> {
+    require_roles(&user, ROLE_OVERRIDES_VIEW)?;
     let rows = sqlx::query(
         r#"SELECT id, scope_type, scope_value, action, reason, created_by, expires_at, status, created_at, updated_at
         FROM overrides ORDER BY created_at DESC LIMIT 200"#,
@@ -236,10 +253,15 @@ async fn list_overrides(
 }
 
 async fn create_override(
+    Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
-    Json(payload): Json<OverrideUpsertRequest>,
+    Json(mut payload): Json<OverrideUpsertRequest>,
 ) -> Result<Json<OverrideRecord>, (StatusCode, Json<ApiError>)> {
-    let actor_hint = payload.created_by.clone();
+    require_roles(&user, ROLE_OVERRIDES_WRITE)
+        .map_err(|status| (status, Json(ApiError::forbidden())))?;
+    if payload.created_by.is_none() {
+        payload.created_by = Some(user.actor.clone());
+    }
     let validated = validate_override_payload(payload)?;
     let ValidatedOverridePayload {
         scope_type,
@@ -297,7 +319,10 @@ async fn create_override(
     state
         .log_override_event(
             "override.create",
-            actor_hint.or_else(|| mapped.created_by.clone()),
+            mapped
+                .created_by
+                .clone()
+                .or_else(|| Some(user.actor.clone())),
             mapped.id.to_string(),
             &mapped,
         )
@@ -307,9 +332,12 @@ async fn create_override(
 }
 
 async fn delete_override(
+    Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<(), (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_OVERRIDES_DELETE)
+        .map_err(|status| (status, Json(ApiError::forbidden())))?;
     let deleted =
         sqlx::query("DELETE FROM overrides WHERE id = $1 RETURNING scope_type, scope_value")
             .bind(id)
@@ -346,7 +374,7 @@ async fn delete_override(
     state
         .log_override_event(
             "override.delete",
-            Some("admin".into()),
+            Some(user.actor.clone()),
             id.to_string(),
             serde_json::json!({
                 "scope_type": scope_type,
@@ -359,11 +387,16 @@ async fn delete_override(
 }
 
 async fn update_override(
+    Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-    Json(payload): Json<OverrideUpsertRequest>,
+    Json(mut payload): Json<OverrideUpsertRequest>,
 ) -> Result<Json<OverrideRecord>, (StatusCode, Json<ApiError>)> {
-    let actor_hint = payload.created_by.clone();
+    require_roles(&user, ROLE_OVERRIDES_WRITE)
+        .map_err(|status| (status, Json(ApiError::forbidden())))?;
+    if payload.created_by.is_none() {
+        payload.created_by = Some(user.actor.clone());
+    }
     let validated = validate_override_payload(payload)?;
     let ValidatedOverridePayload {
         scope_type,
@@ -423,9 +456,10 @@ async fn update_override(
     state
         .log_override_event(
             "override.update",
-            actor_hint
-                .or_else(|| mapped.created_by.clone())
-                .or(Some("admin".into())),
+            mapped
+                .created_by
+                .clone()
+                .or_else(|| Some(user.actor.clone())),
             mapped.id.to_string(),
             &mapped,
         )
@@ -435,8 +469,10 @@ async fn update_override(
 }
 
 async fn list_review_queue(
+    Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ReviewRecord>>, StatusCode> {
+    require_roles(&user, ROLE_REVIEW_VIEW)?;
     let rows = sqlx::query(
         r#"SELECT id, normalized_key, request_metadata, status, submitter, assigned_to, decided_by, decision_notes, decision_action, created_at, updated_at
         FROM review_queue ORDER BY created_at DESC LIMIT 200"#,
@@ -460,15 +496,21 @@ async fn list_review_queue(
 }
 
 async fn resolve_review_item(
+    Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-    Json(payload): Json<ReviewResolveRequest>,
+    Json(mut payload): Json<ReviewResolveRequest>,
 ) -> Result<Json<ReviewRecord>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_REVIEW_RESOLVE)
+        .map_err(|status| (status, Json(ApiError::forbidden())))?;
     if payload.status.trim().is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ApiError::new("VALIDATION_ERROR", "status required")),
         ));
+    }
+    if payload.decided_by.is_none() {
+        payload.decided_by = Some(user.actor.clone());
     }
 
     let rows = sqlx::query(
@@ -511,7 +553,10 @@ async fn resolve_review_item(
     state
         .log_review_event(
             "review.resolve",
-            payload.decided_by.clone().or(Some("admin".into())),
+            payload
+                .decided_by
+                .clone()
+                .or_else(|| Some(user.actor.clone())),
             mapped.id.to_string(),
             &mapped,
         )
@@ -532,6 +577,10 @@ impl ApiError {
             error_code: code,
             message: message.into(),
         }
+    }
+
+    fn forbidden() -> Self {
+        Self::new("FORBIDDEN", "insufficient privileges")
     }
 }
 

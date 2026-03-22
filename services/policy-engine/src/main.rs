@@ -79,9 +79,7 @@ async fn main() -> Result<()> {
         .route("/api/v1/policies/simulate", post(simulate_policy))
         .with_state(state.clone())
         .layer(middleware::from_fn_with_state(
-            AdminAuth {
-                token: admin_token,
-            },
+            AdminAuth { token: admin_token },
             enforce_admin,
         ));
 

@@ -4,5 +4,11 @@
   "database_url": null,
   "admin_token": null,
   "redis_url": "redis://redis:6379",
-  "cache_channel": "od:cache:invalidate"
+  "cache_channel": "od:cache:invalidate",
+  "auth": {
+    "static_roles": ["policy-admin", "policy-editor", "policy-viewer", "auditor"],
+    "oidc_issuer": null,
+    "oidc_audience": null,
+    "oidc_hs256_secret": null
+  }
 }
