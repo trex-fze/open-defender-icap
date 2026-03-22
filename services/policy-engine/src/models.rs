@@ -1,6 +1,7 @@
 use common_types::{PolicyAction, PolicyDecision};
 use policy_dsl::PolicyDocument;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DecisionRequest {
@@ -26,6 +27,7 @@ pub struct ErrorResponse {
 
 #[derive(Debug, Serialize)]
 pub struct PolicyListResponse {
+    pub policy_id: Option<String>,
     pub version: String,
     pub rules: Vec<PolicySummary>,
 }
@@ -46,7 +48,11 @@ pub struct SimulationResponse {
 }
 
 impl PolicyListResponse {
-    pub fn from_rules(version: String, rules: Vec<policy_dsl::PolicyRule>) -> Self {
+    pub fn from_store(
+        version: String,
+        policy_id: Option<Uuid>,
+        rules: Vec<policy_dsl::PolicyRule>,
+    ) -> Self {
         let summaries = rules
             .into_iter()
             .map(|rule| PolicySummary {
@@ -57,6 +63,7 @@ impl PolicyListResponse {
             })
             .collect::<Vec<_>>();
         Self {
+            policy_id: policy_id.map(|id| id.to_string()),
             version,
             rules: summaries,
         }
@@ -77,6 +84,25 @@ impl PolicyCreateRequest {
         PolicyDocument {
             version: self.version,
             rules: self.rules,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PolicyUpdateRequest {
+    pub version: Option<String>,
+    pub status: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub rules: Option<Vec<policy_dsl::PolicyRule>>,
+}
+
+impl ErrorResponse {
+    pub fn forbidden() -> Self {
+        Self {
+            error_code: "FORBIDDEN",
+            message: "insufficient privileges".into(),
         }
     }
 }

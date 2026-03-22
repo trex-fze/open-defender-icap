@@ -1,12 +1,13 @@
 use crate::{
-    models::{DecisionRequest, PolicyCreateRequest},
-    store::{insert_policy_document, PolicyStore, SimulationResult},
+    models::{DecisionRequest, PolicyCreateRequest, PolicyUpdateRequest},
+    store::{insert_policy_document, update_policy_document, PolicyStore, SimulationResult},
 };
 use anyhow::{anyhow, Result};
 use common_types::PolicyDecision;
 use policy_dsl::PolicyDocument;
 use sqlx::PgPool;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct PolicyEvaluator {
@@ -56,15 +57,21 @@ impl PolicyEvaluator {
             }
             PolicySource::Database { pool, seed_path } => {
                 if let Some(new_store) = PolicyStore::load_from_db(pool).await? {
-                    self.store
-                        .update_from_rules(new_store.list_rules(), new_store.version());
+                    self.store.update_from_rules(
+                        new_store.list_rules(),
+                        new_store.version(),
+                        new_store.policy_id(),
+                    );
                 } else if let Some(seed) = seed_path {
                     let doc = PolicyDocument::load_from_file(seed)?;
                     PolicyStore::seed_db_from_document(pool, &doc, "default", Some("system"))
                         .await?;
                     if let Some(new_store) = PolicyStore::load_from_db(pool).await? {
-                        self.store
-                            .update_from_rules(new_store.list_rules(), new_store.version());
+                        self.store.update_from_rules(
+                            new_store.list_rules(),
+                            new_store.version(),
+                            new_store.policy_id(),
+                        );
                     }
                 }
             }
@@ -87,11 +94,31 @@ impl PolicyEvaluator {
         }
     }
 
+    pub async fn update_policy(
+        &self,
+        policy_id: Uuid,
+        req: PolicyUpdateRequest,
+        actor: &str,
+    ) -> Result<()> {
+        match &self.source {
+            PolicySource::File { .. } => Err(anyhow!("database backend not configured")),
+            PolicySource::Database { pool, .. } => {
+                update_policy_document(pool, policy_id, &req, Some(actor)).await?;
+                self.reload().await?;
+                Ok(())
+            }
+        }
+    }
+
     pub fn rules(&self) -> Vec<policy_dsl::PolicyRule> {
         self.store.list_rules()
     }
 
     pub fn version(&self) -> String {
         self.store.version()
+    }
+
+    pub fn policy_id(&self) -> Option<Uuid> {
+        self.store.policy_id()
     }
 }

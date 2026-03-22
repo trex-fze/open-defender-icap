@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-        "odctl commands:\n  health                         Run health checks\n  smoke [host:port]              Run ICAP smoke test\n  policy list                    List active policy rules\n  policy reload                  Reload policy definitions\n  policy simulate <file>         Simulate policy decision using JSON payload\n  override list                  List manual overrides\n  override create <file>         Create override from JSON definition\n  override update <id> <file>    Update override via JSON definition\n  override delete <id>           Delete override by UUID\n  review list                    List manual review queue\n  review resolve <id> <file>     Resolve review item via JSON payload\n  migrate run [target]           Run DB migrations (target = admin|policy|all)\n  seed policies [file] [name] [created_by]  Seed policies via Policy API\n"
+        "odctl commands:\n  health                         Run health checks\n  smoke [host:port]              Run ICAP smoke test\n  policy list                    List active policy rules\n  policy reload                  Reload policy definitions\n  policy simulate <file>         Simulate policy decision using JSON payload\n  policy import <file> [name] [created_by]  Create a policy from DSL file\n  policy update <id|current> <file> Update policy metadata/rules via JSON payload\n  override list                  List manual overrides\n  override create <file>         Create override from JSON definition\n  override update <id> <file>    Update override via JSON definition\n  override delete <id>           Delete override by UUID\n  review list                    List manual review queue\n  review resolve <id> <file>     Resolve review item via JSON payload\n  migrate run [target]           Run DB migrations (target = admin|policy|all)\n  seed policies [file] [name] [created_by]  Seed policies via Policy API\n"
     );
 }
 
@@ -102,6 +102,38 @@ async fn run_policy(mut args: impl Iterator<Item = String>) -> Result<()> {
             println!("Policy reload requested against {base}");
             Ok(())
         }
+        "import" => {
+            let path = args
+                .next()
+                .ok_or_else(|| anyhow!("provide policy file to import"))?;
+            let name = args.next().unwrap_or_else(|| "imported".to_string());
+            let created_by = args.next();
+            seed_policies(&path, name, created_by).await
+        }
+        "update" => {
+            let target = args
+                .next()
+                .ok_or_else(|| anyhow!("provide policy id or 'current'"))?;
+            let path = args
+                .next()
+                .ok_or_else(|| anyhow!("provide JSON file for policy update payload"))?;
+            let body = fs::read_to_string(&path).await?;
+            let url = format!(
+                "{}/api/v1/policies/{}",
+                base.trim_end_matches('/'),
+                target
+            );
+            let mut req = client
+                .put(&url)
+                .header("content-type", "application/json")
+                .body(body);
+            if let Ok(token) = env::var("OD_ADMIN_TOKEN") {
+                req = req.header("X-Admin-Token", token);
+            }
+            req.send().await?.error_for_status()?;
+            println!("Policy {target} updated");
+            Ok(())
+        }
         "simulate" => {
             let path = args
                 .next()
@@ -124,7 +156,9 @@ async fn run_policy(mut args: impl Iterator<Item = String>) -> Result<()> {
             Ok(())
         }
         "help" => {
-            println!("policy subcommands: list | reload | simulate <file>");
+            println!(
+                "policy subcommands: list | reload | simulate <file> | import <file> [name] [created_by] | update <policy_id|current> <json_file>"
+            );
             Ok(())
         }
         other => Err(anyhow!("unknown policy subcommand: {other}")),

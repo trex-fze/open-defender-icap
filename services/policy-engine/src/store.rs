@@ -12,6 +12,7 @@ use uuid::Uuid;
 pub struct PolicyStore {
     inner: Arc<RwLock<Vec<PolicyRule>>>,
     version: Arc<RwLock<String>>,
+    policy_id: Arc<RwLock<Option<Uuid>>>,
 }
 
 #[derive(Clone)]
@@ -27,6 +28,7 @@ impl PolicyStore {
         Self {
             inner: Arc::new(RwLock::new(rules)),
             version: Arc::new(RwLock::new(doc.version)),
+            policy_id: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -68,6 +70,7 @@ impl PolicyStore {
         Ok(Some(Self {
             inner: Arc::new(RwLock::new(parsed_rules)),
             version: Arc::new(RwLock::new(version)),
+            policy_id: Arc::new(RwLock::new(Some(policy_id))),
         }))
     }
 
@@ -77,32 +80,7 @@ impl PolicyStore {
         name: &str,
         created_by: Option<&str>,
     ) -> Result<Uuid> {
-        let policy_id = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO policies (id, name, version, status, created_by) VALUES ($1, $2, $3, 'active', $4)",
-        )
-        .bind(policy_id)
-        .bind(name)
-        .bind(&doc.version)
-        .bind(created_by)
-        .execute(pool)
-        .await?;
-
-        for rule in &doc.rules {
-            sqlx::query(
-                "INSERT INTO policy_rules (id, policy_id, priority, action, description, conditions) VALUES ($1, $2, $3, $4, $5, $6)",
-            )
-            .bind(Uuid::new_v4())
-            .bind(policy_id)
-            .bind(rule.priority as i32)
-            .bind(rule.action.to_string())
-            .bind(&rule.description)
-            .bind(serde_json::to_value(&rule.conditions)?)
-            .execute(pool)
-            .await?;
-        }
-
-        Ok(policy_id)
+        insert_policy_document(pool, doc, name, created_by).await
     }
 
     pub fn update(&self, doc: PolicyDocument) {
@@ -110,11 +88,18 @@ impl PolicyStore {
         rules.sort_by_key(|r| r.priority);
         *self.inner.write() = rules;
         *self.version.write() = doc.version;
+        *self.policy_id.write() = None;
     }
 
-    pub fn update_from_rules(&self, rules: Vec<PolicyRule>, version: String) {
+    pub fn update_from_rules(
+        &self,
+        rules: Vec<PolicyRule>,
+        version: String,
+        policy_id: Option<Uuid>,
+    ) {
         *self.inner.write() = rules;
         *self.version.write() = version;
+        *self.policy_id.write() = policy_id;
     }
 
     pub fn evaluate(&self, request: &DecisionRequest) -> PolicyDecision {
@@ -152,6 +137,10 @@ impl PolicyStore {
     pub fn version(&self) -> String {
         self.version.read().clone()
     }
+
+    pub fn policy_id(&self) -> Option<Uuid> {
+        *self.policy_id.read()
+    }
 }
 
 pub async fn insert_policy_document(
@@ -159,7 +148,7 @@ pub async fn insert_policy_document(
     doc: &PolicyDocument,
     name: &str,
     created_by: Option<&str>,
-) -> Result<()> {
+) -> Result<Uuid> {
     let policy_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO policies (id, name, version, status, created_by) VALUES ($1, $2, $3, 'active', $4)",
@@ -185,7 +174,18 @@ pub async fn insert_policy_document(
         .await?;
     }
 
-    Ok(())
+    record_policy_version(
+        pool,
+        policy_id,
+        &doc.version,
+        "active",
+        &doc.rules,
+        created_by,
+        None,
+    )
+    .await?;
+
+    Ok(policy_id)
 }
 
 fn db_row_to_rule(
@@ -212,6 +212,119 @@ fn db_row_to_rule(
         action: action_enum,
         conditions: cond,
     })
+}
+
+async fn record_policy_version(
+    pool: &PgPool,
+    policy_id: Uuid,
+    version: &str,
+    status: &str,
+    rules: &[PolicyRule],
+    created_by: Option<&str>,
+    notes: Option<&str>,
+) -> Result<()> {
+    let payload = serde_json::to_value(rules)?;
+    sqlx::query(
+        r#"INSERT INTO policy_versions (id, policy_id, version, status, created_by, notes, rules)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(policy_id)
+    .bind(version)
+    .bind(status)
+    .bind(created_by)
+    .bind(notes)
+    .bind(payload)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn update_policy_document(
+    pool: &PgPool,
+    policy_id: Uuid,
+    req: &crate::models::PolicyUpdateRequest,
+    actor: Option<&str>,
+) -> Result<()> {
+    let record = sqlx::query("SELECT version, status FROM policies WHERE id = $1")
+        .bind(policy_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| anyhow!("policy not found"))?;
+
+    let mut version: String = record.get("version");
+    let mut status: String = record.get("status");
+    if let Some(v) = &req.version {
+        version = v.clone();
+    }
+    if let Some(s) = &req.status {
+        status = s.clone();
+    }
+
+    if req.version.is_some() || req.status.is_some() {
+        sqlx::query("UPDATE policies SET version = $1, status = $2 WHERE id = $3")
+            .bind(&version)
+            .bind(&status)
+            .bind(policy_id)
+            .execute(pool)
+            .await?;
+    }
+
+    let rules = if let Some(rules) = &req.rules {
+        sqlx::query("DELETE FROM policy_rules WHERE policy_id = $1")
+            .bind(policy_id)
+            .execute(pool)
+            .await?;
+        for rule in rules {
+            sqlx::query(
+                "INSERT INTO policy_rules (id, policy_id, priority, action, description, conditions) VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(policy_id)
+            .bind(rule.priority as i32)
+            .bind(rule.action.to_string())
+            .bind(&rule.description)
+            .bind(serde_json::to_value(&rule.conditions)?)
+            .execute(pool)
+            .await?;
+        }
+        rules.clone()
+    } else {
+        fetch_policy_rules(pool, policy_id).await?
+    };
+
+    record_policy_version(
+        pool,
+        policy_id,
+        &version,
+        &status,
+        &rules,
+        actor,
+        req.notes.as_deref(),
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn fetch_policy_rules(pool: &PgPool, policy_id: Uuid) -> Result<Vec<PolicyRule>> {
+    let rows = sqlx::query(
+        "SELECT priority, action, description, conditions FROM policy_rules WHERE policy_id = $1 ORDER BY priority ASC",
+    )
+    .bind(policy_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut parsed = Vec::with_capacity(rows.len());
+    for row in rows {
+        let priority: i32 = row.get("priority");
+        let action: String = row.get("action");
+        let description: Option<String> = row.get("description");
+        let conditions: Value = row.get("conditions");
+        parsed.push(db_row_to_rule(&action, description, priority, conditions)?);
+    }
+    Ok(parsed)
 }
 
 fn matches_conditions(cond: &Conditions, request: &DecisionRequest) -> bool {

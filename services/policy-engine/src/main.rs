@@ -5,17 +5,21 @@ mod models;
 mod store;
 
 use anyhow::Result;
-use auth::{enforce_admin, AdminAuth};
+use auth::{
+    enforce_admin, require_roles, AdminAuth, AuthSettings, UserContext, ROLE_POLICY_EDITOR_ROLES,
+    ROLE_POLICY_VIEWER_ROLES,
+};
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     middleware,
-    routing::{get, post},
-    Json, Router,
+    routing::{get, post, put},
+    Extension, Json, Router,
 };
 use evaluator::PolicyEvaluator;
 use models::{
-    DecisionRequest, ErrorResponse, PolicyCreateRequest, PolicyListResponse, SimulationResponse,
+    DecisionRequest, ErrorResponse, PolicyCreateRequest, PolicyListResponse, PolicyUpdateRequest,
+    SimulationResponse,
 };
 use policy_dsl::PolicyDocument;
 use sqlx::postgres::PgPoolOptions;
@@ -23,10 +27,13 @@ use std::{env, net::SocketAddr, sync::Arc};
 use store::PolicyStore;
 use tokio::net::TcpListener;
 use tracing::{info, Level};
+use uuid::Uuid;
 
 #[derive(Clone)]
 struct AppState {
     evaluator: Arc<PolicyEvaluator>,
+    #[allow(dead_code)]
+    auth: Arc<AdminAuth>,
 }
 
 #[tokio::main]
@@ -69,19 +76,28 @@ async fn main() -> Result<()> {
         let store = PolicyStore::load_from_file(&cfg.policy_file)?;
         PolicyEvaluator::from_file(store, cfg.policy_file.clone())
     };
+    let auth_settings = AuthSettings::from_env(cfg.auth.clone());
+    let admin_auth = Arc::new(AdminAuth::from_config(admin_token.clone(), auth_settings).await?);
     let state = AppState {
         evaluator: Arc::new(evaluator),
+        auth: admin_auth.clone(),
+    };
+
+    let auth_layer = {
+        let auth = admin_auth.clone();
+        middleware::from_fn(move |req, next| {
+            let auth = auth.clone();
+            async move { enforce_admin(auth, req, next).await }
+        })
     };
 
     let admin_routes = Router::new()
         .route("/api/v1/policies", get(list_policies).post(create_policy))
         .route("/api/v1/policies/reload", post(reload_policies))
         .route("/api/v1/policies/simulate", post(simulate_policy))
+        .route("/api/v1/policies/:id", put(update_policy))
         .with_state(state.clone())
-        .layer(middleware::from_fn_with_state(
-            AdminAuth { token: admin_token },
-            enforce_admin,
-        ));
+        .layer(auth_layer);
 
     let app = Router::new()
         .route("/api/v1/decision", post(handle_decision))
@@ -114,15 +130,25 @@ async fn handle_decision(
     Ok(Json(decision))
 }
 
-async fn list_policies(State(state): State<AppState>) -> Json<PolicyListResponse> {
+async fn list_policies(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+) -> Result<Json<PolicyListResponse>, StatusCode> {
+    require_roles(&user, ROLE_POLICY_VIEWER_ROLES)?;
     let rules = state.evaluator.rules();
     let version = state.evaluator.version();
-    Json(PolicyListResponse::from_rules(version, rules))
+    let policy_id = state.evaluator.policy_id();
+    Ok(Json(PolicyListResponse::from_store(
+        version, policy_id, rules,
+    )))
 }
 
 async fn reload_policies(
+    Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
 ) -> Result<Json<PolicyListResponse>, (StatusCode, Json<ErrorResponse>)> {
+    require_roles(&user, ROLE_POLICY_EDITOR_ROLES)
+        .map_err(|status| (status, Json(ErrorResponse::forbidden())))?;
     state.evaluator.reload().await.map_err(|err| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -134,13 +160,22 @@ async fn reload_policies(
     })?;
     let rules = state.evaluator.rules();
     let version = state.evaluator.version();
-    Ok(Json(PolicyListResponse::from_rules(version, rules)))
+    let policy_id = state.evaluator.policy_id();
+    Ok(Json(PolicyListResponse::from_store(
+        version, policy_id, rules,
+    )))
 }
 
 async fn create_policy(
+    Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
-    Json(payload): Json<PolicyCreateRequest>,
+    Json(mut payload): Json<PolicyCreateRequest>,
 ) -> Result<Json<PolicyListResponse>, (StatusCode, Json<ErrorResponse>)> {
+    require_roles(&user, ROLE_POLICY_EDITOR_ROLES)
+        .map_err(|status| (status, Json(ErrorResponse::forbidden())))?;
+    if payload.created_by.is_none() {
+        payload.created_by = Some(user.actor.clone());
+    }
     state
         .evaluator
         .create_policy(payload)
@@ -161,13 +196,19 @@ async fn create_policy(
         })?;
     let rules = state.evaluator.rules();
     let version = state.evaluator.version();
-    Ok(Json(PolicyListResponse::from_rules(version, rules)))
+    let policy_id = state.evaluator.policy_id();
+    Ok(Json(PolicyListResponse::from_store(
+        version, policy_id, rules,
+    )))
 }
 
 async fn simulate_policy(
+    Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
     Json(payload): Json<DecisionRequest>,
 ) -> Result<Json<SimulationResponse>, (StatusCode, Json<ErrorResponse>)> {
+    require_roles(&user, ROLE_POLICY_VIEWER_ROLES)
+        .map_err(|status| (status, Json(ErrorResponse::forbidden())))?;
     if payload.normalized_key.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -184,6 +225,57 @@ async fn simulate_policy(
         matched_rule_id: result.matched_rule_id,
         policy_version: state.evaluator.version(),
     }))
+}
+
+async fn update_policy(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Path(policy_id): Path<String>,
+    Json(payload): Json<PolicyUpdateRequest>,
+) -> Result<Json<PolicyListResponse>, (StatusCode, Json<ErrorResponse>)> {
+    require_roles(&user, ROLE_POLICY_EDITOR_ROLES)
+        .map_err(|status| (status, Json(ErrorResponse::forbidden())))?;
+
+    let target_id = if policy_id == "current" {
+        state.evaluator.policy_id().ok_or((
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ErrorResponse {
+                error_code: "POLICY_DB_DISABLED",
+                message: "policy database backend required for updates".into(),
+            }),
+        ))?
+    } else {
+        Uuid::parse_str(&policy_id).map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error_code: "VALIDATION_ERROR",
+                    message: "policy_id must be a UUID or 'current'".into(),
+                }),
+            )
+        })?
+    };
+
+    state
+        .evaluator
+        .update_policy(target_id, payload, &user.actor)
+        .await
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "POLICY_UPDATE_FAILED",
+                    message: err.to_string(),
+                }),
+            )
+        })?;
+
+    let rules = state.evaluator.rules();
+    let version = state.evaluator.version();
+    let policy_id = state.evaluator.policy_id();
+    Ok(Json(PolicyListResponse::from_store(
+        version, policy_id, rules,
+    )))
 }
 
 async fn health() -> &'static str {

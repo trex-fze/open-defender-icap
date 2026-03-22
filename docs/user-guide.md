@@ -27,8 +27,9 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - Monitoring: tail `target/debug/icap-adaptor` logs and scrape Prometheus metrics from `http://<metrics_host>:<metrics_port>/metrics` (default `19005`).
 
 ## 4. Using the Policy Engine
-- Config file: `config/policy-engine.json` (host/port, DSL path, optional `database_url`, optional `admin_token`). Leave `database_url` as `null` for file-backed mode; set to a Postgres connection string (or export `OD_POLICY_DATABASE_URL`/`DATABASE_URL`) to enable persistent storage. When `admin_token` is set—either in the file or via `OD_POLICY_ADMIN_TOKEN`—admin APIs require header `X-Admin-Token` (CLI reads `OD_ADMIN_TOKEN`).
+- Config file: `config/policy-engine.json` (host/port, DSL path, optional `database_url`, optional `admin_token`, optional `auth.static_roles`). Leave `database_url` as `null` for file-backed mode; set to a Postgres connection string (or export `OD_POLICY_DATABASE_URL`/`DATABASE_URL`) to enable persistent storage. When `admin_token` is set—either in the file or via `OD_POLICY_ADMIN_TOKEN`—policy admin APIs require header `X-Admin-Token` (CLI reads `OD_ADMIN_TOKEN`). The `auth` block controls which roles (`policy-admin`, `policy-editor`, `policy-viewer`) are granted to static tokens.
 - Policies reside in `config/policies.json`; `GET /api/v1/policies` lists active rules, `POST /api/v1/policies/reload` hot-reloads from the DSL/DB, `POST /api/v1/policies` (DB mode only) creates a new policy document, and `POST /api/v1/policies/simulate` evaluates a sample request without enforcing it.
+- Policy updates: `PUT /api/v1/policies/<policy_id|current>` accepts a JSON body (`version`, `status`, optional `notes`, optional `rules`) and requires the `policy-editor` role. Every create/update stores a snapshot in `policy_versions` for audit/history.
 - `cargo run -p policy-engine` starts REST API with `/api/v1/decision` + health endpoints. On startup the service applies migrations in `services/policy-engine/migrations/` and seeds from the DSL file if the database is empty.
 - Future operations: manage policies via Admin API/UI/CLI; run simulations for policy changes.
 
@@ -50,6 +51,8 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl policy list` | List active policy rules via policy engine | Respects `OD_POLICY_URL` (default `http://localhost:19010`); add `OD_ADMIN_TOKEN` for protected endpoints. |
 | `odctl policy reload` | Trigger policy reload (file/DB backed) | Requires admin token when configured. |
 | `odctl policy simulate <file>` | Hit `/api/v1/policies/simulate` with a JSON request | JSON must match `DecisionRequest`; requires admin token when configured. |
+| `odctl policy import <file> [name] [created_by]` | Create a DB-backed policy from a DSL file | Wraps `POST /api/v1/policies`; honors `OD_ADMIN_TOKEN`. |
+| `odctl policy update <id|current> <file>` | Update policy metadata/rules with JSON payload | Sends `PUT /api/v1/policies/{id}`; `id` can be `current` to target the active policy. |
 | `odctl policy import/export` | Manage policy packages (future) | Depends on Stage 2 completion. |
 | `odctl cache lookup/invalidate` | Inspect redis entries (future) | Tied to Stage 3 cache enhancements. |
 | `odctl migrate run [admin|policy|all]` | Apply Postgres migrations for admin/policy services | Reads `OD_ADMIN_DATABASE_URL` / `OD_POLICY_DATABASE_URL`; runs both when target omitted. |

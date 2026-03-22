@@ -15,7 +15,7 @@
 - [x] Auth scaffolding via admin token + middleware (Spec §14, §18) – HS256 JWT/RBAC guard live on Admin API; policy-engine endpoints still need the same enforcement.
 - [x] Policy simulation endpoint returning decision + matched rule (Spec §14 auditability) – trace/audit logging TBD.
 - [ ] Unit/integration tests covering precedence, overrides, error paths (Spec §24–26).
-- [ ] Audit logging for policy changes (Spec §17).
+- [x] Audit logging for policy changes (Spec §17). *(Policy versions recorded in `policy_versions` table via Admin API + CLI workflows.)*
 
 ## Data Model Snapshot (Planned)
 - `policies`: `id (uuid)`, `name`, `version`, `status`, `created_by`, `created_at`, `updated_at`.

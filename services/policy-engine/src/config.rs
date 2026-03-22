@@ -1,3 +1,4 @@
+use crate::auth::AuthSettings;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -9,6 +10,8 @@ pub struct PolicyConfig {
     pub database_url: Option<String>,
     #[serde(default)]
     pub admin_token: Option<String>,
+    #[serde(default)]
+    pub auth: Option<AuthSettings>,
 }
 
 pub fn load() -> anyhow::Result<PolicyConfig> {
