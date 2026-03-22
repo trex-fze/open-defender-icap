@@ -742,6 +742,7 @@ struct ReviewResolveRequest {
     decision_action: Option<String>,
 }
 
+#[derive(Debug)]
 struct ValidatedOverridePayload {
     scope_type: String,
     scope_value: String,
@@ -919,6 +920,58 @@ fn validation_error(message: &str) -> (StatusCode, Json<ApiError>) {
         StatusCode::BAD_REQUEST,
         Json(ApiError::new("VALIDATION_ERROR", message.to_string())),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_request() -> OverrideUpsertRequest {
+        OverrideUpsertRequest {
+            scope_type: "domain".into(),
+            scope_value: "example.com".into(),
+            action: "block".into(),
+            reason: None,
+            created_by: Some("tester".into()),
+            expires_at: None,
+            status: None,
+        }
+    }
+
+    #[test]
+    fn validates_domain_override() {
+        let payload = base_request();
+        let result = validate_override_payload(payload).unwrap();
+        assert_eq!(result.scope_type, "domain");
+        assert_eq!(result.scope_value, "example.com");
+        assert_eq!(result.action, "block");
+    }
+
+    #[test]
+    fn rejects_unknown_scope_type() {
+        let mut payload = base_request();
+        payload.scope_type = "device".into();
+        let err = validate_override_payload(payload).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert!(err.1 .message.contains("scope_type"));
+    }
+
+    #[test]
+    fn normalizes_wildcard_domain() {
+        let mut payload = base_request();
+        payload.scope_value = "*.Example.com".into();
+        let result = validate_override_payload(payload).unwrap();
+        assert_eq!(result.scope_value, "*.example.com");
+    }
+
+    #[test]
+    fn rejects_invalid_ip_scope() {
+        let mut payload = base_request();
+        payload.scope_type = "ip".into();
+        payload.scope_value = "not-an-ip".into();
+        let err = validate_override_payload(payload).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
 }
 
 fn map_override_row(row: &PgRow) -> sqlx::Result<OverrideRecord> {
