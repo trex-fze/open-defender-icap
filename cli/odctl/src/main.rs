@@ -1,4 +1,6 @@
 use anyhow::{anyhow, Result};
+use reqwest::Client;
+use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::info;
@@ -13,6 +15,7 @@ async fn main() -> Result<()> {
     match command.as_str() {
         "health" => run_health().await?,
         "smoke" => run_smoke(args).await?,
+        "policy" => run_policy(args).await?,
         "help" | "--help" | "-h" => print_help(),
         other => return Err(anyhow!("unknown command: {other}")),
     }
@@ -21,7 +24,9 @@ async fn main() -> Result<()> {
 }
 
 fn print_help() {
-    println!("odctl commands:\n  health    Run health checks\n  smoke     Run smoke tests\n");
+    println!(
+        "odctl commands:\n  health            Run health checks\n  smoke [host:port] Run ICAP smoke test\n  policy list       List active policy rules\n  policy reload     Reload policy definitions\n"
+    );
 }
 
 async fn run_health() -> Result<()> {
@@ -44,4 +49,56 @@ async fn run_smoke(mut args: impl Iterator<Item = String>) -> Result<()> {
     } else {
         Err(anyhow!("unexpected ICAP response: {response}"))
     }
+}
+
+async fn run_policy(mut args: impl Iterator<Item = String>) -> Result<()> {
+    let sub = args.next().unwrap_or_else(|| "help".to_string());
+    let base =
+        std::env::var("OD_POLICY_URL").unwrap_or_else(|_| "http://localhost:19010".to_string());
+    let client = Client::new();
+
+    match sub.as_str() {
+        "list" => {
+            let url = format!("{}/api/v1/policies", base.trim_end_matches('/'));
+            let resp = client.get(&url).send().await?.error_for_status()?;
+            let payload = resp.json::<PolicyListResponse>().await?;
+            println!("Active policy version: {}", payload.version);
+            println!("Priority  Action     Rule ID           Description");
+            for rule in payload.rules {
+                println!(
+                    "{:>8}  {:<10} {:<18} {}",
+                    rule.priority,
+                    rule.action,
+                    rule.id,
+                    rule.description.unwrap_or_default()
+                );
+            }
+            Ok(())
+        }
+        "reload" => {
+            let url = format!("{}/api/v1/policies/reload", base.trim_end_matches('/'));
+            client.post(&url).send().await?.error_for_status()?;
+            println!("Policy reload requested against {base}");
+            Ok(())
+        }
+        "help" => {
+            println!("policy subcommands: list | reload");
+            Ok(())
+        }
+        other => Err(anyhow!("unknown policy subcommand: {other}")),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PolicyListResponse {
+    version: String,
+    rules: Vec<PolicySummary>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PolicySummary {
+    id: String,
+    description: Option<String>,
+    priority: u32,
+    action: String,
 }

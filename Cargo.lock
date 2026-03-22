@@ -1062,6 +1062,7 @@ name = "odctl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "reqwest",
  "serde",
  "tokio",
  "tracing",

@@ -165,10 +165,7 @@ mod tests {
                 },
             }],
         };
-        let tmp = std::env::temp_dir().join(format!(
-            "policy-app-test-{}.json",
-            Uuid::new_v4()
-        ));
+        let tmp = std::env::temp_dir().join(format!("policy-app-test-{}.json", Uuid::new_v4()));
         std::fs::write(&tmp, serde_json::to_string(&doc).unwrap()).unwrap();
         let store = PolicyStore::load_from_file(tmp.to_str().unwrap()).unwrap();
         let evaluator = PolicyEvaluator::from_file(store, tmp.to_str().unwrap().into());

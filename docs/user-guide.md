@@ -38,10 +38,12 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl help` | Display available commands | Lists current subcommands. |
 | `odctl health` | Run health checks (future) | Will query backend `/health` endpoints. |
 | `odctl smoke [host:port]` | Send sample ICAP REQMOD to adaptor | Defaults to `127.0.0.1:1344`; prints ICAP status line. |
+| `odctl policy list` | List active policy rules via policy engine | Respects `OD_POLICY_URL` (default `http://localhost:19010`). |
+| `odctl policy reload` | Trigger policy reload (file/DB backed) | Useful after editing `policies.json` or DB changes. |
 | `odctl policy import/export` | Manage policy packages (future) | Depends on Stage 2 completion. |
 | `odctl cache lookup/invalidate` | Inspect redis entries (future) | Tied to Stage 3 cache enhancements. |
 
-Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example smoke invocation: `odctl smoke 10.0.0.5:1344`.
+Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 odctl policy reload`.
 
 ## 6. React Admin UI (Future)
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
