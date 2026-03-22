@@ -14,8 +14,10 @@
 - [x] URL normalizer with punycode + registered-domain detection (§10, §21).
 - [x] Policy decision request schema aligned with Spec §23.1.
 - [x] In-process cache honors TTLs and prevents stale reuse (§11).
-- [x] Redis integration for shared verdict cache (§11, §33 metric `cache_hit_ratio`).
+- [x] Redis integration for shared verdict cache with retry/backoff (§11, §33 `cache_hit_ratio`).
 - [x] ICAP 204/200 responses for allow/block actions (§11 fail-open guidance).
+- [x] Metrics/trace propagation with `/metrics` endpoint (§17, §33).
+- [x] CLI smoke test exercising ICAP REQMOD flow (§27).
 - [ ] Override lookup, manual placeholder actions (§14) – pending Stage 2.
 - [ ] Event emission/audit logging (§17, §20) – pending Stage 3.
 - [ ] TLS/mTLS between Squid and adaptor (§3 TLS RFCs) – planned Stage 3.

@@ -11,6 +11,7 @@ pub struct IcapRequest {
     pub http_path: String,
     pub http_scheme: Option<String>,
     pub http_host: String,
+    pub trace_id: Option<String>,
 }
 
 impl IcapRequest {
@@ -41,11 +42,13 @@ impl IcapRequest {
                 continue;
             }
             if let Some((name, value)) = line.split_once(':') {
-                headers.insert(name.trim().to_string(), value.trim().to_string());
+                headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
             }
         }
 
         let (http_method, http_path, http_scheme, http_host) = parse_http_block(http_block)?;
+
+        let trace_id = headers.get("x-trace-id").map(|value| value.to_string());
 
         Ok(Self {
             method,
@@ -55,6 +58,7 @@ impl IcapRequest {
             http_path,
             http_scheme,
             http_host,
+            trace_id,
         })
     }
 }
@@ -111,7 +115,7 @@ fn parse_http_block(block: &str) -> Result<(String, String, Option<String>, Stri
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = "REQMOD icap://icap.service/req ICAP/1.0\r\nHost: icap.service\r\n\r\nGET http://Example.com/path HTTP/1.1\r\nHost: Example.com\r\n\r\n";
+    const SAMPLE: &str = "REQMOD icap://icap.service/req ICAP/1.0\r\nHost: icap.service\r\nX-Trace-Id: abc123\r\n\r\nGET http://Example.com/path HTTP/1.1\r\nHost: Example.com\r\n\r\n";
 
     #[test]
     fn parses_basic_icap_request() {
@@ -121,6 +125,7 @@ mod tests {
         assert_eq!(req.http_host, "example.com");
         assert_eq!(req.http_path, "/path");
         assert_eq!(req.http_scheme.as_deref(), Some("http"));
+        assert_eq!(req.trace_id.as_deref(), Some("abc123"));
     }
 
     #[test]

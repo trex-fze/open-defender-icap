@@ -21,10 +21,10 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 5. **Seed taxonomy**: `odctl taxonomy seed` to populate initial categories (Stage 3+).
 
 ## 3. Operating the ICAP Adaptor
-- Config file: `config/icap.json` (host/port, preview size, Redis URL, policy endpoint).
+- Config file: `config/icap.json` (host/port, preview size, Redis URL, policy endpoint, metrics host/port).
 - Key env vars: `OD_CONFIG_JSON` for containerized deployments; `RUST_LOG` for logging levels.
 - Start service: `cargo run -p icap-adaptor` (dev) or via Docker image built with `deploy/docker/rust.Dockerfile`.
-- Monitoring: tail `target/debug/icap-adaptor` logs; watch metrics once Prometheus exporter is added (Stage 6).
+- Monitoring: tail `target/debug/icap-adaptor` logs and scrape Prometheus metrics from `http://<metrics_host>:<metrics_port>/metrics` (default `19005`).
 
 ## 4. Using the Policy Engine
 - Config file: `config/policy-engine.json` (host/port).
@@ -34,13 +34,13 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 ## 5. CLI (`odctl`) Usage
 | Command | Purpose | Notes |
 | --- | --- | --- |
-| `odctl help` | Display available commands | Implemented basic placeholder; expanded functionality forthcoming. |
+| `odctl help` | Display available commands | Lists current subcommands. |
 | `odctl health` | Run health checks (future) | Will query backend `/health` endpoints. |
-| `odctl smoke run` | Execute smoke tests (future) | Will orchestrate `ST-*` suite from spec. |
+| `odctl smoke [host:port]` | Send sample ICAP REQMOD to adaptor | Defaults to `127.0.0.1:1344`; prints ICAP status line. |
 | `odctl policy import/export` | Manage policy packages (future) | Depends on Stage 2 completion. |
 | `odctl cache lookup/invalidate` | Inspect redis entries (future) | Tied to Stage 3 cache enhancements. |
 
-Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens.
+Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example smoke invocation: `odctl smoke 10.0.0.5:1344`.
 
 ## 6. React Admin UI (Future)
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).

@@ -1,6 +1,7 @@
 mod cache;
 mod config;
 mod icap;
+mod metrics;
 mod normalizer;
 mod policy_client;
 
@@ -30,6 +31,14 @@ async fn main() -> Result<()> {
     let cache = Arc::new(CacheClient::new(cfg.redis_url.clone())?);
     let policy_client = Arc::new(PolicyClient::new(cfg.policy_endpoint.clone())?);
 
+    let metrics_host = cfg.metrics_host.clone();
+    let metrics_port = cfg.metrics_port;
+    tokio::spawn(async move {
+        if let Err(err) = metrics::serve_metrics(&metrics_host, metrics_port).await {
+            error!(target = "svc-icap", error = %err, "metrics server exited");
+        }
+    });
+
     loop {
         let (socket, peer) = listener.accept().await?;
         let cfg = cfg.clone();
@@ -44,7 +53,7 @@ async fn main() -> Result<()> {
     }
 }
 
-#[instrument(name = "icap_connection", skip_all)]
+#[instrument(name = "icap_connection", skip_all, fields(trace_id = tracing::field::Empty))]
 async fn handle_connection(
     mut socket: TcpStream,
     cfg: config::IcapConfig,
@@ -61,17 +70,29 @@ async fn handle_connection(
         icap_req.http_scheme.as_deref(),
     )?;
 
+    if let Some(trace_id) = &icap_req.trace_id {
+        tracing::Span::current().record("trace_id", &tracing::field::display(trace_id));
+    }
+
     let decision = if let Some(decision) = cache.get(&normalized.normalized_key).await? {
+        metrics::record_cache_hit();
         info!(target = "svc-icap", normalized_key = %normalized.normalized_key, action = ?decision.action, "cache decision");
         decision
     } else {
+        metrics::record_cache_miss();
         let request = PolicyDecisionRequest {
             normalized_key: normalized.normalized_key.clone(),
             entity_level: normalized.entity_level.clone(),
             source_ip: icap_req.http_host.clone(),
             user_id: None,
         };
-        let decision = policy_client.evaluate(&request).await?;
+        let start = tokio::time::Instant::now();
+        let decision = policy_client.evaluate(&request).await.map_err(|err| {
+            metrics::record_error();
+            err
+        })?;
+        let latency = start.elapsed().as_secs_f64();
+        metrics::observe_policy_latency(latency);
         info!(target = "svc-icap", normalized_key = %normalized.normalized_key, action = ?decision.action, "policy decision placeholder");
         cache
             .set(

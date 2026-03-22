@@ -3,5 +3,7 @@
   "port": 1344,
   "preview_size": 4096,
   "redis_url": "redis://redis:6379",
-  "policy_endpoint": "http://policy-engine:19010"
+  "policy_endpoint": "http://policy-engine:19010",
+  "metrics_host": "0.0.0.0",
+  "metrics_port": 19005
 }

@@ -1,8 +1,10 @@
 use anyhow::Result;
 use common_types::PolicyDecision;
 use redis::AsyncCommands;
+use serde_json;
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::sync::RwLock;
+use tokio::{sync::RwLock, time::sleep};
+use tracing::{debug, warn};
 
 #[derive(Clone)]
 pub struct CacheClient {
@@ -34,13 +36,9 @@ impl CacheClient {
             return Ok(Some(decision));
         }
 
-        if let Some(client) = &self.redis {
-            let mut conn = client.get_async_connection().await?;
-            let payload: Option<String> = conn.get(key).await?;
-            if let Some(payload) = payload {
-                if let Ok(decision) = serde_json::from_str::<PolicyDecision>(&payload) {
-                    return Ok(Some(decision));
-                }
+        if let Some(payload) = self.redis_get(key).await? {
+            if let Ok(decision) = serde_json::from_str::<PolicyDecision>(&payload) {
+                return Ok(Some(decision));
             }
         }
 
@@ -50,11 +48,9 @@ impl CacheClient {
     pub async fn set(&self, key: String, decision: PolicyDecision, ttl: Duration) -> Result<()> {
         self.memory_set(key.clone(), decision.clone(), ttl).await;
 
-        if let Some(client) = &self.redis {
-            let mut conn = client.get_async_connection().await?;
+        if self.redis.is_some() {
             let payload = serde_json::to_string(&decision)?;
-            let ttl_secs = ttl.as_secs().max(1);
-            conn.set_ex(key, payload, ttl_secs).await?;
+            self.redis_set(&key, &payload, ttl.as_secs().max(1)).await?;
         }
 
         Ok(())
@@ -80,6 +76,49 @@ impl CacheClient {
                 expires_at: tokio::time::Instant::now() + ttl,
             },
         );
+    }
+
+    async fn redis_get(&self, key: &str) -> Result<Option<String>> {
+        let client = match &self.redis {
+            Some(client) => client,
+            None => return Ok(None),
+        };
+
+        for attempt in 0..3 {
+            match client.get_async_connection().await {
+                Ok(mut conn) => match conn.get(key).await {
+                    Ok(value) => return Ok(value),
+                    Err(err) => warn!(target = "svc-icap", %err, attempt, "redis GET failed"),
+                },
+                Err(err) => warn!(target = "svc-icap", %err, attempt, "redis connection failed"),
+            }
+            sleep(Duration::from_millis(50 * (attempt + 1))).await;
+        }
+
+        Ok(None)
+    }
+
+    async fn redis_set(&self, key: &str, payload: &str, ttl_secs: u64) -> Result<()> {
+        let client = match &self.redis {
+            Some(client) => client,
+            None => return Ok(()),
+        };
+
+        for attempt in 0..3 {
+            match client.get_async_connection().await {
+                Ok(mut conn) => match conn.set_ex::<&str, &str, ()>(key, payload, ttl_secs).await {
+                    Ok(_) => {
+                        debug!(target = "svc-icap", key, ttl_secs, "redis cache updated");
+                        return Ok(());
+                    }
+                    Err(err) => warn!(target = "svc-icap", %err, attempt, "redis SET failed"),
+                },
+                Err(err) => warn!(target = "svc-icap", %err, attempt, "redis connection failed"),
+            }
+            sleep(Duration::from_millis(50 * (attempt + 1))).await;
+        }
+
+        Ok(())
     }
 }
 
