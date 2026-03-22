@@ -14,7 +14,7 @@
 - [x] Decision API enriched with policy metadata (policy listing + reload/create endpoints).
 - [x] Auth scaffolding via admin token + middleware (Spec §14, §18) – HS256 JWT/RBAC guard now live on both Admin API and Policy Engine endpoints.
 - [x] Policy simulation endpoint returning decision + matched rule (Spec §14 auditability) – trace/audit logging TBD.
-- [ ] Unit/integration tests covering precedence, overrides, error paths (Spec §24–26).
+- [x] Unit/integration tests covering precedence, overrides, error paths (Spec §24–26).
 - [x] Audit logging for policy changes (Spec §17). *(Policy versions recorded in `policy_versions` table via Admin API + CLI workflows.)*
 
 ## Data Model Snapshot (Planned)

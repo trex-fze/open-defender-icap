@@ -311,10 +311,14 @@ async fn metrics_endpoint(
         error!(target = "svc-admin", %err, "failed to sync review metrics gauge");
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
-    state.metrics.render().map(|body| (StatusCode::OK, body)).map_err(|err| {
-        error!(target = "svc-admin", %err, "failed to render metrics");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
+    state
+        .metrics
+        .render()
+        .map(|body| (StatusCode::OK, body))
+        .map_err(|err| {
+            error!(target = "svc-admin", %err, "failed to render metrics");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
 }
 
 async fn list_overrides(

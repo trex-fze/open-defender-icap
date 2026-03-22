@@ -284,27 +284,17 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use axum::routing::Router;
+    use common_types::PolicyAction;
+    use std::fs;
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    fn test_app() -> Router {
-        let doc = policy_dsl::PolicyDocument {
-            version: "test".into(),
-            rules: vec![policy_dsl::PolicyRule {
-                id: "block-social".into(),
-                description: None,
-                priority: 10,
-                action: common_types::PolicyAction::Block,
-                conditions: policy_dsl::Conditions {
-                    categories: Some(vec!["Social Media".into()]),
-                    ..Default::default()
-                },
-            }],
-        };
+    fn in_memory_app(doc: PolicyDocument) -> Router {
         let tmp = std::env::temp_dir().join(format!("policy-app-test-{}.json", Uuid::new_v4()));
-        std::fs::write(&tmp, serde_json::to_string(&doc).unwrap()).unwrap();
+        fs::write(&tmp, serde_json::to_string(&doc).unwrap()).unwrap();
         let store = PolicyStore::load_from_file(tmp.to_str().unwrap()).unwrap();
-        let evaluator = PolicyEvaluator::from_file(store, tmp.to_str().unwrap().into());
+        let evaluator = PolicyEvaluator::from_file(store, tmp.to_string_lossy().into());
         let state = AppState {
             evaluator: Arc::new(evaluator),
         };
@@ -315,13 +305,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn decision_allows_normal_key() {
-        let app = test_app();
+    async fn decision_blocked_when_category_matches() {
+        let doc = PolicyDocument {
+            version: "test".into(),
+            rules: vec![policy_dsl::PolicyRule {
+                id: "block-social".into(),
+                description: Some("Block social".into()),
+                priority: 10,
+                action: PolicyAction::Block,
+                conditions: policy_dsl::Conditions {
+                    categories: Some(vec!["Social".into()]),
+                    ..Default::default()
+                },
+            }],
+        };
+        let app = in_memory_app(doc);
         let payload = serde_json::json!({
             "normalized_key": "domain:example.com",
             "entity_level": "domain",
             "source_ip": "10.0.0.1",
-            "category_hint": "Social Media"
+            "category_hint": "Social"
         });
 
         let response = app
@@ -339,7 +342,11 @@ mod tests {
 
     #[tokio::test]
     async fn decision_validation_error() {
-        let app = test_app();
+        let doc = PolicyDocument {
+            version: "test".into(),
+            rules: vec![],
+        };
+        let app = in_memory_app(doc);
         let payload = serde_json::json!({
             "normalized_key": "",
             "entity_level": "domain",
