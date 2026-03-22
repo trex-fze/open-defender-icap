@@ -32,7 +32,13 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - `cargo run -p policy-engine` starts REST API with `/api/v1/decision` + health endpoints. On startup the service applies migrations in `services/policy-engine/migrations/` and seeds from the DSL file if the database is empty.
 - Future operations: manage policies via Admin API/UI/CLI; run simulations for policy changes.
 
-## 5. CLI (`odctl`) Usage
+## 5. Admin API & Overrides
+- Config file: `config/admin-api.json` controls host/port, optional `database_url`, and optional `admin_token`. Leave `database_url` as `null` for check-ins, but set either `database_url` in the file or `OD_ADMIN_DATABASE_URL`/`DATABASE_URL` env vars in deployment shells; the service refuses to start without one of these values.
+- Admin authentication: set `admin_token` in the config or provide `OD_ADMIN_TOKEN` (the CLI already reads this variable). Requests must include header `X-Admin-Token` when any token is configured.
+- Service startup: `cargo run -p admin-api` applies migrations in `services/admin-api/migrations/` and exposes overrides + review queue routes under `/api/v1`. Operators can also run inside Docker by adding the same env vars to the container spec.
+- Health checks: `curl http://localhost:19000/health/ready` (readiness) and `/health/live` (liveness). Use `OD_ADMIN_URL` (default `http://localhost:19000`) to point `odctl override ...` commands at the service.
+
+## 6. CLI (`odctl`) Usage
 | Command | Purpose | Notes |
 | --- | --- | --- |
 | `odctl help` | Display available commands | Lists current subcommands. |
@@ -46,31 +52,31 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 
 Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 OD_ADMIN_TOKEN=secret odctl policy reload`, `OD_ADMIN_TOKEN=secret odctl policy simulate request.json`.
 
-## 6. React Admin UI (Future)
+## 7. React Admin UI (Future)
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
 - Planned routes: Dashboard, IP/User/Device investigations, Policy mgmt, Overrides, Review queue, Reports, Audit, Health, Cache, Reclassification.
 - Authentication: OIDC login; RBAC controlling navigation.
 - Build: `npm run build`; deploy static assets behind reverse proxy.
 
-## 7. Docker & Compose Workflows
+## 8. Docker & Compose Workflows
 - **Local dev**: `docker compose -f deploy/docker/docker-compose.yml up --build` to launch Redis, Postgres, adaptor, policy engine, workers, etc.
 - **Health checks**: `curl http://localhost:19000/health/ready` (Admin API), `curl http://localhost:19010/health/ready` (Policy), `redis-cli ping`.
 - **Logs**: `docker compose logs icap-adaptor` etc.
 - **Shutdown**: `docker compose down -v` (warning: removes volumes).
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 - **ICAP errors**: Check adaptor logs for parse errors; ensure Squid metadata headers present; verify `policy_endpoint` reachable.
 - **Redis issues**: Confirm `redis_url` configured; check `redis-cli INFO` for latency; fallback memory cache will emit warnings if Redis unreachable.
 - **Policy errors**: 400 from `/api/v1/decision` indicates validation failure; inspect request body for missing `normalized_key`.
 - **CLI auth failures**: Ensure config token valid; inspect `~/.odctl/logs` (future) for stack traces.
 - **Docker build failures**: Clear `target/` and rebuild; ensure Rust toolchain matches required version.
 
-## 9. Evidence & Reporting
+## 10. Evidence & Reporting
 - Keep `rfc/` and `implementation-plan/` documents updated as work progresses.
 - Capture test artifacts (`cargo test` logs, smoke results) for Stage 7 signoff.
 - Use Kibana dashboards (Stage 6) for SOC/management reporting, export as PDF when requested.
 
-## 10. Support & Escalation
+## 11. Support & Escalation
 - **First line**: DevOps/SRE on-call monitors health dashboards and alerts.
 - **Policy issues**: escalate to Policy Engine team; use simulation endpoint to validate proposed changes.
 - **Classification delays**: check Redis Streams queue depth; scale workers as needed.
