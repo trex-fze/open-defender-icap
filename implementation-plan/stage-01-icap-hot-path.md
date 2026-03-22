@@ -15,7 +15,7 @@
 | S1-T5 | ICAP response generation (allow/block) | Secure Gateway Eng | S1-T3 | ✅ | `icap_response` logic, manual verification |
 | S1-T6 | Trace/log propagation & metrics | Platform Eng | S1-T4 | ✅ | `/metrics` endpoint + trace_id logging |
 | S1-T7 | Squid integration smoke test | QA | S1-T5 | ✅ | `odctl smoke` ICAP request validation |
-| S1-T8 | Unit/integration tests for parser/cache/error paths | QA/Dev Leads | S1-T1–T5 | ⬜ | Expand `cargo test -p icap-adaptor` coverage per Spec §24–26 |
+| S1-T8 | Unit/integration tests for parser/cache/error paths | QA/Dev Leads | S1-T1–T5 | ✅ | `cargo test -p icap-adaptor` exercises parser + cache invalidation/TTL |
 
 ## Risks & Mitigations
 - Redis unavailable → fallback memory cache but needs alerting (T4 follow-up).

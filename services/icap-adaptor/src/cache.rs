@@ -279,35 +279,79 @@ fn key_matches_domain_scope(key: &str, scope_value: &str, wildcard: bool) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common_types::{ClassificationVerdict, PolicyAction};
+    use common_types::PolicyAction;
+    use tokio::time::Duration;
 
     fn sample_decision(action: PolicyAction) -> PolicyDecision {
         PolicyDecision {
-            action: action.clone(),
-            cache_hit: action == PolicyAction::Allow,
-            verdict: Some(ClassificationVerdict {
-                primary_category: "Test".into(),
-                subcategory: "Test".into(),
-                risk_level: "low".into(),
-                confidence: 0.9,
-                recommended_action: action,
-            }),
+            action,
+            cache_hit: false,
+            verdict: None,
         }
     }
 
     #[tokio::test]
-    async fn in_memory_cache_flow() {
-        let cache = CacheClient::new(None).unwrap();
-        assert!(cache.get("key").await.unwrap().is_none());
+    async fn memory_cache_expires_entries() {
+        let cache = CacheClient::new(None, "test".into()).unwrap();
         cache
             .set(
                 "key".into(),
                 sample_decision(PolicyAction::Allow),
-                Duration::from_secs(10),
+                Duration::from_millis(50),
             )
             .await
             .unwrap();
-        let value = cache.get("key").await.unwrap().unwrap();
-        assert_eq!(value.action, PolicyAction::Allow);
+        assert!(cache.get("key").await.unwrap().is_some());
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(cache.get("key").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn review_invalidation_clears_entry() {
+        let cache = CacheClient::new(None, "test".into()).unwrap();
+        cache
+            .set(
+                "domain:example.com".into(),
+                sample_decision(PolicyAction::Block),
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap();
+        let payload = serde_json::json!({
+            "kind": "review",
+            "normalized_key": "domain:example.com"
+        })
+        .to_string();
+        CacheClient::apply_invalidation(&cache.memory, &payload)
+            .await
+            .unwrap();
+        assert!(cache.get("domain:example.com").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn domain_scope_invalidation_clears_subdomains() {
+        let cache = CacheClient::new(None, "test".into()).unwrap();
+        cache
+            .set(
+                "subdomain:foo.example.com".into(),
+                sample_decision(PolicyAction::Review),
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap();
+        let payload = serde_json::json!({
+            "kind": "override",
+            "scope_type": "domain",
+            "scope_value": "example.com"
+        })
+        .to_string();
+        CacheClient::apply_invalidation(&cache.memory, &payload)
+            .await
+            .unwrap();
+        assert!(cache
+            .get("subdomain:foo.example.com")
+            .await
+            .unwrap()
+            .is_none());
     }
 }
