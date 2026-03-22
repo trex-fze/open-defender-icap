@@ -11,3 +11,5 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 reqwest = { version = "0.11", features = ["json", "default-tls"] }
+sqlx = { version = "0.7", default-features = false, features = ["runtime-tokio", "postgres", "macros", "migrate"] }
+policy-dsl = { path = "../../crates/policy-dsl" }

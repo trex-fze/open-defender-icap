@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  smoke-tests:
+    extends:
+      file: docker-compose.yml
+      service: odctl-runner
+    command:
+      - bash
+      - -lc
+      - |
+        set -euo pipefail
+        echo "Running database migrations..."
+        odctl migrate run all
+        echo "Seeding default policies..."
+        odctl seed policies config/policies.json default compose
+        echo "Waiting for services before smoke test..."
+        sleep 10
+        odctl override list || true
+        odctl smoke icap-adaptor:1344
+    depends_on:
+      icap-adaptor:
+        condition: service_started
+      admin-api:
+        condition: service_started
+
+  web-admin:
+    profiles: ["dev"]
+
+  elasticsearch:
+    profiles: ["dev"]
+
+  kibana:
+    profiles: ["dev"]
+
+  prometheus:
+    profiles: ["dev"]

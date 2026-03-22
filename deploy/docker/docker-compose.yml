@@ -3,60 +3,207 @@ version: "3.9"
 services:
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   postgres:
     image: postgres:15-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: defender
-      POSTGRES_PASSWORD: defender
-      POSTGRES_DB: defender
+      POSTGRES_USER: ${POSTGRES_USER:-defender}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-defender}
+      POSTGRES_DB: ${POSTGRES_DB:-defender}
     ports:
       - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-defender}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.1
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-changeme-elastic}
+      - xpack.security.http.ssl.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.12.1
+    restart: unless-stopped
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: elastic
+      ELASTICSEARCH_PASSWORD: ${ELASTIC_PASSWORD:-changeme-elastic}
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
 
   icap-adaptor:
     build:
       context: ../..
       dockerfile: deploy/docker/rust.Dockerfile
     command: ["icap-adaptor"]
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "1344:1344"
+      - "19005:19005"
+    volumes:
+      - ../../config:/app/config:ro
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      policy-engine:
+        condition: service_started
 
   policy-engine:
     build:
       context: ../..
       dockerfile: deploy/docker/rust.Dockerfile
     command: ["policy-engine"]
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "19010:19010"
+    volumes:
+      - ../../config:/app/config:ro
     depends_on:
-      - postgres
-
-  llm-worker:
-    build:
-      context: ../..
-      dockerfile: deploy/docker/rust.Dockerfile
-    command: ["llm-worker"]
-    depends_on:
-      - redis
-      - postgres
-
-  reclass-worker:
-    build:
-      context: ../..
-      dockerfile: deploy/docker/rust.Dockerfile
-    command: ["reclass-worker"]
-    depends_on:
-      - redis
-      - postgres
+      postgres:
+        condition: service_healthy
 
   admin-api:
     build:
       context: ../..
       dockerfile: deploy/docker/rust.Dockerfile
     command: ["admin-api"]
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      OD_ADMIN_DATABASE_URL: ${OD_ADMIN_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender}
+      OD_ADMIN_TOKEN: ${OD_ADMIN_TOKEN:-changeme-admin}
+      OD_CACHE_REDIS_URL: ${OD_CACHE_REDIS_URL:-redis://redis:6379}
+      OD_CACHE_CHANNEL: ${OD_CACHE_CHANNEL:-od:cache:invalidate}
     ports:
       - "19000:19000"
+    volumes:
+      - ../../config:/app/config:ro
     depends_on:
-      - redis
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  llm-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/rust.Dockerfile
+    command: ["llm-worker"]
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - ../../config:/app/config:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  reclass-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/rust.Dockerfile
+    command: ["reclass-worker"]
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - ../../config:/app/config:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  squid:
+    image: ubuntu/squid:5.2-22.04_edge
+    restart: unless-stopped
+    ports:
+      - "3128:3128"
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf:ro
+      - squid-logs:/var/log/squid
+    depends_on:
+      icap-adaptor:
+        condition: service_started
+
+  web-admin:
+    image: node:20
+    working_dir: /app/web-admin
+    command: ["bash", "-lc", "npm install && npm run dev -- --host 0.0.0.0 --port 19001"]
+    ports:
+      - "19001:19001"
+    environment:
+      VITE_ADMIN_API_URL: http://localhost:19000
+    volumes:
+      - ../../web-admin:/app/web-admin
+    depends_on:
+      admin-api:
+        condition: service_started
+
+  odctl-runner:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/rust.Dockerfile
+    command: ["sleep", "infinity"]
+    environment:
+      OD_ADMIN_URL: ${OD_ADMIN_URL:-http://admin-api:19000}
+      OD_POLICY_URL: ${OD_POLICY_URL:-http://policy-engine:19010}
+      OD_ADMIN_TOKEN: ${OD_ADMIN_TOKEN:-changeme-admin}
+      OD_ADMIN_DATABASE_URL: ${OD_ADMIN_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender}
+      OD_POLICY_DATABASE_URL: ${OD_POLICY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender}
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - ../../config:/app/config:ro
+    depends_on:
+      admin-api:
+        condition: service_started
+
+volumes:
+  redis-data:
+  pg-data:
+  es-data:
+  squid-logs:

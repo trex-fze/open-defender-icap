@@ -6,3 +6,4 @@ web-admin/node_modules/
 web-admin/dist/
 **/*.log
 docker-data/
+.env

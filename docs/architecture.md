@@ -136,7 +136,7 @@ flowchart LR
 - `overrides`, `review_queue`, `audit_events`, `reporting_aggregates` (per Spec §20).
 
 ## 5. Deployment Architecture
-- **Local Dev**: `deploy/docker/docker-compose.yml` orchestrates Squid, adaptor, policy, Redis, Postgres, Elasticsearch, Kibana, workers, UI.
+- **Local Dev**: `deploy/docker/docker-compose.yml` orchestrates Squid, adaptor, policy engine, Redis, Postgres, Elasticsearch, Kibana, Prometheus, workers, UI, and an odctl runner; `docker-compose.test.yml` / `docker-compose.smoke.yml` provide trimmed stacks for CI and quick validation.
 - **Prod**:
   - Squid cluster fronted by load balancer; adaptor pods behind service mesh.
   - Redis cluster (sentinel or managed) for cache/queue; Postgres HA (Patroni or managed service).

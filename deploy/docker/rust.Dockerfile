@@ -11,5 +11,6 @@ COPY --from=builder /app/target/release/policy-engine /usr/local/bin/policy-engi
 COPY --from=builder /app/target/release/llm-worker /usr/local/bin/llm-worker
 COPY --from=builder /app/target/release/reclass-worker /usr/local/bin/reclass-worker
 COPY --from=builder /app/target/release/admin-api /usr/local/bin/admin-api
+COPY --from=builder /app/target/release/odctl /usr/local/bin/odctl
 COPY config /app/config
 ENTRYPOINT ["/bin/bash", "-c", "echo specify command"]

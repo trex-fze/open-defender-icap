@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  redis:
+    extends:
+      file: docker-compose.yml
+      service: redis
+
+  postgres:
+    extends:
+      file: docker-compose.yml
+      service: postgres
+
+  policy-engine:
+    extends:
+      file: docker-compose.yml
+      service: policy-engine
+
+  admin-api:
+    extends:
+      file: docker-compose.yml
+      service: admin-api
+
+  icap-adaptor:
+    extends:
+      file: docker-compose.yml
+      service: icap-adaptor
+
+  odctl-runner:
+    extends:
+      file: docker-compose.yml
+      service: odctl-runner
+
+  smoke-tests:
+    extends:
+      file: docker-compose.test.yml
+      service: smoke-tests

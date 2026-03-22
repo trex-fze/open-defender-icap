@@ -50,6 +50,11 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl policy simulate <file>` | Hit `/api/v1/policies/simulate` with a JSON request | JSON must match `DecisionRequest`; requires admin token when configured. |
 | `odctl policy import/export` | Manage policy packages (future) | Depends on Stage 2 completion. |
 | `odctl cache lookup/invalidate` | Inspect redis entries (future) | Tied to Stage 3 cache enhancements. |
+| `odctl migrate run [admin|policy|all]` | Apply Postgres migrations for admin/policy services | Reads `OD_ADMIN_DATABASE_URL` / `OD_POLICY_DATABASE_URL`; runs both when target omitted. |
+| `odctl seed policies [file] [name] [created_by]` | Load policy DSL file via Policy API | Defaults to `config/policies.json`, `name=default`; requires admin token. |
+| `odctl override update <id> <file>` | PUT override definition | JSON matches Admin API payload; invalidates caches instantly. |
+| `odctl review list` | List pending review queue items | Displays status, normalized key, submitter/assignee. |
+| `odctl review resolve <id> <file>` | Resolve review item via JSON payload | Wraps `/api/v1/review-queue/{id}/resolve`; triggers cache invalidation. |
 
 Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 OD_ADMIN_TOKEN=secret odctl policy reload`, `OD_ADMIN_TOKEN=secret odctl policy simulate request.json`.
 
@@ -60,10 +65,12 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - Build: `npm run build`; deploy static assets behind reverse proxy.
 
 ## 8. Docker & Compose Workflows
-- **Local dev**: `docker compose -f deploy/docker/docker-compose.yml up --build` to launch Redis, Postgres, adaptor, policy engine, workers, etc.
-- **Health checks**: `curl http://localhost:19000/health/ready` (Admin API), `curl http://localhost:19010/health/ready` (Policy), `redis-cli ping`.
-- **Logs**: `docker compose logs icap-adaptor` etc.
-- **Shutdown**: `docker compose down -v` (warning: removes volumes).
+- **Prep**: Copy `.env.example` → `.env`, edit tokens/passwords, then `cd deploy/docker`.
+- **Local dev**: `docker compose up --build` starts Redis, Postgres, ICAP adaptor, Policy engine, Admin API, Squid, workers, Kibana, Prometheus, React UI, and the `odctl` runner. Logs live under `docker compose logs -f <service>`.
+- **Smoke stack**: `docker compose -f docker-compose.smoke.yml up --build --abort-on-container-exit` spins up only Redis/Postgres/core services plus a smoke-tests container that runs `odctl smoke`.
+- **CI/integration**: `docker compose -f docker-compose.yml -f docker-compose.test.yml up --abort-on-container-exit` runs the same smoke harness but can skip heavy services via profiles.
+- **Health checks**: `curl http://localhost:19000/health/ready`, `curl http://localhost:19010/health/ready`, `redis-cli -h localhost ping`, `curl http://localhost:5601/status` (Kibana), `curl http://localhost:9090/-/ready` (Prometheus).
+- **Shutdown**: `docker compose down` keeps volumes, `docker compose down -v` wipes Postgres/Redis/ES data.
 
 ## 9. Troubleshooting
 - **ICAP errors**: Check adaptor logs for parse errors; ensure Squid metadata headers present; verify `policy_endpoint` reachable.
