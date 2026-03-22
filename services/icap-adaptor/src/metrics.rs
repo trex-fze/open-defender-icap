@@ -11,13 +11,15 @@ static CACHE_HITS: Lazy<IntCounter> =
 static CACHE_MISSES: Lazy<IntCounter> =
     Lazy::new(|| prometheus::register_int_counter!("cache_misses", "Cache misses").unwrap());
 static POLICY_LATENCY: Lazy<Histogram> = Lazy::new(|| {
-    let opts = HistogramOpts::new("policy_decision_latency_seconds", "Latency of policy requests")
-        .buckets(vec![0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0]);
+    let opts = HistogramOpts::new(
+        "policy_decision_latency_seconds",
+        "Latency of policy requests",
+    )
+    .buckets(vec![0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0]);
     prometheus::register_histogram!(opts).unwrap()
 });
-static ICAP_ERRORS: Lazy<IntCounter> = Lazy::new(|| {
-    prometheus::register_int_counter!("icap_errors", "ICAP handler errors").unwrap()
-});
+static ICAP_ERRORS: Lazy<IntCounter> =
+    Lazy::new(|| prometheus::register_int_counter!("icap_errors", "ICAP handler errors").unwrap());
 
 pub fn record_cache_hit() {
     CACHE_HITS.inc();

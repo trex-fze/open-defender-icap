@@ -1,12 +1,19 @@
 mod config;
 mod evaluator;
 mod models;
+mod store;
 
 use anyhow::Result;
-use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
 use evaluator::PolicyEvaluator;
-use models::{DecisionRequest, ErrorResponse};
+use models::{DecisionRequest, ErrorResponse, PolicyListResponse};
 use std::{net::SocketAddr, sync::Arc};
+use store::PolicyStore;
 use tokio::net::TcpListener;
 use tracing::{info, Level};
 
@@ -24,12 +31,16 @@ async fn main() -> Result<()> {
         .init();
 
     let cfg = config::load()?;
+    let store = PolicyStore::load_from_file(&cfg.policy_file)?;
+    let evaluator = PolicyEvaluator::new(store, cfg.policy_file.clone());
     let state = AppState {
-        evaluator: Arc::new(PolicyEvaluator::default()),
+        evaluator: Arc::new(evaluator),
     };
     let app = Router::new()
         .route("/api/v1/decision", post(handle_decision))
-        .route("/health/ready", axum::routing::get(health))
+        .route("/api/v1/policies", get(list_policies))
+        .route("/api/v1/policies/reload", post(reload_policies))
+        .route("/health/ready", get(health))
         .with_state(state);
 
     let addr: SocketAddr = format!("{}:{}", cfg.api_host, cfg.api_port).parse()?;
@@ -57,6 +68,29 @@ async fn handle_decision(
     Ok(Json(decision))
 }
 
+async fn list_policies(State(state): State<AppState>) -> Json<PolicyListResponse> {
+    let rules = state.evaluator.rules();
+    let version = state.evaluator.version();
+    Json(PolicyListResponse::from_rules(version, rules))
+}
+
+async fn reload_policies(
+    State(state): State<AppState>,
+) -> Result<Json<PolicyListResponse>, (StatusCode, Json<ErrorResponse>)> {
+    state.evaluator.reload().map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error_code: "RELOAD_FAILED",
+                message: err.to_string(),
+            }),
+        )
+    })?;
+    let rules = state.evaluator.rules();
+    let version = state.evaluator.version();
+    Ok(Json(PolicyListResponse::from_rules(version, rules)))
+}
+
 async fn health() -> &'static str {
     "OK"
 }
@@ -69,11 +103,29 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_app() -> Router {
+        let doc = policy_dsl::PolicyDocument {
+            version: "test".into(),
+            rules: vec![policy_dsl::PolicyRule {
+                id: "block-social".into(),
+                description: None,
+                priority: 10,
+                action: common_types::PolicyAction::Block,
+                conditions: policy_dsl::Conditions {
+                    categories: Some(vec!["Social Media".into()]),
+                    ..Default::default()
+                },
+            }],
+        };
+        let tmp = std::env::temp_dir().join("policy-app-test.json");
+        std::fs::write(&tmp, serde_json::to_string(&doc).unwrap()).unwrap();
+        let store = PolicyStore::load_from_file(tmp.to_str().unwrap()).unwrap();
+        let evaluator = PolicyEvaluator::new(store, tmp.to_str().unwrap().into());
         let state = AppState {
-            evaluator: Arc::new(PolicyEvaluator::default()),
+            evaluator: Arc::new(evaluator),
         };
         Router::new()
             .route("/api/v1/decision", post(handle_decision))
+            .route("/api/v1/policies", get(list_policies))
             .with_state(state)
     }
 
@@ -83,7 +135,8 @@ mod tests {
         let payload = serde_json::json!({
             "normalized_key": "domain:example.com",
             "entity_level": "domain",
-            "source_ip": "10.0.0.1"
+            "source_ip": "10.0.0.1",
+            "category_hint": "Social Media"
         });
 
         let response = app

@@ -1,0 +1,30 @@
+{
+  "version": "2026-03-22",
+  "rules": [
+    {
+      "id": "block-malware",
+      "description": "Block domains tagged as malware",
+      "priority": 5,
+      "action": "Block",
+      "conditions": {
+        "categories": ["Malware / Phishing / Fraud"]
+      }
+    },
+    {
+      "id": "monitor-social",
+      "description": "Monitor social media",
+      "priority": 50,
+      "action": "Monitor",
+      "conditions": {
+        "categories": ["Social Media"]
+      }
+    },
+    {
+      "id": "allow-default",
+      "description": "Allow everything else",
+      "priority": 1000,
+      "action": "Allow",
+      "conditions": {}
+    }
+  ]
+}

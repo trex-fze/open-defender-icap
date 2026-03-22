@@ -83,7 +83,8 @@ flowchart LR
 
 ### 2.2 Policy Engine (`svc-policy`)
 - **Current State**: Axum service exposing `/api/v1/decision`; simple evaluator stub.
-- **Future Enhancements**: DSL parser, Postgres persistence, policy CRUD, simulation endpoint, RBAC, audit events.
+- **Current Enhancements**: Loads policy DSL from `config/policies.json`, exposes `/api/v1/policies` (list) and `/api/v1/policies/reload` to refresh without restart.
+- **Future Enhancements**: Postgres persistence, policy CRUD, simulation endpoint, RBAC, audit events.
 - **Interfaces**: REST (JSON) for ICAP adaptor + admin tools; eventually gRPC for low-latency decision path.
 
 ### 2.3 Cache Layer (Redis + Memory)

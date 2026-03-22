@@ -13,6 +13,11 @@ common-types = { path = "../../crates/common-types" }
 config-core = { path = "../../crates/config-core" }
 axum = { version = "0.7.9", features = ["macros"] }
 serde_json = { workspace = true }
+tower = "0.5"
+policy-dsl = { path = "../../crates/policy-dsl" }
+once_cell = { workspace = true }
+tokio-stream = "0.1"
+parking_lot = "0.12"
 
 [dev-dependencies]
 tower = "0.5"

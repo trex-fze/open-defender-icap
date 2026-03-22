@@ -1,4 +1,5 @@
 {
   "api_host": "0.0.0.0",
-  "api_port": 19010
+  "api_port": 19010,
+  "policy_file": "config/policies.json"
 }

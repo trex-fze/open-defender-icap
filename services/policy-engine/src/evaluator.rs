@@ -1,34 +1,31 @@
-use common_types::{ClassificationVerdict, PolicyAction, PolicyDecision};
+use crate::{models::DecisionRequest, store::PolicyStore};
+use common_types::PolicyDecision;
 
-use crate::models::DecisionRequest;
-
-#[derive(Debug, Clone, Default)]
-pub struct PolicyEvaluator;
+#[derive(Clone)]
+pub struct PolicyEvaluator {
+    store: PolicyStore,
+    policy_file: String,
+}
 
 impl PolicyEvaluator {
-    pub fn evaluate(&self, request: &DecisionRequest) -> PolicyDecision {
-        let action = if request.normalized_key.contains("block") {
-            PolicyAction::Block
-        } else if request.risk_hint.as_deref() == Some("high") {
-            PolicyAction::Review
-        } else {
-            PolicyAction::Allow
-        };
+    pub fn new(store: PolicyStore, policy_file: String) -> Self {
+        Self { store, policy_file }
+    }
 
-        PolicyDecision {
-            action: action.clone(),
-            cache_hit: false,
-            verdict: Some(ClassificationVerdict {
-                primary_category: request
-                    .category_hint
-                    .clone()
-                    .unwrap_or_else(|| "Unknown".into()),
-                subcategory: "Unspecified".into(),
-                risk_level: request.risk_hint.clone().unwrap_or_else(|| "medium".into()),
-                confidence: request.confidence_hint.unwrap_or(0.5),
-                recommended_action: action,
-            }),
-        }
+    pub fn evaluate(&self, request: &DecisionRequest) -> PolicyDecision {
+        self.store.evaluate(request)
+    }
+
+    pub fn reload(&self) -> anyhow::Result<()> {
+        self.store.reload(&self.policy_file)
+    }
+
+    pub fn rules(&self) -> Vec<policy_dsl::PolicyRule> {
+        self.store.list_rules()
+    }
+
+    pub fn version(&self) -> String {
+        self.store.version()
     }
 }
 
@@ -36,6 +33,26 @@ impl PolicyEvaluator {
 mod tests {
     use super::*;
     use crate::models::DecisionRequest;
+    use policy_dsl::{PolicyDocument, PolicyRule};
+
+    fn mock_store() -> PolicyStore {
+        let doc = PolicyDocument {
+            version: "test".into(),
+            rules: vec![PolicyRule {
+                id: "block-social".into(),
+                description: None,
+                priority: 10,
+                action: common_types::PolicyAction::Block,
+                conditions: policy_dsl::Conditions {
+                    categories: Some(vec!["Social Media".into()]),
+                    ..Default::default()
+                },
+            }],
+        };
+        let path = std::env::temp_dir().join("policy-test.json");
+        std::fs::write(&path, serde_json::to_string(&doc).unwrap()).unwrap();
+        PolicyStore::load_from_file(path.to_str().unwrap()).unwrap()
+    }
 
     fn base_request() -> DecisionRequest {
         DecisionRequest {
@@ -43,34 +60,18 @@ mod tests {
             entity_level: "domain".into(),
             source_ip: "10.0.0.1".into(),
             user_id: None,
-            category_hint: None,
+            group_ids: None,
+            category_hint: Some("Social Media".into()),
             risk_hint: None,
-            confidence_hint: None,
+            confidence_hint: Some(0.8),
         }
     }
 
     #[test]
-    fn allow_default() {
-        let evaluator = PolicyEvaluator::default();
+    fn matches_policy_rule() {
+        let store = mock_store();
+        let evaluator = PolicyEvaluator::new(store, "unused".into());
         let decision = evaluator.evaluate(&base_request());
-        assert_eq!(decision.action, PolicyAction::Allow);
-    }
-
-    #[test]
-    fn block_contains_keyword() {
-        let evaluator = PolicyEvaluator::default();
-        let mut req = base_request();
-        req.normalized_key = "domain:blocked_site.com".into();
-        let decision = evaluator.evaluate(&req);
-        assert_eq!(decision.action, PolicyAction::Block);
-    }
-
-    #[test]
-    fn review_on_high_risk_hint() {
-        let evaluator = PolicyEvaluator::default();
-        let mut req = base_request();
-        req.risk_hint = Some("high".into());
-        let decision = evaluator.evaluate(&req);
-        assert_eq!(decision.action, PolicyAction::Review);
+        assert_eq!(decision.action, common_types::PolicyAction::Block);
     }
 }

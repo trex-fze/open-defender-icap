@@ -4,6 +4,7 @@ use serde::Deserialize;
 pub struct PolicyConfig {
     pub api_host: String,
     pub api_port: u16,
+    pub policy_file: String,
 }
 
 pub fn load() -> anyhow::Result<PolicyConfig> {
