@@ -9,7 +9,7 @@
 4. Introduce audit logging + evidence capture for policy/override actions.
 
 ## Checklist
-- [ ] Schema + migrations for entities listed in Spec §20 (`classifications`, `overrides`, `review_queue`, etc.). *(Overrides/review tables + classifications/versions now defined; remaining audit artifacts still open.)*
+- [x] Schema + migrations for entities listed in Spec §20 (`classifications`, `overrides`, `review_queue`, etc.). *(Added taxonomy tables, cache entries, reclassification jobs, CLI/UI audit logs, reporting aggregates.)*
 - [x] Override APIs (create/update/delete, scope validation) – Spec §23.4. *(Admin API now validates scopes/actions, supports PUT + DELETE, and emits cache invalidations; CLI/UI follow-ups pending.)*
 - [x] Review queue endpoints & SLA metrics – Spec §§14, 16. *(List + resolve endpoints wired; Prometheus `/metrics` exposes queue depth + SLA counters.)*
 - [x] Cache invalidation hooks on DB changes – Spec §11. *(Admin API purges Redis keys + publishes events; ICAP adaptor and workers subscribe and react.)*
