@@ -17,6 +17,7 @@
 | S2-T6 | Add audit logging for policy changes | Security Eng | S2-T5 | ⏳ | Policy versions captured in DB; Elasticsearch export + approval records tracked in Stage 4. |
 | S2-T7 | Document and expose `/api/v1/policies` for UI/CLI | Tech Writer | S2-T4 | ✅ | Updated architecture + user guide referencing endpoints. |
 | S2-T8 | CLI/UX tooling for policy reload/list | DevTools Eng | S2-T4 | ✅ | `odctl policy list/reload/import/update` all available. |
+| S2-T9 | Unit/integration tests (precedence, overrides, error paths) | QA | S2-T4/S2-T5 | ✅ | `cargo test -p policy-engine` coverage added (decision + protection tests). |
 
 ## Evidence Plan
 - DSL spec doc, migration logs, OpenAPI schema, CI test reports.

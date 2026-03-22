@@ -14,3 +14,4 @@
 | S3-T4 | Implement review queue + SLA metrics | SOC Eng | S3-T2 | ✅ (review endpoints emit Prometheus metrics + SLA counters) |
 | S3-T5 | Audit trail writer (DB + ES) | Security Eng | S3-T2 | ✅ (audit_events table + optional Elasticsearch exporter) |
 | S3-T6 | Evidence capture (audit samples, API tests) | QA | S3-T3/T5 | ⏳ (unit coverage added for metrics; integration evidence still pending) |
+| S3-T7 | Unit/integration tests for overrides + review persistence | QA | S3-T3/T4 | ⬜ |

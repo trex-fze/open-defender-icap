@@ -21,6 +21,7 @@
 - [ ] Override lookup, manual placeholder actions (§14) – pending Stage 2.
 - [ ] Event emission/audit logging (§17, §20) – pending Stage 3.
 - [ ] TLS/mTLS between Squid and adaptor (§3 TLS RFCs) – planned Stage 3.
+- [ ] Unit/integration tests covering parser, cache fallback, and ICAP error paths (§24–26).
 
 ## Traceability
 - **RFC 3507**: `icap::IcapRequest` parser ensures compliance with REQMOD structure.

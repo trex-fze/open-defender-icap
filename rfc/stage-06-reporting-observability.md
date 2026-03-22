@@ -15,6 +15,7 @@
 - [ ] Metrics export (`squid_to_icap_latency`, `cache_hit_ratio`, etc.) – Spec §33.
 - [ ] Alert definitions + runbooks – Spec §33, §34.
 - [ ] Report APIs & CLI helpers – Spec §16, §19.
+- [ ] Unit/integration tests for ingestion, dashboards, and alerting workflows – Spec §25–26.
 
 ## Traceability Plan
 | Requirement | Section | Artifact |
