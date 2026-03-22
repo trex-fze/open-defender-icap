@@ -1,4 +1,4 @@
-use common_types::PolicyAction;
+use common_types::{PolicyAction, PolicyDecision};
 use policy_dsl::PolicyDocument;
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +36,13 @@ pub struct PolicySummary {
     pub description: Option<String>,
     pub priority: u32,
     pub action: PolicyAction,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SimulationResponse {
+    pub decision: PolicyDecision,
+    pub matched_rule_id: Option<String>,
+    pub policy_version: String,
 }
 
 impl PolicyListResponse {

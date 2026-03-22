@@ -1,6 +1,6 @@
 use crate::{
     models::{DecisionRequest, PolicyCreateRequest},
-    store::{insert_policy_document, PolicyStore},
+    store::{insert_policy_document, PolicyStore, SimulationResult},
 };
 use anyhow::{anyhow, Result};
 use common_types::PolicyDecision;
@@ -42,6 +42,10 @@ impl PolicyEvaluator {
 
     pub fn evaluate(&self, request: &DecisionRequest) -> PolicyDecision {
         self.store.evaluate(request)
+    }
+
+    pub fn simulate(&self, request: &DecisionRequest) -> SimulationResult {
+        self.store.simulate(request)
     }
 
     pub async fn reload(&self) -> Result<()> {

@@ -7,6 +7,8 @@ pub struct PolicyConfig {
     pub policy_file: String,
     #[serde(default)]
     pub database_url: Option<String>,
+    #[serde(default)]
+    pub admin_token: Option<String>,
 }
 
 pub fn load() -> anyhow::Result<PolicyConfig> {

@@ -14,6 +14,12 @@ pub struct PolicyStore {
     version: Arc<RwLock<String>>,
 }
 
+#[derive(Clone)]
+pub struct SimulationResult {
+    pub decision: PolicyDecision,
+    pub matched_rule_id: Option<String>,
+}
+
 impl PolicyStore {
     pub fn from_document(doc: PolicyDocument) -> Self {
         let mut rules = doc.rules;
@@ -112,20 +118,30 @@ impl PolicyStore {
     }
 
     pub fn evaluate(&self, request: &DecisionRequest) -> PolicyDecision {
+        self.simulate(request).decision
+    }
+
+    pub fn simulate(&self, request: &DecisionRequest) -> SimulationResult {
         let rules = self.inner.read();
         for rule in rules.iter() {
             if matches_conditions(&rule.conditions, request) {
-                return PolicyDecision {
-                    action: rule.action.clone(),
-                    cache_hit: false,
-                    verdict: request.to_verdict(rule),
+                return SimulationResult {
+                    decision: PolicyDecision {
+                        action: rule.action.clone(),
+                        cache_hit: false,
+                        verdict: request.to_verdict(rule),
+                    },
+                    matched_rule_id: Some(rule.id.clone()),
                 };
             }
         }
-        PolicyDecision {
-            action: PolicyAction::Allow,
-            cache_hit: false,
-            verdict: request.to_verdict_default(),
+        SimulationResult {
+            decision: PolicyDecision {
+                action: PolicyAction::Allow,
+                cache_hit: false,
+                verdict: request.to_verdict_default(),
+            },
+            matched_rule_id: None,
         }
     }
 

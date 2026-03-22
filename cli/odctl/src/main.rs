@@ -1,8 +1,13 @@
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::Deserialize;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use serde_json::Value;
+use std::env;
+use tokio::{
+    fs,
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 use tracing::info;
 
 #[tokio::main]
@@ -25,7 +30,7 @@ async fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-        "odctl commands:\n  health            Run health checks\n  smoke [host:port] Run ICAP smoke test\n  policy list       List active policy rules\n  policy reload     Reload policy definitions\n"
+        "odctl commands:\n  health            Run health checks\n  smoke [host:port] Run ICAP smoke test\n  policy list       List active policy rules\n  policy reload     Reload policy definitions\n  policy simulate <file>  Simulate policy decision using JSON payload\n"
     );
 }
 
@@ -53,14 +58,17 @@ async fn run_smoke(mut args: impl Iterator<Item = String>) -> Result<()> {
 
 async fn run_policy(mut args: impl Iterator<Item = String>) -> Result<()> {
     let sub = args.next().unwrap_or_else(|| "help".to_string());
-    let base =
-        std::env::var("OD_POLICY_URL").unwrap_or_else(|_| "http://localhost:19010".to_string());
+    let base = env::var("OD_POLICY_URL").unwrap_or_else(|_| "http://localhost:19010".to_string());
     let client = Client::new();
 
     match sub.as_str() {
         "list" => {
             let url = format!("{}/api/v1/policies", base.trim_end_matches('/'));
-            let resp = client.get(&url).send().await?.error_for_status()?;
+            let mut req = client.get(&url);
+            if let Ok(token) = env::var("OD_ADMIN_TOKEN") {
+                req = req.header("X-Admin-Token", token);
+            }
+            let resp = req.send().await?.error_for_status()?;
             let payload = resp.json::<PolicyListResponse>().await?;
             println!("Active policy version: {}", payload.version);
             println!("Priority  Action     Rule ID           Description");
@@ -77,12 +85,37 @@ async fn run_policy(mut args: impl Iterator<Item = String>) -> Result<()> {
         }
         "reload" => {
             let url = format!("{}/api/v1/policies/reload", base.trim_end_matches('/'));
-            client.post(&url).send().await?.error_for_status()?;
+            let mut req = client.post(&url);
+            if let Ok(token) = env::var("OD_ADMIN_TOKEN") {
+                req = req.header("X-Admin-Token", token);
+            }
+            req.send().await?.error_for_status()?;
             println!("Policy reload requested against {base}");
             Ok(())
         }
+        "simulate" => {
+            let path = args
+                .next()
+                .ok_or_else(|| anyhow!("provide JSON file path for simulation"))?;
+            let body = fs::read_to_string(&path).await?;
+            let url = format!("{}/api/v1/policies/simulate", base.trim_end_matches('/'));
+            let mut req = client
+                .post(&url)
+                .header("content-type", "application/json")
+                .body(body);
+            if let Ok(token) = env::var("OD_ADMIN_TOKEN") {
+                req = req.header("X-Admin-Token", token);
+            }
+            let resp = req.send().await?.error_for_status()?;
+            let payload = resp.json::<PolicySimulationResponse>().await?;
+            println!(
+                "Action: {}, Rule: {:?}, Version: {}",
+                payload.decision.action, payload.matched_rule_id, payload.policy_version
+            );
+            Ok(())
+        }
         "help" => {
-            println!("policy subcommands: list | reload");
+            println!("policy subcommands: list | reload | simulate <file>");
             Ok(())
         }
         other => Err(anyhow!("unknown policy subcommand: {other}")),
@@ -101,4 +134,18 @@ struct PolicySummary {
     description: Option<String>,
     priority: u32,
     action: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PolicySimulationResponse {
+    decision: PolicyDecisionData,
+    matched_rule_id: Option<String>,
+    policy_version: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PolicyDecisionData {
+    action: String,
+    cache_hit: bool,
+    verdict: Option<Value>,
 }

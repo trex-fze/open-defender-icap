@@ -27,8 +27,8 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - Monitoring: tail `target/debug/icap-adaptor` logs and scrape Prometheus metrics from `http://<metrics_host>:<metrics_port>/metrics` (default `19005`).
 
 ## 4. Using the Policy Engine
-- Config file: `config/policy-engine.json` (host/port, DSL path, optional `database_url`). Leave `database_url` as `null` for file-backed mode; set to a Postgres connection string to enable persistent storage.
-- Policies reside in `config/policies.json`; `GET /api/v1/policies` lists active rules, `POST /api/v1/policies/reload` hot-reloads from the DSL/DB, and `POST /api/v1/policies` (DB mode only) creates a new policy document.
+- Config file: `config/policy-engine.json` (host/port, DSL path, optional `database_url`, optional `admin_token`). Leave `database_url` as `null` for file-backed mode; set to a Postgres connection string to enable persistent storage. When `admin_token` is set, admin APIs require header `X-Admin-Token` (CLI reads `OD_ADMIN_TOKEN`).
+- Policies reside in `config/policies.json`; `GET /api/v1/policies` lists active rules, `POST /api/v1/policies/reload` hot-reloads from the DSL/DB, `POST /api/v1/policies` (DB mode only) creates a new policy document, and `POST /api/v1/policies/simulate` evaluates a sample request without enforcing it.
 - `cargo run -p policy-engine` starts REST API with `/api/v1/decision` + health endpoints. On startup the service applies migrations in `services/policy-engine/migrations/` and seeds from the DSL file if the database is empty.
 - Future operations: manage policies via Admin API/UI/CLI; run simulations for policy changes.
 
@@ -38,12 +38,13 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl help` | Display available commands | Lists current subcommands. |
 | `odctl health` | Run health checks (future) | Will query backend `/health` endpoints. |
 | `odctl smoke [host:port]` | Send sample ICAP REQMOD to adaptor | Defaults to `127.0.0.1:1344`; prints ICAP status line. |
-| `odctl policy list` | List active policy rules via policy engine | Respects `OD_POLICY_URL` (default `http://localhost:19010`). |
-| `odctl policy reload` | Trigger policy reload (file/DB backed) | Useful after editing `policies.json` or DB changes. |
+| `odctl policy list` | List active policy rules via policy engine | Respects `OD_POLICY_URL` (default `http://localhost:19010`); add `OD_ADMIN_TOKEN` for protected endpoints. |
+| `odctl policy reload` | Trigger policy reload (file/DB backed) | Requires admin token when configured. |
+| `odctl policy simulate <file>` | Hit `/api/v1/policies/simulate` with a JSON request | JSON must match `DecisionRequest`; requires admin token when configured. |
 | `odctl policy import/export` | Manage policy packages (future) | Depends on Stage 2 completion. |
 | `odctl cache lookup/invalidate` | Inspect redis entries (future) | Tied to Stage 3 cache enhancements. |
 
-Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 odctl policy reload`.
+Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 OD_ADMIN_TOKEN=secret odctl policy reload`, `OD_ADMIN_TOKEN=secret odctl policy simulate request.json`.
 
 ## 6. React Admin UI (Future)
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).

@@ -11,9 +11,9 @@
 ## Checklist
 - [x] DSL grammar & parser aligned with Spec §14 evaluation order (see `crates/policy-dsl`, `config/policies.json`).
 - [x] Policy storage schema & migrations created (Spec §20 entities `policies`, `policy_rules`).
-- [x] Decision API enriched with policy metadata (policy listing + reload endpoints).
-- [ ] AuthN/Z via OIDC/mTLS with role-based scopes (Spec §14, §18 frontend).
-- [ ] Policy simulation endpoint w/ trace outputs for audit (Spec §14 auditability).
+- [x] Decision API enriched with policy metadata (policy listing + reload/create endpoints).
+- [x] Auth scaffolding via admin token + middleware (Spec §14, §18) – full OIDC/RBAC pending.
+- [x] Policy simulation endpoint returning decision + matched rule (Spec §14 auditability) – trace/audit logging TBD.
 - [ ] Unit/integration tests covering precedence, overrides, error paths (Spec §24–26).
 - [ ] Audit logging for policy changes (Spec §17).
 

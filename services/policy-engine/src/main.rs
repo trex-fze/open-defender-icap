@@ -1,17 +1,22 @@
+mod auth;
 mod config;
 mod evaluator;
 mod models;
 mod store;
 
 use anyhow::Result;
+use auth::{enforce_admin, AdminAuth};
 use axum::{
     extract::State,
     http::StatusCode,
+    middleware,
     routing::{get, post},
     Json, Router,
 };
 use evaluator::PolicyEvaluator;
-use models::{DecisionRequest, ErrorResponse, PolicyCreateRequest, PolicyListResponse};
+use models::{
+    DecisionRequest, ErrorResponse, PolicyCreateRequest, PolicyListResponse, SimulationResponse,
+};
 use policy_dsl::PolicyDocument;
 use sqlx::postgres::PgPoolOptions;
 use std::{net::SocketAddr, sync::Arc};
@@ -57,12 +62,24 @@ async fn main() -> Result<()> {
     let state = AppState {
         evaluator: Arc::new(evaluator),
     };
-    let app = Router::new()
-        .route("/api/v1/decision", post(handle_decision))
+
+    let admin_routes = Router::new()
         .route("/api/v1/policies", get(list_policies).post(create_policy))
         .route("/api/v1/policies/reload", post(reload_policies))
+        .route("/api/v1/policies/simulate", post(simulate_policy))
+        .with_state(state.clone())
+        .layer(middleware::from_fn_with_state(
+            AdminAuth {
+                token: cfg.admin_token.clone(),
+            },
+            enforce_admin,
+        ));
+
+    let app = Router::new()
+        .route("/api/v1/decision", post(handle_decision))
         .route("/health/ready", get(health))
-        .with_state(state);
+        .with_state(state.clone())
+        .merge(admin_routes);
 
     let addr: SocketAddr = format!("{}:{}", cfg.api_host, cfg.api_port).parse()?;
     let listener = TcpListener::bind(addr).await?;
@@ -137,6 +154,28 @@ async fn create_policy(
     let rules = state.evaluator.rules();
     let version = state.evaluator.version();
     Ok(Json(PolicyListResponse::from_rules(version, rules)))
+}
+
+async fn simulate_policy(
+    State(state): State<AppState>,
+    Json(payload): Json<DecisionRequest>,
+) -> Result<Json<SimulationResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if payload.normalized_key.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error_code: "VALIDATION_ERROR",
+                message: "normalized_key required".into(),
+            }),
+        ));
+    }
+
+    let result = state.evaluator.simulate(&payload);
+    Ok(Json(SimulationResponse {
+        decision: result.decision,
+        matched_rule_id: result.matched_rule_id,
+        policy_version: state.evaluator.version(),
+    }))
 }
 
 async fn health() -> &'static str {
