@@ -32,8 +32,6 @@ use uuid::Uuid;
 #[derive(Clone)]
 struct AppState {
     evaluator: Arc<PolicyEvaluator>,
-    #[allow(dead_code)]
-    auth: Arc<AdminAuth>,
 }
 
 #[tokio::main]
@@ -80,7 +78,6 @@ async fn main() -> Result<()> {
     let admin_auth = Arc::new(AdminAuth::from_config(admin_token.clone(), auth_settings).await?);
     let state = AppState {
         evaluator: Arc::new(evaluator),
-        auth: admin_auth.clone(),
     };
 
     let auth_layer = {

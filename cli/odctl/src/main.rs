@@ -79,7 +79,14 @@ async fn run_policy(mut args: impl Iterator<Item = String>) -> Result<()> {
             }
             let resp = req.send().await?.error_for_status()?;
             let payload = resp.json::<PolicyListResponse>().await?;
-            println!("Active policy version: {}", payload.version);
+            if let Some(policy_id) = payload.policy_id {
+                println!(
+                    "Active policy id: {} (version {})",
+                    policy_id, payload.version
+                );
+            } else {
+                println!("Active policy version: {}", payload.version);
+            }
             println!("Priority  Action     Rule ID           Description");
             for rule in payload.rules {
                 println!(
@@ -118,11 +125,7 @@ async fn run_policy(mut args: impl Iterator<Item = String>) -> Result<()> {
                 .next()
                 .ok_or_else(|| anyhow!("provide JSON file for policy update payload"))?;
             let body = fs::read_to_string(&path).await?;
-            let url = format!(
-                "{}/api/v1/policies/{}",
-                base.trim_end_matches('/'),
-                target
-            );
+            let url = format!("{}/api/v1/policies/{}", base.trim_end_matches('/'), target);
             let mut req = client
                 .put(&url)
                 .header("content-type", "application/json")
@@ -436,6 +439,7 @@ async fn seed_policies(path: &str, name: String, created_by: Option<String>) -> 
 
 #[derive(Debug, Deserialize)]
 struct PolicyListResponse {
+    policy_id: Option<String>,
     version: String,
     rules: Vec<PolicySummary>,
 }
