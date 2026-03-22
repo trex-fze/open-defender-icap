@@ -1,7 +1,9 @@
+mod audit;
 mod auth;
 mod cache;
 
 use anyhow::{Context, Result};
+use audit::{AuditEvent, AuditLogger};
 use auth::{enforce_admin, AdminAuth};
 use axum::{
     extract::{Path, State},
@@ -38,6 +40,7 @@ struct AdminApiConfig {
 struct AppState {
     pool: PgPool,
     cache_invalidator: Option<Arc<CacheInvalidator>>,
+    audit_logger: AuditLogger,
 }
 
 impl AppState {
@@ -66,6 +69,48 @@ impl AppState {
                 );
             }
         }
+    }
+
+    async fn log_override_event<T>(
+        &self,
+        action: &str,
+        actor: Option<String>,
+        target_id: String,
+        payload: T,
+    ) where
+        T: serde::Serialize,
+    {
+        let payload = serde_json::to_value(payload).ok();
+        self.audit_logger
+            .log(AuditEvent {
+                actor,
+                action: action.to_string(),
+                target_type: Some("override".into()),
+                target_id: Some(target_id),
+                payload,
+            })
+            .await;
+    }
+
+    async fn log_review_event<T>(
+        &self,
+        action: &str,
+        actor: Option<String>,
+        target_id: String,
+        payload: T,
+    ) where
+        T: serde::Serialize,
+    {
+        let payload = serde_json::to_value(payload).ok();
+        self.audit_logger
+            .log(AuditEvent {
+                actor,
+                action: action.to_string(),
+                target_type: Some("review".into()),
+                target_id: Some(target_id),
+                payload,
+            })
+            .await;
     }
 }
 
@@ -125,6 +170,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         pool: pool.clone(),
         cache_invalidator,
+        audit_logger: AuditLogger::new(pool.clone()),
     };
 
     let admin_routes = Router::new()
@@ -193,6 +239,7 @@ async fn create_override(
     State(state): State<AppState>,
     Json(payload): Json<OverrideUpsertRequest>,
 ) -> Result<Json<OverrideRecord>, (StatusCode, Json<ApiError>)> {
+    let actor_hint = payload.created_by.clone();
     let validated = validate_override_payload(payload)?;
     let ValidatedOverridePayload {
         scope_type,
@@ -247,6 +294,14 @@ async fn create_override(
     state
         .invalidate_override(&mapped.scope_type, &mapped.scope_value)
         .await;
+    state
+        .log_override_event(
+            "override.create",
+            actor_hint.or_else(|| mapped.created_by.clone()),
+            mapped.id.to_string(),
+            &mapped,
+        )
+        .await;
 
     Ok(Json(mapped))
 }
@@ -288,6 +343,17 @@ async fn delete_override(
     })?;
 
     state.invalidate_override(&scope_type, &scope_value).await;
+    state
+        .log_override_event(
+            "override.delete",
+            Some("admin".into()),
+            id.to_string(),
+            serde_json::json!({
+                "scope_type": scope_type,
+                "scope_value": scope_value
+            }),
+        )
+        .await;
 
     Ok(())
 }
@@ -297,6 +363,7 @@ async fn update_override(
     Path(id): Path<Uuid>,
     Json(payload): Json<OverrideUpsertRequest>,
 ) -> Result<Json<OverrideRecord>, (StatusCode, Json<ApiError>)> {
+    let actor_hint = payload.created_by.clone();
     let validated = validate_override_payload(payload)?;
     let ValidatedOverridePayload {
         scope_type,
@@ -352,6 +419,16 @@ async fn update_override(
 
     state
         .invalidate_override(&mapped.scope_type, &mapped.scope_value)
+        .await;
+    state
+        .log_override_event(
+            "override.update",
+            actor_hint
+                .or_else(|| mapped.created_by.clone())
+                .or(Some("admin".into())),
+            mapped.id.to_string(),
+            &mapped,
+        )
         .await;
 
     Ok(Json(mapped))
@@ -431,6 +508,14 @@ async fn resolve_review_item(
     })?;
 
     state.invalidate_review(&mapped.normalized_key).await;
+    state
+        .log_review_event(
+            "review.resolve",
+            payload.decided_by.clone().or(Some("admin".into())),
+            mapped.id.to_string(),
+            &mapped,
+        )
+        .await;
 
     Ok(Json(mapped))
 }

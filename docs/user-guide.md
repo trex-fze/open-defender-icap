@@ -37,6 +37,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - Cache invalidation: when `redis_url` is configured (or `OD_CACHE_REDIS_URL` env var is set) the Admin API publishes override/review updates to the `cache_channel` (defaults to `od:cache:invalidate`) and deletes the matching Redis keys before returning to the client. Without Redis configured the API logs a warning and skips invalidation, which means cached policy decisions may take up to 5 minutes to expire.
 - Admin authentication: set `admin_token` in the config or provide `OD_ADMIN_TOKEN` (the CLI already reads this variable). Requests must include header `X-Admin-Token` when any token is configured.
 - Service startup: `cargo run -p admin-api` applies migrations in `services/admin-api/migrations/` and exposes overrides + review queue routes under `/api/v1`. Operators can also run inside Docker by adding the same env vars to the container spec.
+- Audit logging: every override create/update/delete and review resolution writes to `audit_events` (Postgres). Each entry captures actor (from `created_by`/`decided_by` or `X-Admin-Actor` in future), action, target type/ID, and JSON payload; this table feeds SOC reporting and future Elasticsearch replication.
 - Health checks: `curl http://localhost:19000/health/ready` (readiness) and `/health/live` (liveness). Use `OD_ADMIN_URL` (default `http://localhost:19000`) to point `odctl override ...` commands at the service.
 
 ## 6. CLI (`odctl`) Usage
