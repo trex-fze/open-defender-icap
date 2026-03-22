@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: defender
+      POSTGRES_PASSWORD: defender
+      POSTGRES_DB: defender
+    ports:
+      - "5432:5432"
+
+  icap-adaptor:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/rust.Dockerfile
+    command: ["icap-adaptor"]
+    depends_on:
+      - redis
+      - postgres
+
+  policy-engine:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/rust.Dockerfile
+    command: ["policy-engine"]
+    depends_on:
+      - postgres
+
+  llm-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/rust.Dockerfile
+    command: ["llm-worker"]
+    depends_on:
+      - redis
+      - postgres
+
+  reclass-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/rust.Dockerfile
+    command: ["reclass-worker"]
+    depends_on:
+      - redis
+      - postgres
+
+  admin-api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/rust.Dockerfile
+    command: ["admin-api"]
+    ports:
+      - "19000:19000"
+    depends_on:
+      - redis
+      - postgres

@@ -1,0 +1,13 @@
+[package]
+name = "admin-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { version = "0.7.5", features = ["macros"] }
+serde = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+config-core = { path = "../../crates/config-core" }

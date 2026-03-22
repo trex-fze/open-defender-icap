@@ -1,0 +1,13 @@
+[package]
+name = "llm-worker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+common-types = { path = "../../crates/common-types" }
+config-core = { path = "../../crates/config-core" }

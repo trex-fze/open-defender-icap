@@ -1,0 +1,29 @@
+[workspace]
+members = [
+    "crates/common-types",
+    "crates/config-core",
+    "services/icap-adaptor",
+    "services/policy-engine",
+    "services/admin-api",
+    "workers/llm-worker",
+    "workers/reclass-worker",
+    "cli/odctl"
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+authors = ["open-defender-icap team"]
+
+[workspace.dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+url = "2.4.1"
+idna = "0.4.0"
+redis = { version = "0.24", features = ["tokio-comp"] }
