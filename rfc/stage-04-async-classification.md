@@ -9,7 +9,7 @@
 4. Enforce first-seen placeholder logic + review queue escalation.
 
 ## Checklist
-- [ ] Queue schema, producer/consumer contracts (Spec §9B, §15).
+- [x] Queue schema, producer/consumer contracts (Spec §9B, §15). *(Redis stream `classification-jobs` with adaptor publisher + LLM worker consumer.)*
 - [ ] LLM prompt + response validator per Spec §24 JSON schema.
 - [ ] Classification persistence + cache update workflow (Spec §11).
 - [ ] Reclassification triggers (low confidence, TTL expiry, taxonomy change) – Spec §16.

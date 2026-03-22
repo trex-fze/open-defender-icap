@@ -14,6 +14,8 @@ pub struct IcapConfig {
     pub metrics_port: u16,
     #[serde(default = "default_cache_channel")]
     pub cache_channel: String,
+    #[serde(default)]
+    pub job_queue: Option<JobQueueConfig>,
 }
 
 pub fn load() -> anyhow::Result<IcapConfig> {
@@ -35,4 +37,15 @@ const fn default_metrics_port() -> u16 {
 
 fn default_cache_channel() -> String {
     "od:cache:invalidate".to_string()
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct JobQueueConfig {
+    pub redis_url: String,
+    #[serde(default = "default_job_stream")]
+    pub stream: String,
+}
+
+fn default_job_stream() -> String {
+    "classification-jobs".to_string()
 }

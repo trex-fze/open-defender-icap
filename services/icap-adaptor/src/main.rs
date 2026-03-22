@@ -1,6 +1,7 @@
 mod cache;
 mod config;
 mod icap;
+mod jobs;
 mod metrics;
 mod normalizer;
 mod policy_client;
@@ -12,7 +13,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info, instrument, Level};
 
 use cache::CacheClient;
-use common_types::{PolicyAction, PolicyDecisionRequest};
+use common_types::{EntityLevel, PolicyAction, PolicyDecisionRequest};
+use jobs::{ClassificationJob, JobPublisher};
 use policy_client::PolicyClient;
 
 #[tokio::main]
@@ -33,6 +35,11 @@ async fn main() -> Result<()> {
         cfg.cache_channel.clone(),
     )?);
     let policy_client = Arc::new(PolicyClient::new(cfg.policy_endpoint.clone())?);
+    let job_publisher = cfg
+        .job_queue
+        .as_ref()
+        .map(|queue| JobPublisher::new(&queue.redis_url, queue.stream.clone()))
+        .transpose()?;
 
     let metrics_host = cfg.metrics_host.clone();
     let metrics_port = cfg.metrics_port;
@@ -47,9 +54,12 @@ async fn main() -> Result<()> {
         let cfg = cfg.clone();
         let cache = Arc::clone(&cache);
         let policy_client = Arc::clone(&policy_client);
+        let job_publisher = job_publisher.clone();
         info!(target = "svc-icap", ?peer, "accepted connection");
         tokio::spawn(async move {
-            if let Err(err) = handle_connection(socket, cfg, cache, policy_client).await {
+            if let Err(err) =
+                handle_connection(socket, cfg, cache, policy_client, job_publisher).await
+            {
                 error!(target = "svc-icap", error = %err, "connection handler failed");
             }
         });
@@ -62,6 +72,7 @@ async fn handle_connection(
     cfg: config::IcapConfig,
     cache: Arc<CacheClient>,
     policy_client: Arc<PolicyClient>,
+    job_publisher: Option<JobPublisher>,
 ) -> Result<()> {
     let mut buf = vec![0u8; cfg.preview_size.max(1024)];
     let n = socket.read(&mut buf).await?;
@@ -107,10 +118,44 @@ async fn handle_connection(
         decision
     };
 
+    if let Some(publisher) = &job_publisher {
+        if should_enqueue(&decision.action, decision.verdict.is_none()) {
+            if let Err(err) = publisher
+                .publish(&ClassificationJob {
+                    normalized_key: &normalized.normalized_key,
+                    entity_level: entity_level_str(&normalized.entity_level),
+                    hostname: &normalized.hostname,
+                    full_url: &normalized.full_url,
+                    trace_id: icap_req.trace_id.as_deref().unwrap_or(""),
+                })
+                .await
+            {
+                error!(target = "svc-icap", %err, "failed to publish classification job");
+            }
+        }
+    }
+
     let response = icap_response(&decision.action);
     socket.write_all(response.as_bytes()).await?;
     socket.shutdown().await?;
     Ok(())
+}
+
+fn should_enqueue(action: &PolicyAction, missing_verdict: bool) -> bool {
+    missing_verdict
+        || matches!(
+            action,
+            PolicyAction::Review | PolicyAction::RequireApproval | PolicyAction::Warn
+        )
+}
+
+fn entity_level_str(level: &EntityLevel) -> &'static str {
+    match level {
+        EntityLevel::Domain => "domain",
+        EntityLevel::Subdomain => "subdomain",
+        EntityLevel::Url => "url",
+        EntityLevel::Page => "page",
+    }
 }
 
 fn icap_response(action: &PolicyAction) -> String {

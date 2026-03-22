@@ -21,7 +21,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 5. **Seed taxonomy**: `odctl taxonomy seed` to populate initial categories (Stage 3+).
 
 ## 3. Operating the ICAP Adaptor
-- Config file: `config/icap.json` (host/port, preview size, Redis URL, policy endpoint, metrics host/port, cache invalidation channel). `cache_channel` defaults to `od:cache:invalidate` and controls the Redis pub/sub topic used for cache flush notifications.
+- Config file: `config/icap.json` (host/port, preview size, Redis URL, policy endpoint, metrics host/port, cache invalidation channel, optional `job_queue`). `cache_channel` defaults to `od:cache:invalidate` and controls the Redis pub/sub topic used for cache flush notifications. When `job_queue` is configured, the adaptor publishes classification jobs to the specified Redis stream for Stage 4 LLM workers.
 - Key env vars: `OD_CONFIG_JSON` for containerized deployments; `RUST_LOG` for logging levels.
 - Start service: `cargo run -p icap-adaptor` (dev) or via Docker image built with `deploy/docker/rust.Dockerfile`.
 - Monitoring: tail `target/debug/icap-adaptor` logs and scrape Prometheus metrics from `http://<metrics_host>:<metrics_port>/metrics` (default `19005`).

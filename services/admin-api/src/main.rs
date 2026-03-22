@@ -953,7 +953,7 @@ mod tests {
         payload.scope_type = "device".into();
         let err = validate_override_payload(payload).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        assert!(err.1 .message.contains("scope_type"));
+        assert!(err.1.message.contains("scope_type"));
     }
 
     #[test]
