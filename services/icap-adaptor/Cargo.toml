@@ -19,3 +19,4 @@ redis = { workspace = true }
 prometheus = { workspace = true }
 once_cell = { workspace = true }
 axum = { version = "0.7", features = ["macros"] }
+futures = "0.3"

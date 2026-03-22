@@ -12,6 +12,8 @@ pub struct IcapConfig {
     pub metrics_host: String,
     #[serde(default = "default_metrics_port")]
     pub metrics_port: u16,
+    #[serde(default = "default_cache_channel")]
+    pub cache_channel: String,
 }
 
 pub fn load() -> anyhow::Result<IcapConfig> {
@@ -29,4 +31,8 @@ fn default_metrics_host() -> String {
 
 const fn default_metrics_port() -> u16 {
     19005
+}
+
+fn default_cache_channel() -> String {
+    "od:cache:invalidate".to_string()
 }

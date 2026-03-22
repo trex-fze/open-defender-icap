@@ -28,7 +28,10 @@ async fn main() -> Result<()> {
     let listener = TcpListener::bind(&addr).await?;
     info!(target = "svc-icap", %addr, preview_size = cfg.preview_size, "ICAP adaptor listening");
 
-    let cache = Arc::new(CacheClient::new(cfg.redis_url.clone())?);
+    let cache = Arc::new(CacheClient::new(
+        cfg.redis_url.clone(),
+        cfg.cache_channel.clone(),
+    )?);
     let policy_client = Arc::new(PolicyClient::new(cfg.policy_endpoint.clone())?);
 
     let metrics_host = cfg.metrics_host.clone();

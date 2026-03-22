@@ -10,9 +10,9 @@
 
 ## Checklist
 - [ ] Schema + migrations for entities listed in Spec §20 (`classifications`, `overrides`, `review_queue`, etc.). *(Overrides + review_queue tables landed; classifications/audit artifacts still open.)*
-- [ ] Override APIs (create/update/delete, scope validation) – Spec §23.4. *(Create/list/delete live behind admin token; update + scope validation outstanding.)*
+- [x] Override APIs (create/update/delete, scope validation) – Spec §23.4. *(Admin API now validates scopes/actions, supports PUT + DELETE, and emits cache invalidations; CLI/UI follow-ups pending.)*
 - [ ] Review queue endpoints & SLA metrics – Spec §§14, 16. *(List + resolve endpoints wired; SLA metrics + worker hooks TBD.)*
-- [ ] Cache invalidation hooks on DB changes – Spec §11.
+- [x] Cache invalidation hooks on DB changes – Spec §11. *(Admin API purges Redis keys + publishes events; ICAP adaptor subscribes and clears local caches.)*
 - [ ] Audit event pipeline (DB + Elasticsearch) – Spec §17.
 - [ ] Unit/integration tests for persistence logic – Spec §24–26.
 

@@ -21,7 +21,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 5. **Seed taxonomy**: `odctl taxonomy seed` to populate initial categories (Stage 3+).
 
 ## 3. Operating the ICAP Adaptor
-- Config file: `config/icap.json` (host/port, preview size, Redis URL, policy endpoint, metrics host/port).
+- Config file: `config/icap.json` (host/port, preview size, Redis URL, policy endpoint, metrics host/port, cache invalidation channel). `cache_channel` defaults to `od:cache:invalidate` and controls the Redis pub/sub topic used for cache flush notifications.
 - Key env vars: `OD_CONFIG_JSON` for containerized deployments; `RUST_LOG` for logging levels.
 - Start service: `cargo run -p icap-adaptor` (dev) or via Docker image built with `deploy/docker/rust.Dockerfile`.
 - Monitoring: tail `target/debug/icap-adaptor` logs and scrape Prometheus metrics from `http://<metrics_host>:<metrics_port>/metrics` (default `19005`).
@@ -33,7 +33,8 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - Future operations: manage policies via Admin API/UI/CLI; run simulations for policy changes.
 
 ## 5. Admin API & Overrides
-- Config file: `config/admin-api.json` controls host/port, optional `database_url`, and optional `admin_token`. Leave `database_url` as `null` for check-ins, but set either `database_url` in the file or `OD_ADMIN_DATABASE_URL`/`DATABASE_URL` env vars in deployment shells; the service refuses to start without one of these values.
+- Config file: `config/admin-api.json` controls host/port, optional `database_url`, optional `admin_token`, and cache invalidation wiring (`redis_url`, `cache_channel`). Leave `database_url` as `null` for check-ins, but set either `database_url` in the file or `OD_ADMIN_DATABASE_URL`/`DATABASE_URL` env vars in deployment shells; the service refuses to start without one of these values.
+- Cache invalidation: when `redis_url` is configured (or `OD_CACHE_REDIS_URL` env var is set) the Admin API publishes override/review updates to the `cache_channel` (defaults to `od:cache:invalidate`) and deletes the matching Redis keys before returning to the client. Without Redis configured the API logs a warning and skips invalidation, which means cached policy decisions may take up to 5 minutes to expire.
 - Admin authentication: set `admin_token` in the config or provide `OD_ADMIN_TOKEN` (the CLI already reads this variable). Requests must include header `X-Admin-Token` when any token is configured.
 - Service startup: `cargo run -p admin-api` applies migrations in `services/admin-api/migrations/` and exposes overrides + review queue routes under `/api/v1`. Operators can also run inside Docker by adding the same env vars to the container spec.
 - Health checks: `curl http://localhost:19000/health/ready` (readiness) and `/health/live` (liveness). Use `OD_ADMIN_URL` (default `http://localhost:19000`) to point `odctl override ...` commands at the service.

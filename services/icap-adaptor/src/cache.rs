@@ -1,10 +1,12 @@
 use anyhow::Result;
 use common_types::PolicyDecision;
+use futures::StreamExt;
 use redis::AsyncCommands;
+use serde::Deserialize;
 use serde_json;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{sync::RwLock, time::sleep};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Clone)]
 pub struct CacheClient {
@@ -19,16 +21,28 @@ struct CacheEntry {
 }
 
 impl CacheClient {
-    pub fn new(redis_url: Option<String>) -> Result<Self> {
+    pub fn new(redis_url: Option<String>, channel: String) -> Result<Self> {
         let redis = if let Some(url) = redis_url {
             Some(redis::Client::open(url)?)
         } else {
             None
         };
-        Ok(Self {
+        let client = Self {
             memory: Arc::new(RwLock::new(HashMap::new())),
-            redis,
-        })
+            redis: redis.clone(),
+        };
+
+        if let Some(redis_client) = redis {
+            let memory = Arc::clone(&client.memory);
+            tokio::spawn(async move {
+                if let Err(err) = Self::listen_for_invalidation(redis_client, memory, channel).await
+                {
+                    warn!(target = "svc-icap", %err, "cache invalidation subscriber exited");
+                }
+            });
+        }
+
+        Ok(client)
     }
 
     pub async fn get(&self, key: &str) -> Result<Option<PolicyDecision>> {
@@ -120,6 +134,146 @@ impl CacheClient {
 
         Ok(())
     }
+
+    async fn listen_for_invalidation(
+        redis: redis::Client,
+        memory: Arc<RwLock<HashMap<String, CacheEntry>>>,
+        channel: String,
+    ) -> Result<()> {
+        loop {
+            match redis.get_async_connection().await {
+                Ok(conn) => {
+                    let mut pubsub = conn.into_pubsub();
+                    if let Err(err) = pubsub.subscribe(&channel).await {
+                        warn!(target = "svc-icap", %err, channel, "failed to subscribe to cache invalidation channel");
+                        sleep(Duration::from_millis(1500)).await;
+                        continue;
+                    }
+
+                    if let Err(err) = Self::consume_messages(&mut pubsub, &memory).await {
+                        warn!(target = "svc-icap", %err, "cache invalidation listener error");
+                        sleep(Duration::from_millis(1000)).await;
+                    }
+                }
+                Err(err) => {
+                    warn!(target = "svc-icap", %err, "cache invalidation redis connection failed");
+                    sleep(Duration::from_millis(1500)).await;
+                }
+            }
+        }
+        #[allow(unreachable_code)]
+        Ok(())
+    }
+
+    async fn consume_messages(
+        pubsub: &mut redis::aio::PubSub,
+        memory: &Arc<RwLock<HashMap<String, CacheEntry>>>,
+    ) -> redis::RedisResult<()> {
+        let mut stream = pubsub.on_message();
+        while let Some(msg) = stream.next().await {
+            let payload: String = msg.get_payload()?;
+            if let Err(err) = Self::apply_invalidation(memory, &payload).await {
+                warn!(target = "svc-icap", %err, "cache invalidation payload failed");
+            }
+        }
+        Ok(())
+    }
+
+    async fn apply_invalidation(
+        memory: &Arc<RwLock<HashMap<String, CacheEntry>>>,
+        payload: &str,
+    ) -> Result<()> {
+        let event: CacheInvalidationEvent = serde_json::from_str(payload)?;
+        match event {
+            CacheInvalidationEvent::Override {
+                scope_type,
+                scope_value,
+            } => Self::invalidate_scope(memory, &scope_type, &scope_value).await,
+            CacheInvalidationEvent::Review { normalized_key } => {
+                Self::invalidate_key(memory, &normalized_key).await
+            }
+        }
+    }
+
+    async fn invalidate_scope(
+        memory: &Arc<RwLock<HashMap<String, CacheEntry>>>,
+        scope_type: &str,
+        scope_value: &str,
+    ) -> Result<()> {
+        let mut store = memory.write().await;
+        if scope_type != "domain" {
+            let removed = store.len();
+            store.clear();
+            info!(
+                target = "svc-icap",
+                removed, scope_type, "cleared cache for non-domain scope override"
+            );
+            return Ok(());
+        }
+
+        let (wildcard, value) = match scope_value.strip_prefix("*.") {
+            Some(rest) => (true, rest),
+            None => (false, scope_value),
+        };
+
+        let before = store.len();
+        store.retain(|key, _| !key_matches_domain_scope(key, value, wildcard));
+        let removed = before.saturating_sub(store.len());
+        info!(
+            target = "svc-icap",
+            removed,
+            scope = scope_value,
+            "invalidated domain scope cache entries"
+        );
+        Ok(())
+    }
+
+    async fn invalidate_key(
+        memory: &Arc<RwLock<HashMap<String, CacheEntry>>>,
+        normalized_key: &str,
+    ) -> Result<()> {
+        let mut store = memory.write().await;
+        if store.remove(normalized_key).is_some() {
+            info!(
+                target = "svc-icap",
+                normalized_key, "invalidated cache entry"
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum CacheInvalidationEvent {
+    Override {
+        scope_type: String,
+        scope_value: String,
+    },
+    Review {
+        normalized_key: String,
+    },
+}
+
+fn key_matches_domain_scope(key: &str, scope_value: &str, wildcard: bool) -> bool {
+    if let Some(host) = key.strip_prefix("domain:") {
+        return host == scope_value;
+    }
+
+    if let Some(host) = key.strip_prefix("subdomain:") {
+        if wildcard {
+            return host == scope_value || host.ends_with(scope_value);
+        }
+        if host == scope_value {
+            return true;
+        }
+        let suffix = format!(".{}", scope_value);
+        if host.ends_with(&suffix) {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
