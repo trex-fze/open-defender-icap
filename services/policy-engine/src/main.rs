@@ -19,7 +19,7 @@ use models::{
 };
 use policy_dsl::PolicyDocument;
 use sqlx::postgres::PgPoolOptions;
-use std::{net::SocketAddr, sync::Arc};
+use std::{env, net::SocketAddr, sync::Arc};
 use store::PolicyStore;
 use tokio::net::TcpListener;
 use tracing::{info, Level};
@@ -38,7 +38,17 @@ async fn main() -> Result<()> {
         .init();
 
     let cfg = config::load()?;
-    let evaluator = if let Some(db_url) = cfg.database_url.clone() {
+    let db_url = cfg
+        .database_url
+        .clone()
+        .or_else(|| env::var("OD_POLICY_DATABASE_URL").ok())
+        .or_else(|| env::var("DATABASE_URL").ok());
+    let admin_token = cfg
+        .admin_token
+        .clone()
+        .or_else(|| env::var("OD_POLICY_ADMIN_TOKEN").ok());
+
+    let evaluator = if let Some(db_url) = db_url {
         let pool = PgPoolOptions::new()
             .max_connections(5)
             .connect(&db_url)
@@ -70,7 +80,7 @@ async fn main() -> Result<()> {
         .with_state(state.clone())
         .layer(middleware::from_fn_with_state(
             AdminAuth {
-                token: cfg.admin_token.clone(),
+                token: admin_token,
             },
             enforce_admin,
         ));

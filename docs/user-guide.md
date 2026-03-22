@@ -27,7 +27,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - Monitoring: tail `target/debug/icap-adaptor` logs and scrape Prometheus metrics from `http://<metrics_host>:<metrics_port>/metrics` (default `19005`).
 
 ## 4. Using the Policy Engine
-- Config file: `config/policy-engine.json` (host/port, DSL path, optional `database_url`, optional `admin_token`). Leave `database_url` as `null` for file-backed mode; set to a Postgres connection string to enable persistent storage. When `admin_token` is set, admin APIs require header `X-Admin-Token` (CLI reads `OD_ADMIN_TOKEN`).
+- Config file: `config/policy-engine.json` (host/port, DSL path, optional `database_url`, optional `admin_token`). Leave `database_url` as `null` for file-backed mode; set to a Postgres connection string (or export `OD_POLICY_DATABASE_URL`/`DATABASE_URL`) to enable persistent storage. When `admin_token` is set—either in the file or via `OD_POLICY_ADMIN_TOKEN`—admin APIs require header `X-Admin-Token` (CLI reads `OD_ADMIN_TOKEN`).
 - Policies reside in `config/policies.json`; `GET /api/v1/policies` lists active rules, `POST /api/v1/policies/reload` hot-reloads from the DSL/DB, `POST /api/v1/policies` (DB mode only) creates a new policy document, and `POST /api/v1/policies/simulate` evaluates a sample request without enforcing it.
 - `cargo run -p policy-engine` starts REST API with `/api/v1/decision` + health endpoints. On startup the service applies migrations in `services/policy-engine/migrations/` and seeds from the DSL file if the database is empty.
 - Future operations: manage policies via Admin API/UI/CLI; run simulations for policy changes.

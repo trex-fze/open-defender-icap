@@ -99,6 +99,8 @@ services:
     command: ["policy-engine"]
     environment:
       RUST_LOG: ${RUST_LOG:-info}
+      OD_POLICY_DATABASE_URL: ${OD_POLICY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender}
+      OD_POLICY_ADMIN_TOKEN: ${OD_POLICY_ADMIN_TOKEN:-changeme-admin}
     ports:
       - "19010:19010"
     volumes:
