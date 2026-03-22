@@ -13,3 +13,7 @@ common-types = { path = "../../crates/common-types" }
 config-core = { path = "../../crates/config-core" }
 redis = { workspace = true }
 tokio-stream = "0.1"
+serde_json = { workspace = true }
+sqlx = { version = "0.7", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "macros"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+chrono = "0.4"

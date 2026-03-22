@@ -2,5 +2,6 @@
   "queue_name": "classification-jobs",
   "redis_url": "redis://redis:6379",
   "cache_channel": "od:cache:invalidate",
-  "stream": "classification-jobs"
+  "stream": "classification-jobs",
+  "database_url": "postgres://defender:defender@postgres:5432/defender"
 }
