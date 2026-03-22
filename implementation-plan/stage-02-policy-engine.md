@@ -8,12 +8,15 @@
 ## Work Breakdown
 | Task ID | Description | Owner | Dependencies | Status | Notes |
 | --- | --- | --- | --- | --- | --- |
-| S2-T1 | Finalize DSL syntax + grammar | Policy Architect | Stage 1 complete | ✅ | DSL defined in `crates/policy-dsl` + `config/policies.json` |
-| S2-T2 | Implement DSL parser/compiler crate | Policy Eng | S2-T1 | ✅ | `policy-dsl` crate with unit tests |
-| S2-T3 | Create Postgres schema + migrations for `policies`, `policy_rules` | Backend Eng | S2-T1 | ⬜ | Migration evidence required |
-| S2-T4 | Extend policy-engine service with persistence + evaluator | Policy Eng | S2-T2/T3 | 🟡 | In-memory evaluator + reload/list APIs complete; DB persistence pending |
-| S2-T5 | Implement policy CRUD + simulation APIs with auth | Backend Eng | S2-T4 | ⬜ | OpenAPI + auth tests |
-| S2-T6 | Add audit logging for policy changes | Security Eng | S2-T5 | ⬜ | Event samples |
+| Task ID | Description | Owner | Dependencies | Status | Notes |
+| S2-T1 | Finalize DSL syntax + grammar | Policy Architect | Stage 1 complete | ✅ | DSL defined in `crates/policy-dsl` + `config/policies.json`. |
+| S2-T2 | Implement DSL parser/compiler crate | Policy Eng | S2-T1 | ✅ | `policy-dsl` crate, unit tests ensure parsing success. |
+| S2-T3 | Create Postgres schema + migrations for `policies`, `policy_rules` | Backend Eng | S2-T1 | ⬜ | Define SQL migrations, integrate with `odctl migrate run`. |
+| S2-T4 | Extend policy-engine service with persistence + evaluator | Policy Eng | S2-T2/T3 | 🟡 | File-backed evaluator + reload/list done; DB hot-reload + caching pending. |
+| S2-T5 | Implement policy CRUD + simulation APIs with auth | Backend Eng | S2-T4 | ⬜ | Requires RBAC + trace output. |
+| S2-T6 | Add audit logging for policy changes | Security Eng | S2-T5 | ⬜ | Write to Postgres + Elasticsearch. |
+| S2-T7 | Document and expose `/api/v1/policies` for UI/CLI | Tech Writer | S2-T4 | ✅ | Updated architecture + user guide referencing endpoints. |
+| S2-T8 | CLI/UX tooling for policy reload/list | DevTools Eng | S2-T4 | ⬜ | Add `odctl policy list/reload`. |
 
 ## Evidence Plan
 - DSL spec doc, migration logs, OpenAPI schema, CI test reports.
