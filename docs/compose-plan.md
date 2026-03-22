@@ -73,11 +73,11 @@ This document records the design for the next iteration of the containerized dev
 ## Open Questions / Future Work
 - Do we need Squid in the initial stack or can ICAP adaptor be called directly? (Assumption: include Squid now to align with spec.)
 - When to introduce Elasticsearch/Kibana for real vs. placeholder containers? (Plan: stub in dev/test, allow disabling via `profiles`.)
-- Need a decision on certificate handling (Squid SSL bump) before exposing to developers; for now we’ll ship default self-signed certs stored under `deploy/docker/squid/`.
+- Certificate handling now automated via `make gen-certs`; revisit when production CAs/cert rotation are required.
 
 ## Next Steps
 1. (Done) Create `.env.example`, update `.gitignore` for `.env`.
 2. (Done) Add new compose files and `deploy/docker/README.md` matching this plan.
-3. Add helper scripts/make targets (`make compose-up`, `make compose-smoke`).
+3. (Done) Add helper scripts/make targets (`make compose-up`, `make compose-smoke`) and Squid cert generation script.
 4. (Done) Update docs (`docs/user-guide.md`, `docs/architecture.md`) to reference the new flows.
 5. (Done) Implement odctl migration/seed commands to automate DB prep in the compose runner.

@@ -71,8 +71,8 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - Build: `npm run build`; deploy static assets behind reverse proxy.
 
 ## 8. Docker & Compose Workflows
-- **Prep**: Copy `.env.example` → `.env`, edit tokens/passwords, then `cd deploy/docker`.
-- **Local dev**: `docker compose up --build` starts Redis, Postgres, ICAP adaptor, Policy engine, Admin API, Squid, workers, Kibana, Prometheus, React UI, and the `odctl` runner. Logs live under `docker compose logs -f <service>`.
+- **Prep**: Copy `.env.example` → `.env`, edit tokens/passwords, then run `make gen-certs` (generates Squid CA/server certs under `deploy/docker/squid/certs/`; import `ca.pem` into any client trust store that should trust the proxy).
+- **Local dev**: `make compose-up` (or `docker compose up --build` inside `deploy/docker/`) starts Redis, Postgres, ICAP adaptor, Policy engine, Admin API, Squid, workers, Kibana, Prometheus, React UI, and the `odctl` runner. Use `make compose-logs SERVICE=icap-adaptor` to tail logs quickly.
 - **Smoke stack**: `docker compose -f docker-compose.smoke.yml up --build --abort-on-container-exit` spins up only Redis/Postgres/core services plus a smoke-tests container that runs `odctl smoke`.
 - **CI/integration**: `docker compose -f docker-compose.yml -f docker-compose.test.yml up --abort-on-container-exit` runs the same smoke harness but can skip heavy services via profiles.
 - **Health checks**: `curl http://localhost:19000/health/ready`, `curl http://localhost:19010/health/ready`, `redis-cli -h localhost ping`, `curl http://localhost:5601/status` (Kibana), `curl http://localhost:9090/-/ready` (Prometheus).

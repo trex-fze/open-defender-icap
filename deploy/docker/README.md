@@ -25,15 +25,30 @@ docker compose -f docker-compose.smoke.yml up --build --abort-on-container-exit
 docker compose run --rm odctl-runner odctl override list
 ```
 
+### Helper targets
+For convenience, the repo root exposes a `Makefile` wrapper:
+
+```bash
+make gen-certs            # Generate Squid CA/server certs under deploy/docker/squid/certs/
+make compose-up           # Equivalent to docker compose up --build
+make compose-down         # Stops the stack
+make compose-smoke        # Runs the minimal smoke stack (abort on completion)
+make compose-test         # Runs the CI/test stack (docker-compose.yml + test overlay)
+make compose-logs SERVICE=admin-api   # Tail logs for a specific service
+```
+
+Run `make gen-certs` once before the first `compose-up`; import `deploy/docker/squid/certs/ca.pem` into any client trust store hitting the Squid proxy.
+
 ## Startup sequence
 1. Ensure Docker Desktop/Engine is running and ports 1344, 19000, 19001, 19005, 19010, 3128, 5432, 6379, 9200, 5601, 9090 are free.
 2. Copy `.env.example` → `.env` (edit tokens/passwords as needed).
-3. `docker compose up -d postgres redis` and wait for healthchecks, or just run `docker compose up --build` to start everything.
-4. Run migrations/seeds as needed:
+3. Run `make gen-certs` once to generate Squid certificates (stores them under `deploy/docker/squid/certs/`).
+4. `docker compose up -d postgres redis` and wait for healthchecks, or just run `docker compose up --build` / `make compose-up` to start everything.
+5. Run migrations/seeds as needed:
    - `docker compose run --rm odctl-runner odctl migrate run all`
    - `docker compose run --rm odctl-runner odctl seed policies config/policies.json default compose`
-5. Once services are healthy, run `docker compose run --rm odctl-runner odctl smoke icap-adaptor:1344` (already performed automatically in the test/smoke stacks).
-6. Access:
+6. Once services are healthy, run `docker compose run --rm odctl-runner odctl smoke icap-adaptor:1344` (already performed automatically in the test/smoke stacks).
+7. Access:
    - Admin API: http://localhost:19000/health/ready
    - Policy Engine: http://localhost:19010/health/ready
    - Kibana: http://localhost:5601 (user `elastic`, password from `.env`)

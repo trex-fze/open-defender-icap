@@ -7,3 +7,5 @@ web-admin/dist/
 **/*.log
 docker-data/
 .env
+deploy/docker/squid/certs/*
+!deploy/docker/squid/certs/.gitkeep
