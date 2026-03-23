@@ -17,3 +17,10 @@ serde_json = { workspace = true }
 sqlx = { version = "0.7", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "macros"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 chrono = "0.4"
+reqwest = { version = "0.11", features = ["json", "default-tls"] }
+prometheus = { workspace = true }
+once_cell = { workspace = true }
+axum = { version = "0.7", features = ["macros"] }
+
+[dev-dependencies]
+portpicker = "0.1"

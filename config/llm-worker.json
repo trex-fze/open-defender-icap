@@ -3,5 +3,9 @@
   "redis_url": "redis://redis:6379",
   "cache_channel": "od:cache:invalidate",
   "stream": "classification-jobs",
-  "database_url": "postgres://defender:defender@postgres:5432/defender"
+  "database_url": "postgres://defender:defender@postgres:5432/defender",
+  "llm_endpoint": "http://llm-service:8080/classify",
+  "llm_api_key": "changeme-llm",
+  "metrics_host": "0.0.0.0",
+  "metrics_port": 19015
 }

@@ -984,10 +984,15 @@ name = "llm-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "chrono",
  "common-types",
  "config-core",
+ "once_cell",
+ "portpicker",
+ "prometheus",
  "redis",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",
@@ -1341,6 +1346,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "portpicker"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be97d76faf1bfab666e1375477b23fde79eccf0276e9b63b92a39d676a889ba9"
+dependencies = [
+ "rand",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1423,13 +1437,20 @@ name = "reclass-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
+ "chrono",
  "config-core",
+ "once_cell",
+ "prometheus",
  "redis",
  "serde",
+ "serde_json",
+ "sqlx",
  "tokio",
- "tokio-stream",
  "tracing",
  "tracing-subscriber",
+ "url",
+ "uuid",
 ]
 
 [[package]]
