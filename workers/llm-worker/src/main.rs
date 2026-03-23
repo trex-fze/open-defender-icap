@@ -521,6 +521,7 @@ async fn invoke_llm(
     job: &ClassificationJobPayload,
 ) -> Result<LlmResponse> {
     metrics::record_llm_invocation();
+    metrics::record_provider_invocation(&provider.name);
     let start = Instant::now();
     let result = match provider.kind {
         ProviderKind::Ollama => invoke_ollama(provider, job).await,
@@ -534,7 +535,9 @@ async fn invoke_llm(
 
     match result {
         Ok(response) => {
-            metrics::observe_llm_latency(start.elapsed().as_secs_f64());
+            let elapsed = start.elapsed().as_secs_f64();
+            metrics::observe_llm_latency(elapsed);
+            metrics::observe_provider_latency(&provider.name, elapsed);
             Ok(response)
         }
         Err(err) => {
@@ -544,8 +547,10 @@ async fn invoke_llm(
                 .unwrap_or(false)
             {
                 metrics::record_llm_timeout();
+                metrics::record_provider_timeout(&provider.name);
             }
             metrics::record_llm_failure();
+            metrics::record_provider_failure(&provider.name);
             Err(err)
         }
     }
