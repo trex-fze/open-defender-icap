@@ -25,6 +25,7 @@ services:
       - "5432:5432"
     volumes:
       - pg-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-defender}"]
       interval: 10s
@@ -58,8 +59,7 @@ services:
     restart: unless-stopped
     environment:
       ELASTICSEARCH_HOSTS: http://elasticsearch:9200
-      ELASTICSEARCH_USERNAME: elastic
-      ELASTICSEARCH_PASSWORD: ${ELASTIC_PASSWORD:-changeme-elastic}
+      ELASTICSEARCH_SERVICEACCOUNTTOKEN: ${ELASTICSEARCH_SERVICEACCOUNTTOKEN:-AAEAAWVsYXN0aWMva2liYW5hL29kLXN0YWNrOm1WVXNleUJCVDFPSENsYWpRNk9YbGc}
     ports:
       - "5601:5601"
     depends_on:
@@ -100,7 +100,7 @@ services:
     command: ["policy-engine"]
     environment:
       RUST_LOG: ${RUST_LOG:-info}
-      OD_POLICY_DATABASE_URL: ${OD_POLICY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender}
+      OD_POLICY_DATABASE_URL: ${OD_POLICY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_policy}
       OD_POLICY_ADMIN_TOKEN: ${OD_POLICY_ADMIN_TOKEN:-changeme-admin}
     ports:
       - "19010:19010"
@@ -117,7 +117,7 @@ services:
     command: ["admin-api"]
     environment:
       RUST_LOG: ${RUST_LOG:-info}
-      OD_ADMIN_DATABASE_URL: ${OD_ADMIN_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender}
+      OD_ADMIN_DATABASE_URL: ${OD_ADMIN_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_admin}
       OD_ADMIN_TOKEN: ${OD_ADMIN_TOKEN:-changeme-admin}
       OD_CACHE_REDIS_URL: ${OD_CACHE_REDIS_URL:-redis://redis:6379}
       OD_CACHE_CHANNEL: ${OD_CACHE_CHANNEL:-od:cache:invalidate}
@@ -154,6 +154,8 @@ services:
         condition: service_healthy
       admin-api:
         condition: service_started
+      mock-openai:
+        condition: service_started
 
   event-ingester:
     build:
@@ -173,6 +175,30 @@ services:
     depends_on:
       elasticsearch:
         condition: service_healthy
+
+  mock-openai:
+    build:
+      context: ./mock-openai
+    restart: unless-stopped
+    environment:
+      MOCK_LLM_CATEGORY: ${MOCK_LLM_CATEGORY:-Testing}
+      MOCK_LLM_SUBCATEGORY: ${MOCK_LLM_SUBCATEGORY:-LLM}
+      MOCK_LLM_RISK: ${MOCK_LLM_RISK:-medium}
+      MOCK_LLM_ACTION: ${MOCK_LLM_ACTION:-Review}
+      MOCK_LLM_CONFIDENCE: ${MOCK_LLM_CONFIDENCE:-0.85}
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.12.1
+    restart: unless-stopped
+    environment:
+      LS_JAVA_OPTS: "-Xms256m -Xmx256m"
+      OD_INGEST_ENDPOINT: ${OD_INGEST_ENDPOINT:-http://event-ingester:19100}
+      OD_FILEBEAT_SECRET: ${OD_FILEBEAT_SECRET:-changeme-ingest}
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+    depends_on:
+      event-ingester:
+        condition: service_started
 
   reclass-worker:
     build:
@@ -230,6 +256,8 @@ services:
       OD_INGEST_ENDPOINT: ${OD_INGEST_ENDPOINT:-http://event-ingester:19100}
       OD_FILEBEAT_SECRET: ${OD_FILEBEAT_SECRET:-changeme-ingest}
     depends_on:
+      logstash:
+        condition: service_started
       event-ingester:
         condition: service_started
       squid:
@@ -244,8 +272,8 @@ services:
       OD_ADMIN_URL: ${OD_ADMIN_URL:-http://admin-api:19000}
       OD_POLICY_URL: ${OD_POLICY_URL:-http://policy-engine:19010}
       OD_ADMIN_TOKEN: ${OD_ADMIN_TOKEN:-changeme-admin}
-      OD_ADMIN_DATABASE_URL: ${OD_ADMIN_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender}
-      OD_POLICY_DATABASE_URL: ${OD_POLICY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender}
+      OD_ADMIN_DATABASE_URL: ${OD_ADMIN_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_admin}
+      OD_POLICY_DATABASE_URL: ${OD_POLICY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_policy}
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
       - ../../config:/app/config:ro

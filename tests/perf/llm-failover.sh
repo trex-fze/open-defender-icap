@@ -6,7 +6,7 @@ set -euo pipefail
 
 STACK_DIR=${STACK_DIR:-"$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)/deploy/docker"}
 REDIS_URL=${REDIS_URL:-"redis://127.0.0.1:6379"}
-DATABASE_URL=${DATABASE_URL:-"postgres://defender:defender@127.0.0.1:5432/defender"}
+DATABASE_URL=${DATABASE_URL:-"postgres://defender:defender@127.0.0.1:5432/defender_admin"}
 WAIT_SECONDS=${WAIT_SECONDS:-30}
 
 command -v redis-cli >/dev/null || { echo "redis-cli required" >&2; exit 1; }
@@ -57,7 +57,7 @@ JSON
 )
 
 echo "[failover] Enqueueing job $JOB_KEY"
-redis-cli -u "$REDIS_URL" XADD classification-jobs * payload "$PAYLOAD" >/dev/null
+redis-cli -u "$REDIS_URL" XADD classification-jobs '*' payload "$PAYLOAD" >/dev/null
 
 echo "[failover] Waiting up to ${WAIT_SECONDS}s for classification"
 end=$((SECONDS + WAIT_SECONDS))

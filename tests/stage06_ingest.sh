@@ -40,7 +40,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
   -d "${payload}" \
   "${INGEST_URL}/ingest/filebeat" | grep -E '202|200' >/dev/null
 
-sleep 2
+sleep "${INGEST_WAIT_SECONDS:-5}"
 
 echo "[Stage06] Verifying document landed in Elasticsearch (${ELASTIC_URL})"
 count=$(curl -sS -u "${ELASTIC_USER}:${ELASTIC_PASS}" \

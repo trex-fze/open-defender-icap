@@ -487,13 +487,13 @@ async fn store_classification(
     .await?;
 
     let classification_id: Uuid = row.get("id");
-    let current_version: i64 = sqlx::query(
-        "SELECT COALESCE(MAX(version), 0) AS version FROM classification_versions WHERE classification_id = $1",
+    let current_version: i64 = sqlx::query_scalar::<_, Option<i32>>(
+        "SELECT MAX(version) FROM classification_versions WHERE classification_id = $1",
     )
     .bind(classification_id)
     .fetch_one(pool)
     .await?
-    .get::<i64, _>("version");
+    .unwrap_or(0) as i64;
     let next_version = current_version + 1;
 
     sqlx::query(

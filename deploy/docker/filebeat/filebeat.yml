@@ -22,12 +22,7 @@ processors:
   - add_host_metadata: ~
   - add_cloud_metadata: ~
 
-output.http:
-  hosts: ["${OD_INGEST_ENDPOINT:http://event-ingester:19100}"]
-  path: /ingest/filebeat
-  compression_level: 3
-  headers:
-    X-Filebeat-Secret: ${OD_FILEBEAT_SECRET:changeme-ingest}
-  timeout: 60s
+output.logstash:
+  hosts: ["logstash:5044"]
 
 logging.level: info

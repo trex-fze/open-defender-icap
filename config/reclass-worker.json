@@ -1,7 +1,7 @@
 {
   "redis_url": "redis://redis:6379",
   "job_stream": "classification-jobs",
-  "database_url": "postgres://defender:defender@postgres:5432/defender",
+  "database_url": "postgres://defender:defender@postgres:5432/defender_admin",
   "planner_interval_seconds": 60,
   "planner_batch_size": 200,
   "dispatcher_batch_size": 200,

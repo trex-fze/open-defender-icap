@@ -2,7 +2,7 @@
 set -euo pipefail
 
 : "${REDIS_URL:=redis://127.0.0.1:6379}"
-: "${DATABASE_URL:=postgres://defender:defender@127.0.0.1:5432/defender}"
+: "${DATABASE_URL:=postgres://defender:defender@127.0.0.1:5432/defender_admin}"
 
 command -v redis-cli >/dev/null || {
   echo "redis-cli is required" >&2
@@ -30,7 +30,7 @@ JSON
 )
 
 echo "[security] Enqueueing prompt-injection job ($JOB_KEY)"
-redis-cli -u "$REDIS_URL" XADD classification-jobs * payload "$INJECTION_PAYLOAD" >/dev/null
+redis-cli -u "$REDIS_URL" XADD classification-jobs '*' payload "$INJECTION_PAYLOAD" >/dev/null
 
 echo "[security] Waiting for llm-worker to persist classification"
 sleep 5
