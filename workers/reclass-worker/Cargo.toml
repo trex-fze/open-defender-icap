@@ -19,3 +19,6 @@ once_cell = { workspace = true }
 prometheus = { workspace = true }
 axum = { version = "0.7", features = ["macros"] }
 url = { workspace = true }
+
+[dev-dependencies]
+portpicker = "0.1"

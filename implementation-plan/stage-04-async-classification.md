@@ -13,4 +13,4 @@
 | S4-T3 | Build LLM worker (prompt builder, validator, persistence) | ML Eng | S4-T1 | ✅ | Worker sends prompts to configured LLM endpoint, validates responses, and persists classifications in Postgres |
 | S4-T4 | Reclassification worker w/ triggers | ML Eng | S4-T2 | ✅ | Inserts `reclassification_jobs` for stale TTLs and republishes jobs via Redis stream |
 | S4-T5 | Monitoring & metrics for workers | SRE | S4-T3 | ✅ | LLM + reclass workers expose Prometheus metrics/HTTP endpoints |
-| S4-T6 | Integration tests w/ mock LLM | QA | S4-T3 | ⏳ | Added dockerized Redis→LLM worker→Postgres test ensuring queue jobs persist classifications |
+| S4-T6 | Integration tests w/ mock LLM | QA | S4-T3 | ✅ | Dockerized Redis→LLM worker→Postgres test plus reclass planner/dispatcher coverage |

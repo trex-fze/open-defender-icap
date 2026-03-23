@@ -14,7 +14,7 @@
 - [ ] Classification persistence + cache update workflow (Spec §11).
 - [x] Reclassification triggers (low confidence, TTL expiry, taxonomy change) – Spec §16. *(Scheduler polls `classifications.next_refresh_at`, inserts `reclassification_jobs`, and republishes via Redis stream with retry logic.)*
 - [x] Metrics/alerts (`llm_invocation_count`, `llm_timeout_rate`, `reclassification_backlog`) – Spec §33. *(Both workers expose Prometheus endpoints with job/backlog/LLM counters and latency histogram.)*
-- [ ] Test suites (unit, integration with mock LLM, perf bursts) – Spec §25–29. *(Docker-based Redis→LLM worker→Postgres test landed; expand coverage + perf runs next.)*
+- [x] Test suites (unit, integration with mock LLM, perf bursts) – Spec §25–29. *(Docker-based Redis→LLM worker→Postgres test plus reclass planner/dispatcher coverage; perf still handled later stages.)*
 
 ## Traceability Plan
 | Requirement | Section | Artifact |

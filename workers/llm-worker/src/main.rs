@@ -344,10 +344,13 @@ async fn invoke_llm(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{extract::Json, response::IntoResponse, routing::post, Router};
+    use axum::{extract::Json, routing::post, Router};
     use portpicker::pick_unused_port;
     use serde_json::json;
-    use std::process::{Command, Stdio};
+    use std::{
+        process::{Command, Stdio},
+        sync::Arc,
+    };
     use tokio::{
         net::TcpListener,
         task::JoinHandle,
@@ -417,18 +420,92 @@ mod tests {
         Ok(())
     }
 
-    async fn spawn_mock_llm() -> (String, JoinHandle<()>) {
-        async fn handle(Json(_body): Json<serde_json::Value>) -> impl IntoResponse {
-            Json(json!({
-                "primary_category": "News / Media",
-                "subcategory": "National",
-                "risk_level": "low",
-                "confidence": 0.88,
-                "recommended_action": "Allow"
-            }))
-        }
+    #[tokio::test]
+    async fn fails_on_invalid_llm_response() -> Result<()> {
+        let (redis_guard, redis_port) = start_redis_container()?;
+        let redis_url = format!("redis://127.0.0.1:{}/", redis_port);
+        wait_for_redis(&redis_url).await?;
 
-        let app = Router::new().route("/classify", post(handle));
+        let (postgres_guard, pg_port) = start_postgres_container()?;
+        let database_url = format!(
+            "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+            pg_port
+        );
+        let pool = connect_postgres(&database_url).await?;
+        apply_migrations(&pool).await;
+
+        let (llm_endpoint, server_task) = spawn_llm_with_payload(json!({
+            "primary_category": "News / Media",
+            "subcategory": "National",
+            "risk_level": "low",
+            "confidence": 0.88,
+            "recommended_action": "DROP"
+        }))
+        .await;
+
+        let cfg = WorkerConfig {
+            queue_name: "classification-jobs".into(),
+            redis_url: redis_url.clone(),
+            cache_channel: "od:cache:invalidate".into(),
+            stream: "classification-jobs".into(),
+            database_url: database_url.clone(),
+            llm_endpoint,
+            llm_api_key: "test-key".into(),
+            metrics_host: "127.0.0.1".into(),
+            metrics_port: 0,
+        };
+
+        let consumer = JobConsumer::new(&cfg, pool.clone()).await.unwrap();
+        let consumer_handle = tokio::spawn(async move { consumer.run().await });
+
+        let job = ClassificationJobPayload {
+            normalized_key: "domain:invalid-llm.test".into(),
+            entity_level: "domain".into(),
+            hostname: "invalid-llm.test".into(),
+            full_url: "https://invalid-llm.test/".into(),
+            trace_id: "trace-invalid".into(),
+        };
+
+        sleep(Duration::from_millis(500)).await;
+        enqueue_job(&redis_url, &job).await.expect("enqueue job");
+
+        sleep(Duration::from_secs(3)).await;
+        let exists = classification_exists(&pool, &job.normalized_key)
+            .await
+            .expect("query classification");
+        assert!(
+            !exists,
+            "invalid LLM response should not persist classification"
+        );
+
+        consumer_handle.abort();
+        server_task.abort();
+        drop(redis_guard);
+        drop(postgres_guard);
+        Ok(())
+    }
+
+    async fn spawn_mock_llm() -> (String, JoinHandle<()>) {
+        spawn_llm_with_payload(json!({
+            "primary_category": "News / Media",
+            "subcategory": "National",
+            "risk_level": "low",
+            "confidence": 0.88,
+            "recommended_action": "Allow"
+        }))
+        .await
+    }
+
+    async fn spawn_llm_with_payload(payload: serde_json::Value) -> (String, JoinHandle<()>) {
+        let payload = Arc::new(payload);
+        let route_payload = Arc::clone(&payload);
+        let app = Router::new().route(
+            "/classify",
+            post(move |Json(_body): Json<serde_json::Value>| {
+                let route_payload = Arc::clone(&route_payload);
+                async move { Json((*route_payload).clone()) }
+            }),
+        );
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind mock llm");

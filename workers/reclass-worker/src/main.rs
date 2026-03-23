@@ -199,8 +199,8 @@ impl Planner {
         for row in &rows {
             let classification_id: Uuid = row.try_get("id")?;
             let normalized_key: String = row.try_get("normalized_key")?;
-            let ttl_seconds: i64 = row.try_get::<i64, _>("ttl_seconds")?;
-            let ttl = ttl_seconds.max(300);
+            let ttl_seconds: i32 = row.try_get::<i32, _>("ttl_seconds")?;
+            let ttl = i64::from(ttl_seconds).max(300);
             let next_refresh = Utc::now() + ChronoDuration::seconds(ttl);
 
             sqlx::query(
@@ -432,5 +432,253 @@ fn build_target(normalized_key: &str) -> Result<JobTarget> {
         _ => Err(anyhow!(
             "unsupported entity level {prefix} for key {normalized_key}"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use portpicker::pick_unused_port;
+    use serde_json::json;
+    use std::process::{Command, Stdio};
+    use tokio::time::{sleep, Duration, Instant};
+
+    #[tokio::test]
+    async fn planner_schedules_due_classifications() -> Result<()> {
+        let (pg_guard, pg_port) = start_postgres_container()?;
+        let database_url = format!(
+            "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+            pg_port
+        );
+        let pool = connect_postgres(&database_url).await?;
+        apply_migrations(&pool).await;
+
+        insert_classification(
+            &pool,
+            "domain:planner.test",
+            "planner.example.com",
+            "NOW() - INTERVAL '1 minute'",
+        )
+        .await?;
+
+        let planner = Planner::new(pool.clone(), 10, Duration::from_secs(1));
+        let planned = planner.plan_batch().await?;
+        assert_eq!(planned, 1);
+
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM reclassification_jobs WHERE normalized_key = $1",
+        )
+        .bind("domain:planner.test")
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(count, 1);
+
+        drop(pg_guard);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn dispatcher_publishes_jobs_to_stream() -> Result<()> {
+        let (pg_guard, pg_port) = start_postgres_container()?;
+        let database_url = format!(
+            "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+            pg_port
+        );
+        let pool = connect_postgres(&database_url).await?;
+        apply_migrations(&pool).await;
+
+        insert_classification(
+            &pool,
+            "domain:dispatcher.test",
+            "dispatcher.example.com",
+            "NOW() + INTERVAL '1 hour'",
+        )
+        .await?;
+
+        let job_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO reclassification_jobs (id, normalized_key, reason, status, created_at) VALUES ($1, $2, $3, 'pending', NOW())",
+        )
+        .bind(job_id)
+        .bind("domain:dispatcher.test")
+        .bind("unit-test")
+        .execute(&pool)
+        .await?;
+
+        let (redis_guard, redis_port) = start_redis_container()?;
+        let redis_url = format!("redis://127.0.0.1:{}/", redis_port);
+        wait_for_redis(&redis_url).await?;
+
+        let publisher = JobPublisher::new(&redis_url, "classification-jobs")?;
+        let dispatcher = Dispatcher::new(pool.clone(), publisher, 10);
+        let processed = dispatcher.dispatch_batch().await?;
+        assert_eq!(processed, 1);
+
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM reclassification_jobs WHERE id = $1")
+                .bind(job_id)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(status, "completed");
+
+        let mut conn = redis::Client::open(redis_url.clone())?
+            .get_async_connection()
+            .await?;
+        let stream_len: i64 = redis::cmd("XLEN")
+            .arg("classification-jobs")
+            .query_async(&mut conn)
+            .await?;
+        assert_eq!(stream_len, 1);
+
+        drop(redis_guard);
+        drop(pg_guard);
+        Ok(())
+    }
+
+    async fn insert_classification(
+        pool: &PgPool,
+        normalized_key: &str,
+        hostname: &str,
+        next_refresh_expr: &str,
+    ) -> Result<()> {
+        sqlx::query(&format!(
+            "INSERT INTO classifications (id, normalized_key, taxonomy_version, model_version, primary_category, subcategory, risk_level, recommended_action, confidence, sfw, flags, ttl_seconds, status, next_refresh_at) VALUES ($1, $2, 'v1', 'test', 'News', 'General', 'low', 'Allow', 0.8, true, $3, 3600, 'active', {})",
+            next_refresh_expr
+        ))
+        .bind(Uuid::new_v4())
+        .bind(normalized_key)
+        .bind(json!({"host": hostname}))
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn connect_postgres(database_url: &str) -> Result<PgPool> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            match PgPoolOptions::new()
+                .max_connections(5)
+                .connect(database_url)
+                .await
+            {
+                Ok(pool) => return Ok(pool),
+                Err(_err) if Instant::now() < deadline => {
+                    sleep(Duration::from_millis(250)).await;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+    }
+
+    async fn wait_for_redis(redis_url: &str) -> Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            match redis::Client::open(redis_url) {
+                Ok(client) => match client.get_async_connection().await {
+                    Ok(mut conn) => {
+                        if redis::cmd("PING")
+                            .query_async::<_, String>(&mut conn)
+                            .await
+                            .is_ok()
+                        {
+                            return Ok(());
+                        }
+                    }
+                    Err(_) => {}
+                },
+                Err(_) => {}
+            }
+
+            if Instant::now() > deadline {
+                anyhow::bail!("redis did not become ready");
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    }
+
+    async fn apply_migrations(pool: &PgPool) {
+        for ddl in [
+            include_str!("../../../services/admin-api/migrations/0003_classifications.sql"),
+            include_str!("../../../services/admin-api/migrations/0004_spec20_artifacts.sql"),
+        ] {
+            apply_sql_batch(pool, ddl).await.expect("apply migration");
+        }
+    }
+
+    async fn apply_sql_batch(pool: &PgPool, sql: &str) -> Result<()> {
+        for statement in sql.split(';') {
+            let trimmed = statement.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            sqlx::query(trimmed).execute(pool).await?;
+        }
+        Ok(())
+    }
+
+    struct DockerContainer {
+        id: String,
+    }
+
+    impl DockerContainer {
+        fn run(image: &str, args: Vec<String>) -> Result<Self> {
+            let mut cmd = Command::new("docker");
+            cmd.arg("run").arg("-d").arg("--rm");
+            for arg in args {
+                cmd.arg(arg);
+            }
+            cmd.arg(image);
+            let output = cmd
+                .output()
+                .with_context(|| format!("failed to launch docker image {image}"))?;
+            if !output.status.success() {
+                anyhow::bail!(
+                    "docker run failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            let id = String::from_utf8(output.stdout)
+                .context("failed to read docker container id")?
+                .trim()
+                .to_string();
+            Ok(Self { id })
+        }
+    }
+
+    impl Drop for DockerContainer {
+        fn drop(&mut self) {
+            let _ = Command::new("docker")
+                .arg("rm")
+                .arg("-f")
+                .arg(&self.id)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+
+    fn start_postgres_container() -> Result<(DockerContainer, u16)> {
+        let port = pick_unused_port().context("no free port for postgres")?;
+        let container = DockerContainer::run(
+            "postgres:15-alpine",
+            vec![
+                "-p".into(),
+                format!("{}:5432", port),
+                "-e".into(),
+                "POSTGRES_PASSWORD=postgres".into(),
+                "-e".into(),
+                "POSTGRES_USER=postgres".into(),
+            ],
+        )?;
+        Ok((container, port))
+    }
+
+    fn start_redis_container() -> Result<(DockerContainer, u16)> {
+        let port = pick_unused_port().context("no free port for redis")?;
+        let container = DockerContainer::run(
+            "redis:7-alpine",
+            vec!["-p".into(), format!("{}:6379", port)],
+        )?;
+        Ok((container, port))
     }
 }

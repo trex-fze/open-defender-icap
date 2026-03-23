@@ -1441,6 +1441,7 @@ dependencies = [
  "chrono",
  "config-core",
  "once_cell",
+ "portpicker",
  "prometheus",
  "redis",
  "serde",
