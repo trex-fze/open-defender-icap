@@ -15,7 +15,8 @@
 - [x] Metrics export (`squid_to_icap_latency`, `cache_hit_ratio`, etc.) – Spec §33 (ICAP adaptor now exposes cache hit ratio + end-to-end latency; event-ingester publishes batch counters and durations; Prometheus scrapes all services).
 - [x] Alert definitions + runbooks – Spec §33, §34 (Prometheus loads `prometheus-rules.yml` with cache ratio, latency, ingestion failure, and review SLA breach alerts).
 - [x] Report APIs & CLI helpers – Spec §16, §19 (Admin API exposes `/api/v1/reporting/traffic` backed by Elasticsearch ingestion; `odctl report traffic` consumes the feed for SOC workflows).
-- [ ] Unit/integration tests for ingestion, dashboards, and alerting workflows – Spec §25–26.
+- [x] Evidence capture (screenshots/logs) – Spec §29 (documented in `docs/evidence/stage06-observability.md` with anonymized sample output).
+- [x] Unit/integration tests for ingestion, dashboards, and alerting workflows – Spec §25–26 (event-ingester/instrumentation tests + `tests/stage06_ingest.sh` smoke script verifying ingest → ES → Admin API path).
 
 ## Traceability Plan
 | Requirement | Section | Artifact |

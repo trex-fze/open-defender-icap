@@ -1,0 +1,32 @@
+{
+  "range": "24h",
+  "bucket_interval": "1h",
+  "allow_block_trend": [
+    {
+      "action": "allow",
+      "buckets": [
+        { "key_as_string": "2026-03-23T00:00:00.000Z", "doc_count": 120 },
+        { "key_as_string": "2026-03-23T01:00:00.000Z", "doc_count": 132 },
+        { "key_as_string": "2026-03-23T02:00:00.000Z", "doc_count": 118 }
+      ]
+    },
+    {
+      "action": "block",
+      "buckets": [
+        { "key_as_string": "2026-03-23T00:00:00.000Z", "doc_count": 12 },
+        { "key_as_string": "2026-03-23T01:00:00.000Z", "doc_count": 15 },
+        { "key_as_string": "2026-03-23T02:00:00.000Z", "doc_count": 9 }
+      ]
+    }
+  ],
+  "top_blocked_domains": [
+    { "key": "malicious.example", "doc_count": 21 },
+    { "key": "phish.bad", "doc_count": 17 },
+    { "key": "ads.tracker.net", "doc_count": 11 }
+  ],
+  "top_categories": [
+    { "key": "Malware", "doc_count": 26 },
+    { "key": "Command & Control", "doc_count": 14 },
+    { "key": "Adult Content", "doc_count": 9 }
+  ]
+}
