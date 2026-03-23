@@ -14,8 +14,8 @@ flowchart LR
     subgraph Decisioning
         PE[Policy Engine]
         Cache[(Redis Cache)]
-        LLW[LLM Worker\n(AI verdicts)]
-        RCW[Reclass Worker\n(AI assist)]
+        LLW[LLM Worker</br>(AI verdicts)]
+        RCW[Reclass Worker</br>(AI assist)]
     end
 
     subgraph Ops & Observability
@@ -23,7 +23,7 @@ flowchart LR
         UI[Admin React UI]
         CLI[odctl CLI]
         EI[Event Ingester]
-        ES[(Elasticsearch\n+ AI analytics)]
+        ES[(Elasticsearch</br>+ AI analytics)]
         FB[Filebeat]
         KB[Kibana Dashboards]
         PR[Prometheus + Alerts]
