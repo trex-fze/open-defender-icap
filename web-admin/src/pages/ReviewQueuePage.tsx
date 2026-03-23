@@ -1,6 +1,7 @@
-import { reviewQueue } from '../data/mockData';
+import { useReviewQueueData } from '../hooks/useReviewQueueData';
 
 export const ReviewQueuePage = () => {
+  const { data, loading, error, isMock } = useReviewQueueData();
   return (
     <div>
       <div className="page-header">
@@ -11,33 +12,53 @@ export const ReviewQueuePage = () => {
         <button className="cta-button">Bulk Resolve</button>
       </div>
 
-      <div className="glass-panel">
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Key</th>
-                <th>Status</th>
-                <th>Risk</th>
-                <th>SLA</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reviewQueue.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.key}</td>
-                  <td>{item.status}</td>
-                  <td>
-                    <span className={`chip chip--${item.risk === 'critical' ? 'red' : 'amber'}`}>
-                      {item.risk}
-                    </span>
-                  </td>
-                  <td>{item.sla}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {error ? (
+        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+          <p style={{ margin: 0, color: '#ff9b9b' }}>Failed to load review queue: {error}</p>
         </div>
+      ) : null}
+
+      {isMock ? (
+        <p className="section-title" style={{ color: '#fdd744', marginTop: '0.5rem' }}>
+          Mock stream (Admin API offline)
+        </p>
+      ) : null}
+
+      <div className="glass-panel">
+        {loading ? (
+          <div>
+            {Array.from({ length: 5 }).map((_, idx) => (
+              <div key={idx} className="skeleton" style={{ marginBottom: '0.75rem' }}></div>
+            ))}
+          </div>
+        ) : (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Status</th>
+                  <th>Risk</th>
+                  <th>SLA</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.key}</td>
+                    <td>{item.status}</td>
+                    <td>
+                      <span className={`chip chip--${item.risk === 'critical' ? 'red' : 'amber'}`}>
+                        {item.risk}
+                      </span>
+                    </td>
+                    <td>{item.sla}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

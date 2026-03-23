@@ -1,13 +1,23 @@
 import { FormEvent, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
+const BOOTSTRAP_TOKEN = (import.meta.env.VITE_ADMIN_TOKEN ?? '').trim();
+
 export const LoginPage = () => {
   const { login } = useAuth();
   const [email, setEmail] = useState('avery@example.com');
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    login({ email, name: email.split('@')[0] });
+    const fallbackToken = BOOTSTRAP_TOKEN || `demo-${crypto.randomUUID?.() ?? Date.now()}`;
+    login(
+      { email, name: email.split('@')[0] },
+      {
+        tokens: {
+          accessToken: fallbackToken,
+        },
+      },
+    );
   };
 
   return (
