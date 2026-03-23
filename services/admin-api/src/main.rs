@@ -7,6 +7,7 @@ mod metrics;
 mod pagination;
 mod policies;
 mod reporting;
+mod reporting_es;
 mod taxonomy;
 
 use anyhow::{Context, Result};
@@ -36,6 +37,7 @@ use uuid::Uuid;
 
 use cache::CacheInvalidator;
 use metrics::ReviewMetrics;
+use reporting_es::{ElasticReportingClient, ReportingConfig};
 
 #[derive(Debug, Clone, Deserialize)]
 struct AdminApiConfig {
@@ -51,6 +53,8 @@ struct AdminApiConfig {
     pub audit: AuditExportConfig,
     #[serde(default)]
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub reporting: ReportingConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -110,6 +114,7 @@ pub struct AppState {
     cache_invalidator: Option<Arc<CacheInvalidator>>,
     audit_logger: AuditLogger,
     metrics: ReviewMetrics,
+    reporting_client: Option<ElasticReportingClient>,
 }
 
 impl AppState {
@@ -227,6 +232,10 @@ impl AppState {
             })
             .await;
     }
+
+    pub fn reporting_client(&self) -> Option<&ElasticReportingClient> {
+        self.reporting_client.as_ref()
+    }
 }
 
 #[tokio::main]
@@ -276,6 +285,7 @@ async fn main() -> Result<()> {
 
     let audit_cfg = cfg.audit.clone().merge_env();
     let metrics_cfg = cfg.metrics.clone().merge_env();
+    let reporting_cfg = cfg.reporting.clone().merge_env();
 
     let elastic_exporter = if let (Some(url), Some(index)) =
         (audit_cfg.elastic_url.clone(), audit_cfg.index.clone())
@@ -306,11 +316,15 @@ async fn main() -> Result<()> {
         );
     }
 
+    let reporting_client = ElasticReportingClient::from_config(&reporting_cfg)
+        .context("failed to initialize reporting client")?;
+
     let state = AppState {
         pool: pool.clone(),
         cache_invalidator,
         audit_logger: AuditLogger::new(pool.clone(), elastic_exporter),
         metrics: review_metrics,
+        reporting_client,
     };
 
     let auth_layer = {
@@ -368,6 +382,7 @@ async fn main() -> Result<()> {
             "/api/v1/reporting/aggregates",
             get(reporting::list_aggregates),
         )
+        .route("/api/v1/reporting/traffic", get(reporting::traffic_summary))
         .route(
             "/api/v1/cache-entries/:cache_key",
             get(cache_entries_api::get_entry).delete(cache_entries_api::delete_entry),

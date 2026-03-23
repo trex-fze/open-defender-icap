@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::{
     auth::{require_roles, UserContext, ROLE_REPORTING_VIEW},
     pagination::{PageOptions, Paged},
+    reporting_es::TrafficReportResponse,
     AppState,
 };
 
@@ -77,6 +78,37 @@ pub async fn list_aggregates(
         })
         .collect();
     Ok(Json(Paged::new(data, total, opts)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TrafficReportQuery {
+    pub range: Option<String>,
+    pub top_n: Option<u32>,
+    pub bucket: Option<String>,
+}
+
+const DEFAULT_TOP_N: u32 = 10;
+
+pub async fn traffic_summary(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Query(query): Query<TrafficReportQuery>,
+) -> Result<Json<TrafficReportResponse>, StatusCode> {
+    require_roles(&user, ROLE_REPORTING_VIEW)?;
+    let client = state
+        .reporting_client()
+        .ok_or(StatusCode::NOT_IMPLEMENTED)?;
+    let range = query.range.as_deref();
+    let bucket = query.bucket.as_deref();
+    let top_n = query.top_n.unwrap_or(DEFAULT_TOP_N).max(1);
+    let report = client
+        .traffic_report(range, top_n, bucket)
+        .await
+        .map_err(|err| {
+            error!(target = "svc-admin", %err, "failed to fetch traffic report from elastic");
+            StatusCode::BAD_GATEWAY
+        })?;
+    Ok(Json(report))
 }
 
 fn map_db_error(err: sqlx::Error) -> StatusCode {

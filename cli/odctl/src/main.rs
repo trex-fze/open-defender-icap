@@ -175,6 +175,14 @@ enum ReportCmd {
         #[clap(long, default_value = "category")]
         dimension: String,
     },
+    Traffic {
+        #[clap(long, default_value = "24h")]
+        range: String,
+        #[clap(long, default_value_t = 10)]
+        top: u32,
+        #[clap(long)]
+        bucket: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -834,6 +842,26 @@ async fn handle_report(cmd: &ReportCmd, client: &ApiClient, json: bool) -> Resul
                 }
             }
         }
+        ReportCmd::Traffic { range, top, bucket } => {
+            let mut params = vec![
+                ("range".to_string(), range.clone()),
+                ("top_n".to_string(), top.to_string()),
+            ];
+            if let Some(b) = bucket {
+                params.push(("bucket".to_string(), b.clone()));
+            }
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let report: TrafficReportResponse =
+                client.get("/api/v1/reporting/traffic", &refs).await?;
+            if json {
+                print_json(&report)?;
+            } else {
+                render_traffic_report(&report);
+            }
+        }
     }
     Ok(())
 }
@@ -967,6 +995,41 @@ fn parse_scope(scope: &str) -> Result<(String, String)> {
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("scope must include a value after ':'"))?;
     Ok((scope_type, scope_value))
+}
+
+fn render_traffic_report(report: &TrafficReportResponse) {
+    println!(
+        "Traffic range: {} (bucket interval {})",
+        report.range, report.bucket_interval
+    );
+    println!("Allow/Block Trend:");
+    for series in &report.allow_block_trend {
+        let total: i64 = series.buckets.iter().map(|b| b.doc_count).sum();
+        let sample = series
+            .buckets
+            .iter()
+            .rev()
+            .take(3)
+            .map(|bucket| format!("{}:{}", bucket.key_as_string, bucket.doc_count))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("- {:<8} total {:<6} ({})", series.action, total, sample);
+    }
+    println!("\nTop Blocked Domains:");
+    let domain_rows = report
+        .top_blocked_domains
+        .iter()
+        .map(|entry| vec![entry.key.clone(), entry.doc_count.to_string()])
+        .collect();
+    print_table(&["Domain", "Events"], domain_rows);
+
+    println!("\nTop Categories:");
+    let category_rows = report
+        .top_categories
+        .iter()
+        .map(|entry| vec![entry.key.clone(), entry.doc_count.to_string()])
+        .collect();
+    print_table(&["Category", "Events"], category_rows);
 }
 
 fn print_json<T: Serialize>(value: &T) -> Result<()> {
@@ -1233,6 +1296,33 @@ struct ReportingAggregate {
     period_start: String,
     metrics: serde_json::Value,
     created_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TrafficReportResponse {
+    range: String,
+    bucket_interval: String,
+    allow_block_trend: Vec<ActionSeriesResponse>,
+    top_blocked_domains: Vec<TopEntryResponse>,
+    top_categories: Vec<TopEntryResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ActionSeriesResponse {
+    action: String,
+    buckets: Vec<TimeBucketResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TimeBucketResponse {
+    key_as_string: String,
+    doc_count: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TopEntryResponse {
+    key: String,
+    doc_count: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

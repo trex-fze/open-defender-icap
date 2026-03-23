@@ -14,7 +14,7 @@
 - [x] Kibana dashboards (IP, user/device, management, security) – Spec §16 + §17 (initial Traffic Operations dashboard + saved objects under `deploy/kibana/dashboards` covering allow/block trends and top blocked domains; additional panels follow the same pattern).
 - [x] Metrics export (`squid_to_icap_latency`, `cache_hit_ratio`, etc.) – Spec §33 (ICAP adaptor now exposes cache hit ratio + end-to-end latency; event-ingester publishes batch counters and durations; Prometheus scrapes all services).
 - [x] Alert definitions + runbooks – Spec §33, §34 (Prometheus loads `prometheus-rules.yml` with cache ratio, latency, ingestion failure, and review SLA breach alerts).
-- [ ] Report APIs & CLI helpers – Spec §16, §19.
+- [x] Report APIs & CLI helpers – Spec §16, §19 (Admin API exposes `/api/v1/reporting/traffic` backed by Elasticsearch ingestion; `odctl report traffic` consumes the feed for SOC workflows).
 - [ ] Unit/integration tests for ingestion, dashboards, and alerting workflows – Spec §25–26.
 
 ## Traceability Plan

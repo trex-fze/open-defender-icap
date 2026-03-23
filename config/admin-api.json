@@ -18,5 +18,13 @@
   },
   "metrics": {
     "review_sla_seconds": 14400
+  },
+  "reporting": {
+    "elastic_url": "http://elasticsearch:9200",
+    "index_pattern": "traffic-events-*",
+    "api_key": null,
+    "username": "elastic",
+    "password": null,
+    "default_range": "24h"
   }
 }
