@@ -145,6 +145,7 @@ services:
     command: ["llm-worker"]
     environment:
       RUST_LOG: ${RUST_LOG:-info}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ../../config:/app/config:ro
     depends_on:

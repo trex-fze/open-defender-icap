@@ -1,0 +1,4 @@
+| Name            | Type     | Endpoint                                      | Role     |
+|-----------------|----------|-----------------------------------------------|----------|
+| lmstudio-edge   | lmstudio | http://192.168.1.170:1234/v1/chat/completions | primary  |
+| openai-fallback | openai   | https://api.openai.com/v1/chat/completions    | fallback |

@@ -580,7 +580,7 @@ async fn invoke_custom_json(
         metrics::record_invalid_response();
         err
     })?;
-    verdict.validate().map_err(|err| {
+    verdict.normalize().map_err(|err| {
         metrics::record_invalid_response();
         err
     })
@@ -713,7 +713,7 @@ fn parse_llm_json_text(text: &str) -> Result<LlmResponse> {
         metrics::record_invalid_response();
         err
     })?;
-    parsed.validate().map_err(|err| {
+    parsed.normalize().map_err(|err| {
         metrics::record_invalid_response();
         err
     })
