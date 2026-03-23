@@ -36,8 +36,16 @@ export const LoginPage = () => {
         <p className="section-title">OIDC Sign-in</p>
         <h2 style={{ marginTop: 0 }}>Welcome back</h2>
         <p style={{ color: '#8ca0cb' }}>Prototype device flow — in production this will redirect to your IdP.</p>
-        <label style={{ display: 'block', marginBottom: '0.35rem' }}>Email</label>
-        <input className="search-input" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <label htmlFor="login-email" style={{ display: 'block', marginBottom: '0.35rem' }}>
+          Email
+        </label>
+        <input
+          id="login-email"
+          className="search-input"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          type="email"
+        />
         <button type="submit" className="cta-button" style={{ width: '100%', marginTop: '1.25rem' }}>
           Continue
         </button>
