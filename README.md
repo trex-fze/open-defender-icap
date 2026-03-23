@@ -48,6 +48,7 @@ flowchart LR
 - **LLM-driven queue triage** – `llm-worker` summarizes risky events, proposes verdicts, and captures reviewer rationales.
 - **Automated reclassification** – `reclass-worker` uses AI outputs and telemetry to queue overrides or second-pass scans.
 - **AI-assisted reporting** – the Elasticsearch/Kibana layer surfaces trending threats with context derived from LLM annotations and metadata enrichment.
+- **Hybrid AI routing** – configure offline engines (Ollama/LM Studio/vLLM) or online SaaS (OpenAI/Claude) with automatic failover per policy.
 
 ## Quick Start (Docker Compose)
 
@@ -98,6 +99,9 @@ flowchart LR
 | `OD_ELASTIC_INDEX_PREFIX` | Prefix for ingested indices (`traffic-events`). |
 | `OD_FILEBEAT_SECRET` | Shared secret between Filebeat and event-ingester. |
 | `OD_REPORTING_ELASTIC_URL` | Reporting endpoint used by `/api/v1/reporting/traffic` (feeds AI-driven analytics). |
+| `OPENAI_API_KEY` | API key for OpenAI-compatible providers (used when `type=openai/openai_compatible`). |
+| `ANTHROPIC_API_KEY` | API key for Anthropic Claude providers. |
+| `LLM_API_KEY` | Legacy fallback for single-endpoint deployments. |
 | `VITE_ADMIN_API_URL` | UI base URL for API calls (set in `web-admin/.env`). |
 | `INGEST_URL`, `ELASTIC_URL`, `ADMIN_URL` | Overrides for Stage 6/7 smoke scripts. |
 
@@ -112,6 +116,40 @@ flowchart LR
 | Ingestion smoke (standalone) | `tests/stage06_ingest.sh` | Validates Filebeat → event-ingester → Elasticsearch → reporting API. |
 | Performance | `k6 run tests/perf/k6-traffic.js` | Load test for `/api/v1/reporting/traffic` & `/api/v1/policies`. |
 | Security authZ smoke | `tests/security/authz-smoke.sh` | Confirms 401 for unauthenticated requests and payload validation. |
+
+## LLM Provider Configuration
+
+`config/llm-worker.json` now supports multiple providers with routing/failover:
+
+```jsonc
+{
+  "providers": [
+    {
+      "name": "local-ollama",
+      "type": "ollama",
+      "endpoint": "http://ollama:11434/api/generate",
+      "model": "llama3",
+      "timeout_ms": 20000
+    },
+    {
+      "name": "openai-fallback",
+      "type": "openai",
+      "endpoint": "https://api.openai.com/v1/chat/completions",
+      "model": "gpt-4o-mini",
+      "api_key_env": "OPENAI_API_KEY"
+    }
+  ],
+  "routing": {
+    "default": "local-ollama",
+    "fallback": "openai-fallback",
+    "policy": "failover"
+  }
+}
+```
+
+- Supported `type` values: `ollama`, `lmstudio`, `vllm`, `openai`, `openai_compatible`, `anthropic`, `custom_json` (legacy HTTP).
+- Offline providers (Ollama/LM Studio) run locally via docker-compose overlays; online providers require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
+- The worker automatically records provider names in logs/metrics; fallback triggers if the primary fails.
 
 ## FAQ
 

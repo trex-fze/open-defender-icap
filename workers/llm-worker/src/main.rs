@@ -4,12 +4,14 @@ mod schema;
 use anyhow::{anyhow, Context, Result};
 use redis::streams::{StreamReadOptions, StreamReadReply};
 use redis::AsyncCommands;
+use reqwest::{Client, RequestBuilder};
 use schema::{LlmResponse, PromptPayload};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::collections::HashMap;
 use std::env;
+use std::time::Duration;
 use tokio::{signal, time::Instant};
 use tokio_stream::StreamExt;
 use tracing::{error, info, Level};
@@ -64,6 +66,7 @@ enum ProviderKind {
     Openai,
     Anthropic,
     OpenaiCompatible,
+    CustomJson,
 }
 
 #[allow(dead_code)]
@@ -112,7 +115,7 @@ impl WorkerConfig {
         Ok(ProviderRouter {
             primary: ResolvedProvider {
                 name: "legacy".into(),
-                kind: ProviderKind::OpenaiCompatible,
+                kind: ProviderKind::CustomJson,
                 endpoint,
                 model: None,
                 timeout_ms: None,
@@ -191,6 +194,10 @@ fn default_metrics_host() -> String {
 fn default_metrics_port() -> u16 {
     19015
 }
+
+const SYSTEM_PROMPT: &str = "You are an AI analyst classifying web traffic for a trust and safety team. Respond ONLY with JSON matching the schema and avoid prose.";
+const OPENAI_DEFAULT_MODEL: &str = "gpt-4o-mini";
+const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -464,8 +471,46 @@ async fn store_classification(
     Ok(())
 }
 
-async fn invoke_llm(provider: &ResolvedProvider, job: &ClassificationJobPayload) -> Result<LlmResponse> {
-    let client = reqwest::Client::new();
+async fn invoke_llm(
+    provider: &ResolvedProvider,
+    job: &ClassificationJobPayload,
+) -> Result<LlmResponse> {
+    metrics::record_llm_invocation();
+    let start = Instant::now();
+    let result = match provider.kind {
+        ProviderKind::Ollama => invoke_ollama(provider, job).await,
+        ProviderKind::Openai
+        | ProviderKind::LmStudio
+        | ProviderKind::Vllm
+        | ProviderKind::OpenaiCompatible => invoke_openai_chat(provider, job).await,
+        ProviderKind::Anthropic => invoke_anthropic(provider, job).await,
+        ProviderKind::CustomJson => invoke_custom_json(provider, job).await,
+    };
+
+    match result {
+        Ok(response) => {
+            metrics::observe_llm_latency(start.elapsed().as_secs_f64());
+            Ok(response)
+        }
+        Err(err) => {
+            if err
+                .downcast_ref::<reqwest::Error>()
+                .map(|e| e.is_timeout())
+                .unwrap_or(false)
+            {
+                metrics::record_llm_timeout();
+            }
+            metrics::record_llm_failure();
+            Err(err)
+        }
+    }
+}
+
+async fn invoke_custom_json(
+    provider: &ResolvedProvider,
+    job: &ClassificationJobPayload,
+) -> Result<LlmResponse> {
+    let client = Client::new();
     let payload = PromptPayload {
         normalized_key: &job.normalized_key,
         hostname: &job.hostname,
@@ -473,48 +518,233 @@ async fn invoke_llm(provider: &ResolvedProvider, job: &ClassificationJobPayload)
         entity_level: &job.entity_level,
         trace_id: &job.trace_id,
     };
-
-    metrics::record_llm_invocation();
-    let start = Instant::now();
     let mut request = client.post(&provider.endpoint);
     if !provider.api_key.is_empty() {
         request = request.header("Authorization", format!("Bearer {}", provider.api_key));
     }
-    for (key, value) in &provider.headers {
-        request = request.header(key, value);
-    }
-    let response = match request
-        .json(&payload)
-        .send()
-        .await
-    {
-        Ok(resp) => resp,
-        Err(err) => {
-            if err.is_timeout() {
-                metrics::record_llm_timeout();
-            }
-            metrics::record_llm_failure();
-            return Err(err.into());
-        }
-    };
-
-    metrics::observe_llm_latency(start.elapsed().as_secs_f64());
-
-    let response = response.error_for_status().map_err(|err| {
-        metrics::record_llm_failure();
-        err
-    })?;
-
+    request = apply_provider_headers(request, provider);
+    request = apply_timeout(request, provider);
+    let response = request.json(&payload).send().await?;
+    let response = response.error_for_status()?;
     let verdict = response.json::<LlmResponse>().await.map_err(|err| {
         metrics::record_invalid_response();
         err
     })?;
+    verdict.validate().map_err(|err| {
+        metrics::record_invalid_response();
+        err
+    })
+}
 
-    let verdict = verdict.validate().map_err(|err| {
+async fn invoke_openai_chat(
+    provider: &ResolvedProvider,
+    job: &ClassificationJobPayload,
+) -> Result<LlmResponse> {
+    let client = Client::new();
+    let model = provider.model.as_deref().unwrap_or(OPENAI_DEFAULT_MODEL);
+    let body = json!({
+        "model": model,
+        "temperature": 0.0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": build_prompt(job)}
+        ]
+    });
+
+    let mut request = client
+        .post(&provider.endpoint)
+        .header("Content-Type", "application/json");
+    if !provider.api_key.is_empty() {
+        request = request.header("Authorization", format!("Bearer {}", provider.api_key));
+    }
+    request = apply_provider_headers(request, provider);
+    request = apply_timeout(request, provider);
+    let response = request.json(&body).send().await?;
+    let response = response.error_for_status()?;
+    let payload: OpenAiChatResponse = response.json().await.map_err(|err| {
         metrics::record_invalid_response();
         err
     })?;
-    Ok(verdict)
+    let message = payload
+        .choices
+        .first()
+        .ok_or_else(|| anyhow!("openai response missing choices"))?;
+    let content = message.message.content_text()?;
+    parse_llm_json_text(&content)
+}
+
+async fn invoke_anthropic(
+    provider: &ResolvedProvider,
+    job: &ClassificationJobPayload,
+) -> Result<LlmResponse> {
+    let client = Client::new();
+    let model = provider
+        .model
+        .as_deref()
+        .unwrap_or("claude-3-sonnet-20240229");
+    let body = json!({
+        "model": model,
+        "max_tokens": 512,
+        "temperature": 0.0,
+        "system": SYSTEM_PROMPT,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": build_prompt(job)}
+                ]
+            }
+        ]
+    });
+
+    if provider.api_key.is_empty() {
+        return Err(anyhow!("anthropic provider requires api_key"));
+    }
+    let mut request = client
+        .post(&provider.endpoint)
+        .header("content-type", "application/json")
+        .header("x-api-key", &provider.api_key)
+        .header("anthropic-version", ANTHROPIC_VERSION);
+    request = apply_provider_headers(request, provider);
+    request = apply_timeout(request, provider);
+    let response = request.json(&body).send().await?;
+    let response = response.error_for_status()?;
+    let payload: AnthropicResponse = response.json().await.map_err(|err| {
+        metrics::record_invalid_response();
+        err
+    })?;
+    let text = payload.first_text()?;
+    parse_llm_json_text(&text)
+}
+
+async fn invoke_ollama(
+    provider: &ResolvedProvider,
+    job: &ClassificationJobPayload,
+) -> Result<LlmResponse> {
+    let client = Client::new();
+    let model = provider.model.as_deref().unwrap_or("llama3");
+    let prompt = format!("{}\n\n{}", SYSTEM_PROMPT, build_prompt(job));
+    let body = json!({
+        "model": model,
+        "prompt": prompt,
+        "stream": false
+    });
+    let mut request = client.post(&provider.endpoint);
+    request = apply_provider_headers(request, provider);
+    request = apply_timeout(request, provider);
+    let response = request.json(&body).send().await?;
+    let response = response.error_for_status()?;
+    let payload: OllamaResponse = response.json().await.map_err(|err| {
+        metrics::record_invalid_response();
+        err
+    })?;
+    parse_llm_json_text(payload.response.trim())
+}
+
+fn build_prompt(job: &ClassificationJobPayload) -> String {
+    format!(
+        "Classify the following web request. Return JSON with fields: primary_category, subcategory, risk_level, confidence (0-1), recommended_action (Allow|Block|Warn|Monitor|Review|RequireApproval).\\nNormalized Key: {}\\nHostname: {}\\nURL: {}\\nEntity Level: {}\\nTrace ID: {}",
+        job.normalized_key, job.hostname, job.full_url, job.entity_level, job.trace_id
+    )
+}
+
+fn parse_llm_json_text(text: &str) -> Result<LlmResponse> {
+    let mut cleaned = text.trim();
+    if let Some(stripped) = cleaned.strip_prefix("```json") {
+        cleaned = stripped.trim();
+    } else if let Some(stripped) = cleaned.strip_prefix("```") {
+        cleaned = stripped.trim();
+    }
+    if let Some(stripped) = cleaned.strip_suffix("```") {
+        cleaned = stripped.trim();
+    }
+    let parsed = serde_json::from_str::<LlmResponse>(cleaned).map_err(|err| {
+        metrics::record_invalid_response();
+        err
+    })?;
+    parsed.validate().map_err(|err| {
+        metrics::record_invalid_response();
+        err
+    })
+}
+
+fn apply_provider_headers(
+    mut request: RequestBuilder,
+    provider: &ResolvedProvider,
+) -> RequestBuilder {
+    for (key, value) in &provider.headers {
+        request = request.header(key, value);
+    }
+    request
+}
+
+fn apply_timeout(mut request: RequestBuilder, provider: &ResolvedProvider) -> RequestBuilder {
+    if let Some(ms) = provider.timeout_ms {
+        request = request.timeout(Duration::from_millis(ms));
+    }
+    request
+}
+
+#[derive(Deserialize)]
+struct OpenAiChatResponse {
+    choices: Vec<OpenAiChoice>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiChoice {
+    message: OpenAiMessage,
+}
+
+#[derive(Deserialize)]
+struct OpenAiMessage {
+    content: Value,
+}
+
+impl OpenAiMessage {
+    fn content_text(&self) -> Result<String> {
+        match &self.content {
+            Value::String(text) => Ok(text.clone()),
+            Value::Array(parts) => {
+                let combined = parts
+                    .iter()
+                    .filter_map(|part| part.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if combined.is_empty() {
+                    Err(anyhow!("openai response missing text content"))
+                } else {
+                    Ok(combined)
+                }
+            }
+            _ => Err(anyhow!("unsupported OpenAI content type")),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct AnthropicResponse {
+    content: Vec<AnthropicBlock>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicBlock {
+    text: Option<String>,
+}
+
+impl AnthropicResponse {
+    fn first_text(&self) -> Result<String> {
+        self.content
+            .iter()
+            .filter_map(|block| block.text.clone())
+            .next()
+            .ok_or_else(|| anyhow!("anthropic response missing text"))
+    }
+}
+
+#[derive(Deserialize)]
+struct OllamaResponse {
+    response: String,
 }
 
 #[cfg(test)]
@@ -564,9 +794,7 @@ mod tests {
         };
 
         let router = cfg.resolve_router().unwrap();
-        let consumer = JobConsumer::new(&cfg, router, pool.clone())
-            .await
-            .unwrap();
+        let consumer = JobConsumer::new(&cfg, router, pool.clone()).await.unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
         let job = ClassificationJobPayload {
@@ -639,9 +867,7 @@ mod tests {
         };
 
         let router = cfg.resolve_router().unwrap();
-        let consumer = JobConsumer::new(&cfg, router, pool.clone())
-            .await
-            .unwrap();
+        let consumer = JobConsumer::new(&cfg, router, pool.clone()).await.unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
         let job = ClassificationJobPayload {
