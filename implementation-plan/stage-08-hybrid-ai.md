@@ -14,10 +14,10 @@
 | S8-T2 | Offline adapters (LM Studio, Ollama, vLLM) | Backend Eng | S8-T1 | ✅ | LM Studio example (`gpt-oss-120b`), Ollama/OpenAI-compatible JSON adapters |
 | S8-T3 | Online adapters (OpenAI, Claude/Anthropic) | Backend Eng | S8-T1 | ✅ | OpenAI chat + Anthropic message integrations landed |
 | S8-T4 | CLI/Admin tooling (`odctl llm providers`, metrics `/providers`) | CLI/Backend | S8-T1 | ✅ | New `odctl llm providers` command + metrics endpoint catalog |
-| S8-T5 | Provider-level metrics & alerts | SRE | S8-T1–T3 | 🔄 | Per-provider counters/latency histograms (in progress) + Prometheus rules TBD |
-| S8-T6 | Compose overlays & docs for LM Studio/Ollama | DevOps | S8-T2 | ⬜ | Provide optional services + instructions for local inference nodes |
-| S8-T7 | Security/perf validation (prompt injection, fallback load) | Security/Perf Eng | S8-T2–T4 | ⬜ | Extend `tests/security` + k6 to cover provider failover |
-| S8-T8 | Evidence & runbooks (Stage 8) | TPM | S8-T1–S8-T7 | ⬜ | Create `docs/evidence/stage08-hybrid-ai.md` once validation completes |
+| S8-T5 | Provider-level metrics & alerts | SRE | S8-T1–T3 | ✅ | Per-provider counters/latency histograms + Prometheus rules (`stage8-llm-alerts`) |
+| S8-T6 | Compose overlays & docs for LM Studio/Ollama | DevOps | S8-T2 | ✅ | Compose overlays for LM Studio + Ollama; README & integration plan updated |
+| S8-T7 | Security/perf validation (prompt injection, fallback load) | Security/Perf Eng | S8-T2–T4 | 🔄 | `tests/security/llm-prompt-smoke.sh` added; fallback perf + k6 scenario pending |
+| S8-T8 | Evidence & runbooks (Stage 8) | TPM | S8-T1–S8-T7 | 🔄 | `docs/evidence/stage08-hybrid-ai.md` created; populate after tests |
 
 ## Milestones
 1. **M1 – Hybrid Config & Offline Providers** (S8-T1/T2) ✅

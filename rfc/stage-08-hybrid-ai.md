@@ -11,8 +11,8 @@
 - [x] Config schema supports multiple providers with routing/fallback (`config/llm-worker.json`).
 - [x] Provider-specific adapters (OpenAI, Anthropic, Ollama, custom HTTP) integrated in `llm-worker`.
 - [x] CLI & metrics endpoints expose provider catalogs (`odctl llm providers`, `/providers`).
-- [ ] Per-provider Prometheus metrics/alerts (latency, failure, timeout labels).
-- [ ] Compose overlays/instructions for LM Studio/Ollama deployment.
+- [x] Per-provider Prometheus metrics/alerts (latency, failure, timeout labels).
+- [x] Compose overlays/instructions for LM Studio/Ollama deployment.
 - [ ] Security/perf suites updated for provider failover + prompt-injection hardening.
 - [ ] Stage 8 evidence bundle (`docs/evidence/stage08-hybrid-ai.md`).
 
@@ -30,7 +30,7 @@
 
 ### Observability
 - Metrics server now exposes `/providers` for quick catalog inspection.
-- Prometheus metrics (in progress) will include provider labels for invocations/failures/latency.
+- Prometheus metrics/alerts include provider labels for invocations, failures, timeouts, and latency (see `stage8-llm-alerts`).
 - `odctl llm providers` surfaces the same data from operator terminals.
 
 ### Security & Compliance
@@ -40,7 +40,7 @@
 
 ### Deployment
 - Default example: LM Studio at `http://192.168.1.170:1234` running `gpt-oss-120b`, with OpenAI fallback.
-- Compose overlays will optionally spin up LM Studio/Ollama containers for local testing.
+- Compose overlays (`docker-compose.lmstudio.yml`, `docker-compose.ollama.yml`) spin up LM Studio/Ollama containers for local testing.
 - Online providers require API keys stored in `.env` or secret manager.
 
 ## Open Questions

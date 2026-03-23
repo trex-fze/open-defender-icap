@@ -62,6 +62,9 @@ flowchart LR
    ```bash
    make compose-up                 # equivalent to docker compose up --build
    ```
+   - To launch the optional LM Studio container for offline inference: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.lmstudio.yml up -d lmstudio`
+   - To launch the optional Ollama container: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.ollama.yml up -d ollama`
+   - Update `config/llm-worker.json` to point at your LM Studio host (default example uses `http://192.168.1.170:1234`).
 4. **Run health & smoke checks**:
    ```bash
    tests/unit.sh                   # workspace + React unit tests
@@ -116,6 +119,7 @@ flowchart LR
 | Ingestion smoke (standalone) | `tests/stage06_ingest.sh` | Validates Filebeat → event-ingester → Elasticsearch → reporting API. |
 | Performance | `k6 run tests/perf/k6-traffic.js` | Load test for `/api/v1/reporting/traffic` & `/api/v1/policies`. |
 | Security authZ smoke | `tests/security/authz-smoke.sh` | Confirms 401 for unauthenticated requests and payload validation. |
+| Security prompt-injection | `tests/security/llm-prompt-smoke.sh` | Enqueues malicious payload and verifies llm-worker ignores injection instructions. |
 
 ## LLM Provider Configuration
 
@@ -148,10 +152,11 @@ flowchart LR
 ```
 
 - Supported `type` values: `ollama`, `lmstudio`, `vllm`, `openai`, `openai_compatible`, `anthropic`, `custom_json` (legacy HTTP).
-- Offline providers (LM Studio at `http://192.168.1.170:1234`, Ollama, etc.) run on your LAN or compose overlay; online providers require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
+- Offline providers (LM Studio at `http://192.168.1.170:1234`, Ollama on `http://localhost:11434`, etc.) run on your LAN or compose overlay; online providers require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
 - The worker automatically records provider names in logs/metrics; fallback triggers if the primary fails.
 - Query configured providers anytime: `curl http://localhost:19015/providers | jq`.
 - CLI inspection: `odctl llm providers --url http://localhost:19015/providers`.
+- Launch LM Studio via docker: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.lmstudio.yml up -d lmstudio` (serves on `http://localhost:1234`).
 
 ## FAQ
 
