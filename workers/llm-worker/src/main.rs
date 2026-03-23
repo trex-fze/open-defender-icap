@@ -1,13 +1,15 @@
 mod metrics;
 mod schema;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use redis::streams::{StreamReadOptions, StreamReadReply};
 use redis::AsyncCommands;
 use schema::{LlmResponse, PromptPayload};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use std::collections::HashMap;
+use std::env;
 use tokio::{signal, time::Instant};
 use tokio_stream::StreamExt;
 use tracing::{error, info, Level};
@@ -21,12 +23,129 @@ struct WorkerConfig {
     #[serde(default = "default_stream")]
     pub stream: String,
     pub database_url: String,
-    pub llm_endpoint: String,
-    pub llm_api_key: String,
+    #[serde(default)]
+    pub llm_endpoint: Option<String>,
+    #[serde(default)]
+    pub llm_api_key: Option<String>,
+    #[serde(default)]
+    pub providers: Vec<ProviderConfig>,
+    #[serde(default)]
+    pub routing: RoutingConfig,
     #[serde(default = "default_metrics_host")]
     pub metrics_host: String,
     #[serde(default = "default_metrics_port")]
     pub metrics_port: u16,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct ProviderConfig {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: ProviderKind,
+    pub endpoint: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+enum ProviderKind {
+    LmStudio,
+    Ollama,
+    Vllm,
+    Openai,
+    Anthropic,
+    OpenaiCompatible,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize, Clone, Default)]
+struct RoutingConfig {
+    #[serde(default)]
+    pub default: Option<String>,
+    #[serde(default)]
+    pub fallback: Option<String>,
+    #[serde(default)]
+    pub policy: Option<String>,
+}
+
+impl WorkerConfig {
+    fn resolve_primary_provider(&self) -> Result<ResolvedProvider> {
+        if !self.providers.is_empty() {
+            let name = self
+                .routing
+                .default
+                .as_deref()
+                .or_else(|| self.providers.first().map(|p| p.name.as_str()))
+                .ok_or_else(|| anyhow!("providers defined but no default specified"))?;
+            let provider = self
+                .providers
+                .iter()
+                .find(|p| p.name == name)
+                .ok_or_else(|| anyhow!("provider '{name}' not found"))?;
+            return ResolvedProvider::from_config(provider);
+        }
+
+        // fallback to legacy fields
+        let endpoint = self
+            .llm_endpoint
+            .clone()
+            .ok_or_else(|| anyhow!("llm_endpoint missing and no providers configured"))?;
+        let api_key = self
+            .llm_api_key
+            .clone()
+            .or_else(|| env::var("LLM_API_KEY").ok())
+            .unwrap_or_default();
+        Ok(ResolvedProvider {
+            name: "legacy".into(),
+            kind: ProviderKind::OpenaiCompatible,
+            endpoint,
+            model: None,
+            timeout_ms: None,
+            headers: HashMap::new(),
+            api_key,
+        })
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct ResolvedProvider {
+    name: String,
+    kind: ProviderKind,
+    endpoint: String,
+    model: Option<String>,
+    timeout_ms: Option<u64>,
+    headers: HashMap<String, String>,
+    api_key: String,
+}
+
+impl ResolvedProvider {
+    fn from_config(config: &ProviderConfig) -> Result<Self> {
+        let api_key = match (&config.api_key, &config.api_key_env) {
+            (Some(value), _) if !value.is_empty() => value.clone(),
+            (_, Some(env_key)) => env::var(env_key)
+                .map_err(|_| anyhow!("env var {env_key} not set for provider {}", config.name))?,
+            _ => String::new(),
+        };
+        Ok(Self {
+            name: config.name.clone(),
+            kind: config.kind,
+            endpoint: config.endpoint.clone(),
+            model: config.model.clone(),
+            timeout_ms: config.timeout_ms,
+            headers: config.headers.clone(),
+            api_key,
+        })
+    }
 }
 
 fn default_stream() -> String {
@@ -58,6 +177,13 @@ async fn main() -> Result<()> {
         "LLM worker initialized"
     );
 
+    let provider = match cfg.resolve_primary_provider() {
+        Ok(p) => p,
+        Err(err) => {
+            return Err(err.context("failed to resolve primary LLM provider"));
+        }
+    };
+
     let metrics_host = cfg.metrics_host.clone();
     let metrics_port = cfg.metrics_port;
     tokio::spawn(async move {
@@ -74,7 +200,7 @@ async fn main() -> Result<()> {
     let cache_listener = CacheListener::new(&cfg.redis_url, &cfg.cache_channel).await?;
     tokio::spawn(cache_listener.run());
 
-    let job_consumer = JobConsumer::new(&cfg, pool).await?;
+    let job_consumer = JobConsumer::new(&cfg, provider, pool).await?;
     tokio::spawn(job_consumer.run());
 
     signal::ctrl_c().await?;
@@ -90,18 +216,16 @@ struct JobConsumer {
     redis_url: String,
     stream: String,
     pool: PgPool,
-    llm_endpoint: String,
-    llm_api_key: String,
+    provider: ResolvedProvider,
 }
 
 impl JobConsumer {
-    async fn new(cfg: &WorkerConfig, pool: PgPool) -> Result<Self> {
+    async fn new(cfg: &WorkerConfig, provider: ResolvedProvider, pool: PgPool) -> Result<Self> {
         Ok(Self {
             redis_url: cfg.redis_url.clone(),
             stream: cfg.stream.clone(),
             pool,
-            llm_endpoint: cfg.llm_endpoint.clone(),
-            llm_api_key: cfg.llm_api_key.clone(),
+            provider,
         })
     }
 
@@ -146,7 +270,7 @@ impl JobConsumer {
 
     async fn handle_job(&self, payload: &str) -> Result<(), anyhow::Error> {
         let job: ClassificationJobPayload = serde_json::from_str(payload)?;
-        let verdict = invoke_llm(&self.llm_endpoint, &self.llm_api_key, &job).await?;
+        let verdict = invoke_llm(&self.provider.endpoint, &self.provider.api_key, &job).await?;
         store_classification(&self.pool, &job, &verdict)
             .await
             .context("failed to persist classification")?;
@@ -154,6 +278,7 @@ impl JobConsumer {
             target = "svc-llm-worker",
             key = job.normalized_key,
             action = ?verdict.recommended_action,
+            provider = self.provider.name,
             "classification stored"
         );
         Ok(())
@@ -379,13 +504,18 @@ mod tests {
             cache_channel: "od:cache:invalidate".into(),
             stream: "classification-jobs".into(),
             database_url: database_url.clone(),
-            llm_endpoint,
-            llm_api_key: "test-key".into(),
+            llm_endpoint: Some(llm_endpoint.clone()),
+            llm_api_key: Some("test-key".into()),
+            providers: Vec::new(),
+            routing: RoutingConfig::default(),
             metrics_host: "127.0.0.1".into(),
             metrics_port: 0,
         };
 
-        let consumer = JobConsumer::new(&cfg, pool.clone()).await.unwrap();
+        let provider = cfg.resolve_primary_provider().unwrap();
+        let consumer = JobConsumer::new(&cfg, provider, pool.clone())
+            .await
+            .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
         let job = ClassificationJobPayload {
@@ -449,13 +579,18 @@ mod tests {
             cache_channel: "od:cache:invalidate".into(),
             stream: "classification-jobs".into(),
             database_url: database_url.clone(),
-            llm_endpoint,
-            llm_api_key: "test-key".into(),
+            llm_endpoint: Some(llm_endpoint.clone()),
+            llm_api_key: Some("test-key".into()),
+            providers: Vec::new(),
+            routing: RoutingConfig::default(),
             metrics_host: "127.0.0.1".into(),
             metrics_port: 0,
         };
 
-        let consumer = JobConsumer::new(&cfg, pool.clone()).await.unwrap();
+        let provider = cfg.resolve_primary_provider().unwrap();
+        let consumer = JobConsumer::new(&cfg, provider, pool.clone())
+            .await
+            .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
         let job = ClassificationJobPayload {

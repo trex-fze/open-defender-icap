@@ -4,8 +4,27 @@
   "cache_channel": "od:cache:invalidate",
   "stream": "classification-jobs",
   "database_url": "postgres://defender:defender@postgres:5432/defender",
-  "llm_endpoint": "http://llm-service:8080/classify",
-  "llm_api_key": "changeme-llm",
+  "providers": [
+    {
+      "name": "local-ollama",
+      "type": "ollama",
+      "endpoint": "http://ollama:11434/api/generate",
+      "model": "llama3",
+      "timeout_ms": 20000
+    },
+    {
+      "name": "openai-fallback",
+      "type": "openai",
+      "endpoint": "https://api.openai.com/v1/chat/completions",
+      "model": "gpt-4o-mini",
+      "api_key_env": "OPENAI_API_KEY"
+    }
+  ],
+  "routing": {
+    "default": "local-ollama",
+    "fallback": "openai-fallback",
+    "policy": "failover"
+  },
   "metrics_host": "0.0.0.0",
   "metrics_port": 19015
 }
