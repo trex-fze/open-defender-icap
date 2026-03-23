@@ -78,7 +78,7 @@ struct RoutingConfig {
 }
 
 impl WorkerConfig {
-    fn resolve_primary_provider(&self) -> Result<ResolvedProvider> {
+    fn resolve_router(&self) -> Result<ProviderRouter> {
         if !self.providers.is_empty() {
             let name = self
                 .routing
@@ -86,12 +86,17 @@ impl WorkerConfig {
                 .as_deref()
                 .or_else(|| self.providers.first().map(|p| p.name.as_str()))
                 .ok_or_else(|| anyhow!("providers defined but no default specified"))?;
-            let provider = self
-                .providers
-                .iter()
-                .find(|p| p.name == name)
-                .ok_or_else(|| anyhow!("provider '{name}' not found"))?;
-            return ResolvedProvider::from_config(provider);
+            let primary = self.find_provider(name)?;
+            let fallback = if let Some(fallback_name) = self.routing.fallback.as_deref() {
+                if fallback_name == name {
+                    None
+                } else {
+                    Some(self.find_provider(fallback_name)?)
+                }
+            } else {
+                None
+            };
+            return Ok(ProviderRouter { primary, fallback });
         }
 
         // fallback to legacy fields
@@ -104,15 +109,27 @@ impl WorkerConfig {
             .clone()
             .or_else(|| env::var("LLM_API_KEY").ok())
             .unwrap_or_default();
-        Ok(ResolvedProvider {
-            name: "legacy".into(),
-            kind: ProviderKind::OpenaiCompatible,
-            endpoint,
-            model: None,
-            timeout_ms: None,
-            headers: HashMap::new(),
-            api_key,
+        Ok(ProviderRouter {
+            primary: ResolvedProvider {
+                name: "legacy".into(),
+                kind: ProviderKind::OpenaiCompatible,
+                endpoint,
+                model: None,
+                timeout_ms: None,
+                headers: HashMap::new(),
+                api_key,
+            },
+            fallback: None,
         })
+    }
+
+    fn find_provider(&self, name: &str) -> Result<ResolvedProvider> {
+        let provider = self
+            .providers
+            .iter()
+            .find(|p| p.name == name)
+            .ok_or_else(|| anyhow!("provider '{name}' not found"))?;
+        ResolvedProvider::from_config(provider)
     }
 }
 
@@ -126,6 +143,21 @@ struct ResolvedProvider {
     timeout_ms: Option<u64>,
     headers: HashMap<String, String>,
     api_key: String,
+}
+
+struct ProviderRouter {
+    primary: ResolvedProvider,
+    fallback: Option<ResolvedProvider>,
+}
+
+impl ProviderRouter {
+    fn providers(&self) -> Vec<&ResolvedProvider> {
+        let mut list = vec![&self.primary];
+        if let Some(fallback) = &self.fallback {
+            list.push(fallback);
+        }
+        list
+    }
 }
 
 impl ResolvedProvider {
@@ -177,10 +209,10 @@ async fn main() -> Result<()> {
         "LLM worker initialized"
     );
 
-    let provider = match cfg.resolve_primary_provider() {
+    let router = match cfg.resolve_router() {
         Ok(p) => p,
         Err(err) => {
-            return Err(err.context("failed to resolve primary LLM provider"));
+            return Err(err.context("failed to resolve LLM providers"));
         }
     };
 
@@ -200,7 +232,7 @@ async fn main() -> Result<()> {
     let cache_listener = CacheListener::new(&cfg.redis_url, &cfg.cache_channel).await?;
     tokio::spawn(cache_listener.run());
 
-    let job_consumer = JobConsumer::new(&cfg, provider, pool).await?;
+    let job_consumer = JobConsumer::new(&cfg, router, pool).await?;
     tokio::spawn(job_consumer.run());
 
     signal::ctrl_c().await?;
@@ -216,16 +248,16 @@ struct JobConsumer {
     redis_url: String,
     stream: String,
     pool: PgPool,
-    provider: ResolvedProvider,
+    router: ProviderRouter,
 }
 
 impl JobConsumer {
-    async fn new(cfg: &WorkerConfig, provider: ResolvedProvider, pool: PgPool) -> Result<Self> {
+    async fn new(cfg: &WorkerConfig, router: ProviderRouter, pool: PgPool) -> Result<Self> {
         Ok(Self {
             redis_url: cfg.redis_url.clone(),
             stream: cfg.stream.clone(),
             pool,
-            provider,
+            router,
         })
     }
 
@@ -270,7 +302,7 @@ impl JobConsumer {
 
     async fn handle_job(&self, payload: &str) -> Result<(), anyhow::Error> {
         let job: ClassificationJobPayload = serde_json::from_str(payload)?;
-        let verdict = invoke_llm(&self.provider.endpoint, &self.provider.api_key, &job).await?;
+        let (verdict, provider_name) = self.invoke_with_fallback(&job).await?;
         store_classification(&self.pool, &job, &verdict)
             .await
             .context("failed to persist classification")?;
@@ -278,10 +310,28 @@ impl JobConsumer {
             target = "svc-llm-worker",
             key = job.normalized_key,
             action = ?verdict.recommended_action,
-            provider = self.provider.name,
+            provider = provider_name,
             "classification stored"
         );
         Ok(())
+    }
+
+    async fn invoke_with_fallback(
+        &self,
+        job: &ClassificationJobPayload,
+    ) -> Result<(LlmResponse, String)> {
+        let mut last_err: Option<anyhow::Error> = None;
+        for provider in self.router.providers() {
+            match invoke_llm(provider, job).await {
+                Ok(response) => return Ok((response, provider.name.clone())),
+                Err(err) => {
+                    error!(target = "svc-llm-worker", provider = provider.name, %err, "llm invocation failed");
+                    last_err = Some(err);
+                    continue;
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow!("no provider available")))
     }
 }
 
@@ -414,11 +464,7 @@ async fn store_classification(
     Ok(())
 }
 
-async fn invoke_llm(
-    endpoint: &str,
-    api_key: &str,
-    job: &ClassificationJobPayload,
-) -> Result<LlmResponse> {
+async fn invoke_llm(provider: &ResolvedProvider, job: &ClassificationJobPayload) -> Result<LlmResponse> {
     let client = reqwest::Client::new();
     let payload = PromptPayload {
         normalized_key: &job.normalized_key,
@@ -430,9 +476,14 @@ async fn invoke_llm(
 
     metrics::record_llm_invocation();
     let start = Instant::now();
-    let response = match client
-        .post(endpoint)
-        .header("Authorization", format!("Bearer {}", api_key))
+    let mut request = client.post(&provider.endpoint);
+    if !provider.api_key.is_empty() {
+        request = request.header("Authorization", format!("Bearer {}", provider.api_key));
+    }
+    for (key, value) in &provider.headers {
+        request = request.header(key, value);
+    }
+    let response = match request
         .json(&payload)
         .send()
         .await
@@ -512,8 +563,8 @@ mod tests {
             metrics_port: 0,
         };
 
-        let provider = cfg.resolve_primary_provider().unwrap();
-        let consumer = JobConsumer::new(&cfg, provider, pool.clone())
+        let router = cfg.resolve_router().unwrap();
+        let consumer = JobConsumer::new(&cfg, router, pool.clone())
             .await
             .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
@@ -587,8 +638,8 @@ mod tests {
             metrics_port: 0,
         };
 
-        let provider = cfg.resolve_primary_provider().unwrap();
-        let consumer = JobConsumer::new(&cfg, provider, pool.clone())
+        let router = cfg.resolve_router().unwrap();
+        let consumer = JobConsumer::new(&cfg, router, pool.clone())
             .await
             .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
