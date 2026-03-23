@@ -1,7 +1,13 @@
 mod audit;
 mod auth;
 mod cache;
+mod cache_entries_api;
+mod cli_logs;
 mod metrics;
+mod pagination;
+mod policies;
+mod reporting;
+mod taxonomy;
 
 use anyhow::{Context, Result};
 use audit::{AuditEvent, AuditLogger, ElasticExporter};
@@ -13,7 +19,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     middleware,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -99,7 +105,7 @@ fn default_review_sla_seconds() -> u64 {
 }
 
 #[derive(Clone)]
-struct AppState {
+pub struct AppState {
     pool: PgPool,
     cache_invalidator: Option<Arc<CacheInvalidator>>,
     audit_logger: AuditLogger,
@@ -107,6 +113,10 @@ struct AppState {
 }
 
 impl AppState {
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     async fn invalidate_override(&self, scope_type: &str, scope_value: &str) {
         if let Some(cache) = &self.cache_invalidator {
             if let Err(err) = cache.invalidate_override(scope_type, scope_value).await {
@@ -129,6 +139,27 @@ impl AppState {
                     %err,
                     normalized_key,
                     "failed to invalidate cache for review update"
+                );
+            }
+        }
+    }
+
+    pub async fn invalidate_policy_cache(&self) {
+        if let Some(cache) = &self.cache_invalidator {
+            if let Err(err) = cache.invalidate_policy().await {
+                warn!(target = "svc-admin", %err, "failed to invalidate caches after policy change");
+            }
+        }
+    }
+
+    pub async fn invalidate_cache_key(&self, cache_key: &str) {
+        if let Some(cache) = &self.cache_invalidator {
+            if let Err(err) = cache.invalidate_key(cache_key).await {
+                warn!(
+                    target = "svc-admin",
+                    %err,
+                    cache_key,
+                    "failed to purge cache entry"
                 );
             }
         }
@@ -171,6 +202,27 @@ impl AppState {
                 action: action.to_string(),
                 target_type: Some("review".into()),
                 target_id: Some(target_id),
+                payload,
+            })
+            .await;
+    }
+
+    pub async fn log_policy_event<T>(
+        &self,
+        action: &str,
+        actor: Option<String>,
+        target_id: Option<String>,
+        payload: T,
+    ) where
+        T: serde::Serialize,
+    {
+        let payload = serde_json::to_value(payload).ok();
+        self.audit_logger
+            .log(AuditEvent {
+                actor,
+                action: action.to_string(),
+                target_type: Some("policy".into()),
+                target_id,
                 payload,
             })
             .await;
@@ -283,6 +335,44 @@ async fn main() -> Result<()> {
             "/api/v1/review-queue/:id/resolve",
             post(resolve_review_item),
         )
+        .route(
+            "/api/v1/policies",
+            get(policies::list_policies).post(policies::create_policy),
+        )
+        .route("/api/v1/policies/validate", post(policies::validate_policy))
+        .route(
+            "/api/v1/policies/:id",
+            get(policies::get_policy).put(policies::update_policy),
+        )
+        .route(
+            "/api/v1/policies/:id/publish",
+            post(policies::publish_policy),
+        )
+        .route(
+            "/api/v1/taxonomy/categories",
+            get(taxonomy::list_categories).post(taxonomy::create_category),
+        )
+        .route(
+            "/api/v1/taxonomy/categories/:id",
+            put(taxonomy::update_category).delete(taxonomy::delete_category),
+        )
+        .route(
+            "/api/v1/taxonomy/subcategories",
+            get(taxonomy::list_subcategories).post(taxonomy::create_subcategory),
+        )
+        .route(
+            "/api/v1/taxonomy/subcategories/:id",
+            put(taxonomy::update_subcategory).delete(taxonomy::delete_subcategory),
+        )
+        .route(
+            "/api/v1/reporting/aggregates",
+            get(reporting::list_aggregates),
+        )
+        .route(
+            "/api/v1/cache-entries/:cache_key",
+            get(cache_entries_api::get_entry).delete(cache_entries_api::delete_entry),
+        )
+        .route("/api/v1/cli-logs", get(cli_logs::list_cli_logs))
         .with_state(state.clone())
         .layer(auth_layer);
 
@@ -676,21 +766,25 @@ async fn resolve_review_item(
 }
 
 #[derive(Debug, Serialize)]
-struct ApiError {
+pub struct ApiError {
     error_code: &'static str,
     message: String,
 }
 
 impl ApiError {
-    fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             error_code: code,
             message: message.into(),
         }
     }
 
-    fn forbidden() -> Self {
+    pub fn forbidden() -> Self {
         Self::new("FORBIDDEN", "insufficient privileges")
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
     }
 }
 
@@ -915,7 +1009,7 @@ fn normalize_optional_field(value: Option<String>) -> Option<String> {
     })
 }
 
-fn validation_error(message: &str) -> (StatusCode, Json<ApiError>) {
+pub fn validation_error(message: &str) -> (StatusCode, Json<ApiError>) {
     (
         StatusCode::BAD_REQUEST,
         Json(ApiError::new("VALIDATION_ERROR", message.to_string())),

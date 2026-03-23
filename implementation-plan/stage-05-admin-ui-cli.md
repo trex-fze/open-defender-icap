@@ -8,8 +8,8 @@
 ## Work Breakdown
 | Task ID | Description | Owner | Dependencies | Status |
 | --- | --- | --- | --- | --- |
-| S5-T1 | Finalize API contracts + auth model | Backend Architect | Stage 3 data | ⬜ |
-| S5-T2 | Implement admin API routes (policies, overrides, reports) | Backend Eng | S5-T1 | ⬜ |
+| S5-T1 | Finalize API contracts + auth model | Backend Architect | Stage 3 data | ✅ | RFC now documents endpoints, RBAC, token flows |
+| S5-T2 | Implement admin API routes (policies, overrides, reports) | Backend Eng | S5-T1 | ✅ | Added policy/taxonomy/reporting/cache/cli log endpoints + pagination |
 | S5-T3 | Build React navigation + pages | Frontend Eng | S5-T1 | ⬜ |
 | S5-T4 | Add CLI commands + test harness | DevTools Eng | S5-T2 | ⬜ |
 | S5-T5 | RBAC enforcement across API/UI/CLI | Security Eng | S5-T2/T3 | ⬜ |
