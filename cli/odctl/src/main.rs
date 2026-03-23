@@ -63,6 +63,8 @@ enum Commands {
     Report(ReportCmd),
     #[clap(subcommand)]
     Logs(LogsCmd),
+    #[clap(subcommand)]
+    Llm(LlmCmd),
     Smoke {
         #[clap(long, default_value = "staging")]
         profile: String,
@@ -192,6 +194,14 @@ enum LogsCmd {
         operator: Option<String>,
         #[clap(long, default_value_t = 50)]
         limit: u32,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum LlmCmd {
+    Providers {
+        #[clap(long, default_value = "http://localhost:19015/providers")]
+        url: String,
     },
 }
 
@@ -410,6 +420,7 @@ async fn main() -> Result<()> {
         Commands::Cache(cmd) => handle_cache(cmd, &client, cli.json).await?,
         Commands::Report(cmd) => handle_report(cmd, &client, cli.json).await?,
         Commands::Logs(cmd) => handle_logs(cmd, &client, cli.json).await?,
+        Commands::Llm(cmd) => handle_llm(cmd, cli.json).await?,
         Commands::Smoke { profile } => run_smoke(profile).await?,
         Commands::Auth(_) => unreachable!(),
     }
@@ -900,6 +911,31 @@ async fn handle_logs(cmd: &LogsCmd, client: &ApiClient, json: bool) -> Result<()
     Ok(())
 }
 
+async fn handle_llm(cmd: &LlmCmd, json: bool) -> Result<()> {
+    match cmd {
+        LlmCmd::Providers { url } => {
+            let summaries: Vec<LlmProviderSummary> = reqwest::get(url).await?.json().await?;
+            if json {
+                print_json(&summaries)?;
+            } else {
+                let rows = summaries
+                    .iter()
+                    .map(|summary| {
+                        vec![
+                            summary.name.clone(),
+                            summary.provider_type.clone(),
+                            summary.endpoint.clone(),
+                            summary.role.clone(),
+                        ]
+                    })
+                    .collect();
+                print_table(&["Name", "Type", "Endpoint", "Role"], rows);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn load_policy_document(file: &PathBuf) -> Result<PolicyDocument> {
     let path = file
         .to_str()
@@ -1296,6 +1332,14 @@ struct ReportingAggregate {
     period_start: String,
     metrics: serde_json::Value,
     created_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct LlmProviderSummary {
+    name: String,
+    provider_type: String,
+    endpoint: String,
+    role: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
