@@ -13,4 +13,4 @@
 | S5-T3 | Build React navigation + pages | Frontend Eng | S5-T1 | ✅ | Shell + role-aware routing, live Admin API hooks landed |
 | S5-T4 | Add CLI commands + test harness | DevTools Eng | S5-T2 | ✅ | odctl rebuilt on clap with policy/override/review/report/cache flows; `cargo test -p odctl` green |
 | S5-T5 | RBAC enforcement across API/UI/CLI | Security Eng | S5-T2/T3 | ✅ | Admin API validates HS256 JWTs, React AuthProvider persists tokens, odctl ships OIDC device flow + refresh |
-| S5-T6 | UI/CLI e2e + accessibility tests | QA | S5-T3/T4 | 🔄 | Vitest + odctl tests landed; Cypress suite now covers login, dashboard, policies with axe-core. Remaining: review queue/overrides/reporting specs + broader axe fixes |
+| S5-T6 | UI/CLI e2e + accessibility tests | QA | S5-T3/T4 | 🔄 | Vitest + odctl tests landed; Cypress suite now covers login, dashboard, policies, review queue, overrides w/ axe-core. Remaining: investigations/reporting specs + relax axe filters after contrast fixes |

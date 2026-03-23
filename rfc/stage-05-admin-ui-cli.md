@@ -13,7 +13,7 @@
 - [x] React UI navigation + role-aware views per Spec §18 (live hooks w/ mock fallback, role-aware routing, gradients/typography implemented).
 - [x] CLI command tree per Spec §19 with table/json output (clap-based `odctl` covering policy, override, review, cache, reporting, logs, smoke).
 - [x] Auth integration (OIDC flows, token storage) – Spec §§18–19 (Admin API enforcing HS256 JWTs, React AuthProvider storing access tokens, `odctl auth login` implementing OIDC device flow with refreshable sessions).
-- [/] Unit + e2e tests (React Testing Library, Cypress, CLI integration) – Spec §25 (Vitest coverage for auth/context/hooks + odctl integration tests shipped; Cypress now runs login/dashboard/policies w/ axe. Review queue + override e2e still pending.)
+- [/] Unit + e2e tests (React Testing Library, Cypress, CLI integration) – Spec §25 (Vitest + odctl integration tests shipped; Cypress now exercises login, dashboard, policies, overrides, review queue with axe. Reporting/investigations specs still pending.)
 - [ ] Accessibility + UX guidelines (fonts, gradients, responsive) – Spec §18 instructions.
 
 ## Admin API Contract (Spec §23)
