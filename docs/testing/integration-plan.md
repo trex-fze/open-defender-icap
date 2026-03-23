@@ -24,6 +24,7 @@ This document explains the docker-compose driven integration suites required for
 - Minimal stack: `docker compose -f docker-compose.smoke.yml up --abort-on-container-exit`
 - CI stack: `docker compose -f docker-compose.yml -f docker-compose.test.yml up --build`
 - LM Studio stack: `docker compose -f docker-compose.yml -f docker-compose.lmstudio.yml up -d lmstudio`
+- Hybrid stack (LM Studio + Ollama): `make compose-hybrid`
 
 ## Next steps
 - Integrate `tests/integration.sh` into CI (GitHub Actions, Jenkins, etc.).

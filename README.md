@@ -62,8 +62,8 @@ flowchart LR
    ```bash
    make compose-up                 # equivalent to docker compose up --build
    ```
-   - To launch the optional LM Studio container for offline inference: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.lmstudio.yml up -d lmstudio`
-   - To launch the optional Ollama container: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.ollama.yml up -d ollama`
+   - To launch both offline providers together: `make compose-hybrid` (wraps LM Studio + Ollama overlays).
+   - Individual containers: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.lmstudio.yml up -d lmstudio` or `...docker-compose.ollama.yml up -d ollama`.
    - Update `config/llm-worker.json` to point at your LM Studio host (default example uses `http://192.168.1.170:1234`).
 4. **Run health & smoke checks**:
    ```bash
@@ -159,6 +159,7 @@ flowchart LR
 - CLI inspection: `odctl llm providers --url http://localhost:19015/providers`.
 - Launch LM Studio via docker: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.lmstudio.yml up -d lmstudio` (serves on `http://localhost:1234`).
 - Launch Ollama via docker: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.ollama.yml up -d ollama` (serves on `http://localhost:11434`).
+- Combined stack (policy + AI providers): `make compose-hybrid`.
 
 ## FAQ
 
