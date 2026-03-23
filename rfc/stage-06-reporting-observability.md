@@ -11,10 +11,9 @@
 ## Checklist
 - [x] Event ingestion pipeline (Filebeat/ingester) with trace correlation – Spec §17 (Filebeat container ships Squid logs to the new Rust event-ingester service which enriches events and bulk indexes them into Elasticsearch).
 - [x] Elasticsearch index templates, ILM policies, retention – Spec §17 & §20 (JSON templates + ILM policy checked in under `deploy/elastic/` and auto-applied by event-ingester on startup).
-- [ ] Elasticsearch index templates, ILM policies, retention – Spec §17 & §20.
 - [x] Kibana dashboards (IP, user/device, management, security) – Spec §16 + §17 (initial Traffic Operations dashboard + saved objects under `deploy/kibana/dashboards` covering allow/block trends and top blocked domains; additional panels follow the same pattern).
-- [ ] Metrics export (`squid_to_icap_latency`, `cache_hit_ratio`, etc.) – Spec §33.
-- [ ] Alert definitions + runbooks – Spec §33, §34.
+- [x] Metrics export (`squid_to_icap_latency`, `cache_hit_ratio`, etc.) – Spec §33 (ICAP adaptor now exposes cache hit ratio + end-to-end latency; event-ingester publishes batch counters and durations; Prometheus scrapes all services).
+- [x] Alert definitions + runbooks – Spec §33, §34 (Prometheus loads `prometheus-rules.yml` with cache ratio, latency, ingestion failure, and review SLA breach alerts).
 - [ ] Report APIs & CLI helpers – Spec §16, §19.
 - [ ] Unit/integration tests for ingestion, dashboards, and alerting workflows – Spec §25–26.
 

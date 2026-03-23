@@ -1,0 +1,38 @@
+groups:
+  - name: stage6-alerts
+    rules:
+      - alert: CacheHitRatioLow
+        expr: avg_over_time(cache_hit_ratio[5m]) < 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cache hit ratio below 90%"
+          description: "Average cache hit ratio over the last 5m is {{ $value }}"
+
+      - alert: SquidToIcapLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(squid_to_icap_latency_seconds_bucket[5m])) by (le)) > 0.5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ICAP adaptor latency p95 above 500ms"
+          description: "p95 Squid → ICAP latency is {{ $value }}s"
+
+      - alert: EventIngestFailures
+        expr: increase(ingest_failures_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Event ingestion failures detected"
+          description: "Bulk ingestion failures observed in the last 5 minutes"
+
+      - alert: ReviewSlaBreaches
+        expr: increase(review_sla_breached_total[15m]) > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Review SLA breach rate high"
+          description: "More than 5 review items breached SLA in the last 15 minutes"

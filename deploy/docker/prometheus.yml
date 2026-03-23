@@ -1,7 +1,26 @@
 global:
   scrape_interval: 15s
 
+rule_files:
+  - /etc/prometheus/prometheus-rules.yml
+
 scrape_configs:
   - job_name: "icap-adaptor"
     static_configs:
       - targets: ["icap-adaptor:19005"]
+  - job_name: "admin-api"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["admin-api:19000"]
+  - job_name: "event-ingester"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["event-ingester:19100"]
+  - job_name: "llm-worker"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["llm-worker:19015"]
+  - job_name: "reclass-worker"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["reclass-worker:19016"]

@@ -1,6 +1,7 @@
 mod bootstrap;
 mod config;
 mod elastic;
+mod metrics;
 mod models;
 
 use axum::{
@@ -11,8 +12,7 @@ use elastic::ElasticWriter;
 use models::{FilebeatEnvelope, HealthResponse};
 use serde_json::Value;
 use std::net::SocketAddr;
-use tokio::net::TcpListener;
-use tokio::signal;
+use tokio::{net::TcpListener, signal, time::Instant};
 use tracing::{error, info};
 
 #[derive(Clone)]
@@ -45,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health/ready", get(ready))
+        .route("/metrics", get(metrics::metrics_endpoint))
         .route("/ingest/filebeat", post(filebeat_ingest))
         .with_state(state);
 
@@ -102,17 +103,21 @@ async fn filebeat_ingest(
     }
 
     let index_prefix = state.index_prefix.clone();
+    let start = Instant::now();
+    let event_count = docs.len();
     state
         .writer
         .bulk_index(index_prefix, docs)
         .await
         .map_err(|err| {
+            metrics::record_failure();
             error!(target = "svc-ingest", %err, "failed to index events");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "failed to index events".into(),
             )
         })?;
+    metrics::record_batch(event_count, start.elapsed().as_secs_f64());
 
     Ok(StatusCode::ACCEPTED)
 }

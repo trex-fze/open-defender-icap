@@ -74,6 +74,7 @@ async fn handle_connection(
     policy_client: Arc<PolicyClient>,
     job_publisher: Option<JobPublisher>,
 ) -> Result<()> {
+    let roundtrip_start = tokio::time::Instant::now();
     let mut buf = vec![0u8; cfg.preview_size.max(1024)];
     let n = socket.read(&mut buf).await?;
     let raw = String::from_utf8_lossy(&buf[..n]);
@@ -138,6 +139,7 @@ async fn handle_connection(
     let response = icap_response(&decision.action);
     socket.write_all(response.as_bytes()).await?;
     socket.shutdown().await?;
+    metrics::observe_squid_roundtrip(roundtrip_start.elapsed().as_secs_f64());
     Ok(())
 }
 
