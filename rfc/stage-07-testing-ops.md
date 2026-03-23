@@ -13,7 +13,7 @@
 - [x] Performance/load tests hitting KPIs (Spec §29) – k6 scenario documented in `docs/testing/perf-plan.md` and scripted via `tests/perf/k6-traffic.js`.
 - [x] Security tests (authZ, injection, prompt, fail-open/close) – Spec §30 (automation via `tests/security/authz-smoke.sh`, plus manual prompt-injection/ OIDC RBAC steps in `docs/testing/security-plan.md`).
 - [x] Deployment/rollback checklists validated (Spec §28 & §35) – documented in `docs/deployment/rollback-plan.md` with compose/k8s workflows plus integration smoke automation.
-- [ ] Evidence artifacts compiled (Spec §29–§31) with signoffs for DoD.
+- [x] Evidence artifacts compiled (Spec §29–§31) with signoffs for DoD (see `docs/evidence/stage07-checklist.md`).
 
 ## Traceability Plan
 | Requirement | Section | Artifact |
