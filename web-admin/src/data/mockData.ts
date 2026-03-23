@@ -22,12 +22,12 @@ export const investigations = [
   },
 ];
 
-type PolicyRule = {
-  id: string;
-  description?: string;
-  priority: number;
-  action: string;
-  conditions: Record<string, unknown>;
+export type PolicyRule = {
+    id: string;
+    description?: string;
+    priority: number;
+    action: string;
+    conditions: Record<string, unknown>;
 };
 
 export type PolicySummary = {
