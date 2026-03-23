@@ -40,7 +40,7 @@
 
 ### Deployment
 - Default example: LM Studio at `http://192.168.1.170:1234` running `gpt-oss-120b`, with OpenAI fallback.
-- Compose overlays (`docker-compose.lmstudio.yml`, `docker-compose.ollama.yml`) spin up LM Studio/Ollama containers for local testing.
+- Operators run LM Studio/Ollama on separate hosts or docker instances; the core compose stack remains unchanged.
 - Online providers require API keys stored in `.env` or secret manager.
 
 ## Open Questions

@@ -62,9 +62,7 @@ flowchart LR
    ```bash
    make compose-up                 # equivalent to docker compose up --build
    ```
-   - To launch both offline providers together: `make compose-hybrid` (wraps LM Studio + Ollama overlays).
-   - Individual containers: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.lmstudio.yml up -d lmstudio` or `...docker-compose.ollama.yml up -d ollama`.
-   - Update `config/llm-worker.json` to point at your LM Studio host (default example uses `http://192.168.1.170:1234`).
+   - Update `config/llm-worker.json` to point at your LM Studio host (default example uses `http://192.168.1.170:1234`). Run LM Studio/Ollama separately on your network; they are **not** part of the compose stack.
 4. **Run health & smoke checks**:
    ```bash
    tests/unit.sh                   # workspace + React unit tests
@@ -153,13 +151,12 @@ flowchart LR
 ```
 
 - Supported `type` values: `ollama`, `lmstudio`, `vllm`, `openai`, `openai_compatible`, `anthropic`, `custom_json` (legacy HTTP).
-- Offline providers (LM Studio at `http://192.168.1.170:1234`, Ollama on `http://localhost:11434`, etc.) run on your LAN or compose overlay; online providers require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
+- Offline providers (LM Studio at `http://192.168.1.170:1234`, Ollama on `http://localhost:11434`, etc.) run on your LAN or standalone docker instances; online providers require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
 - The worker automatically records provider names in logs/metrics; fallback triggers if the primary fails.
 - Query configured providers anytime: `curl http://localhost:19015/providers | jq`.
 - CLI inspection: `odctl llm providers --url http://localhost:19015/providers`.
-- Launch LM Studio via docker: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.lmstudio.yml up -d lmstudio` (serves on `http://localhost:1234`).
-- Launch Ollama via docker: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.ollama.yml up -d ollama` (serves on `http://localhost:11434`).
-- Combined stack (policy + AI providers): `make compose-hybrid`.
+- Run LM Studio separately (local install or remote host like `192.168.1.170:1234`).
+- Run Ollama separately (`ollama serve` or your own docker command) and update provider endpoints.
 
 ## FAQ
 

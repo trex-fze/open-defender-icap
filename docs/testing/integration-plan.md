@@ -6,7 +6,7 @@ This document explains the docker-compose driven integration suites required for
 - Base file: `deploy/docker/docker-compose.yml`
 - Requirements: Docker Engine/Compose, `.env` with credentials (`OD_ADMIN_TOKEN`, `ELASTIC_PASSWORD`, etc.).
 - Services: Redis, Postgres, Policy Engine, Admin API, ICAP adaptor, workers, event-ingester, Filebeat, Elasticsearch, Kibana, Prometheus.
-- Optional AI overlay: add `-f deploy/docker/docker-compose.lmstudio.yml` to start an LM Studio container (`lmstudio-edge`).
+- Optional: run LM Studio or Ollama separately on your own hosts; the compose stack does not manage AI providers.
 
 ## Test automation
 - **Script**: `tests/integration.sh`
@@ -23,8 +23,7 @@ This document explains the docker-compose driven integration suites required for
 ## Manual smoke variants
 - Minimal stack: `docker compose -f docker-compose.smoke.yml up --abort-on-container-exit`
 - CI stack: `docker compose -f docker-compose.yml -f docker-compose.test.yml up --build`
-- LM Studio stack: `docker compose -f docker-compose.yml -f docker-compose.lmstudio.yml up -d lmstudio`
-- Hybrid stack (LM Studio + Ollama): `make compose-hybrid`
+- LM Studio/Ollama: run independently (local install or your own docker invocation) and update `config/llm-worker.json` accordingly.
 
 ## Next steps
 - Integrate `tests/integration.sh` into CI (GitHub Actions, Jenkins, etc.).

@@ -28,15 +28,19 @@ compose_ps() {
   (cd "$STACK_DIR" && docker compose ps --services --filter "status=running" | grep -Fx "$svc" >/dev/null)
 }
 
-PRIMARY_SERVICE=${PRIMARY_SERVICE:-"lmstudio"}
+PRIMARY_SERVICE=${PRIMARY_SERVICE:-""}
 PRIMARY_STOPPED=0
 
-if compose_ps "$PRIMARY_SERVICE" >/dev/null 2>&1; then
-  echo "[failover] Stopping primary provider container ($PRIMARY_SERVICE)"
-  compose_stop "$PRIMARY_SERVICE"
-  PRIMARY_STOPPED=1
+if [[ -n "$PRIMARY_SERVICE" ]]; then
+  if compose_ps "$PRIMARY_SERVICE" >/dev/null 2>&1; then
+    echo "[failover] Stopping primary provider container ($PRIMARY_SERVICE)"
+    compose_stop "$PRIMARY_SERVICE"
+    PRIMARY_STOPPED=1
+  else
+    echo "[failover] Primary provider container $PRIMARY_SERVICE not found in compose stack"
+  fi
 else
-  echo "[failover] Primary provider container $PRIMARY_SERVICE not running (continuing)"
+  echo "[failover] PRIMARY_SERVICE not set; assuming remote/offline provider. Ensure you stop it manually if needed."
 fi
 
 JOB_KEY="domain:failover.$(date +%s)"

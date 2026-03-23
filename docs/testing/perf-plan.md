@@ -4,7 +4,7 @@ We use k6 to validate that the Admin API (policies + reporting endpoints) meets 
 
 ## Scripts
 - `tests/perf/k6-traffic.js`: exercises `/api/v1/reporting/traffic` and `/api/v1/policies` with a steady 20 VU load.
-- `tests/perf/llm-failover.sh`: stops the primary LM Studio container, enqueues a classification job, and verifies fallback providers continue processing.
+- `tests/perf/llm-failover.sh`: optionally stops a local LM Studio container (set `PRIMARY_SERVICE=lmstudio` if using compose); otherwise expect you to disable the primary manually before running.
 
 ## Running locally
 ```bash
@@ -12,8 +12,8 @@ BASE_URL=http://localhost:19000 \
 ADMIN_TOKEN=changeme-admin \
 k6 run tests/perf/k6-traffic.js
 
-# failover smoke (requires docker compose stack + redis-cli + psql)
-tests/perf/llm-failover.sh
+# failover smoke (set PRIMARY_SERVICE if compose manages your LM node)
+PRIMARY_SERVICE=lmstudio tests/perf/llm-failover.sh
 ```
 
 Expected thresholds:
