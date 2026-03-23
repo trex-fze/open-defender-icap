@@ -12,7 +12,7 @@
 - [x] Admin API endpoints per Spec §23 (policy decision support, override CRUD, reporting queries).
 - [x] React UI navigation + role-aware views per Spec §18 (live hooks w/ mock fallback, role-aware routing, gradients/typography implemented).
 - [x] CLI command tree per Spec §19 with table/json output (clap-based `odctl` covering policy, override, review, cache, reporting, logs, smoke).
-- [ ] Auth integration (OIDC flows, token storage) – Spec §§18–19.
+- [x] Auth integration (OIDC flows, token storage) – Spec §§18–19 (Admin API enforcing HS256 JWTs, React AuthProvider storing access tokens, `odctl auth login` implementing OIDC device flow with refreshable sessions).
 - [ ] Unit + e2e tests (React Testing Library, Cypress, CLI integration) – Spec §25.
 - [ ] Accessibility + UX guidelines (fonts, gradients, responsive) – Spec §18 instructions.
 
