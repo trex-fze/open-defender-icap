@@ -36,7 +36,7 @@ export const InvestigationsPage = () => {
       {error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
           <p style={{ margin: 0, color: '#ff9b9b' }}>Unable to reach Admin API: {error}</p>
-          <p style={{ color: '#9fb2d0' }}>Showing mock data while we retry the live feed.</p>
+          <p style={{ color: 'var(--muted)' }}>Showing mock data while we retry the live feed.</p>
         </div>
       ) : null}
 
@@ -61,7 +61,7 @@ export const InvestigationsPage = () => {
             ))}
           </div>
         ) : (
-          <div className="table-wrapper">
+          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Investigations table">
             <table>
               <thead>
                 <tr>

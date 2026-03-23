@@ -15,10 +15,10 @@ describe('Review queue view', () => {
     });
   });
 
-  it('passes axe scan (critical)', () => {
+  it('passes axe scan (serious+)', () => {
     cy.injectAxe();
     cy.checkA11y('.glass-panel', {
-      includedImpacts: ['critical'],
+      includedImpacts: ['serious', 'critical'],
     });
   });
 });

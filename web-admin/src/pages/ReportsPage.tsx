@@ -45,7 +45,7 @@ export const ReportsPage = () => {
                 </div>
               ))}
             </div>
-            <div className="table-wrapper">
+            <div className="table-wrapper" role="region" tabIndex={0} aria-label="Reports table">
               <table>
                 <thead>
                   <tr>

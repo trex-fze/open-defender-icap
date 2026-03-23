@@ -61,7 +61,7 @@ export const ProtectedRoute = ({ children, roles }: GuardProps) => {
     return (
       <div className="glass-panel">
         <h2>Insufficient permissions</h2>
-        <p style={{ color: '#9fb2d0' }}>You need one of the following roles: {roles.join(', ')}</p>
+        <p style={{ color: 'var(--muted)' }}>You need one of the following roles: {roles.join(', ')}</p>
       </div>
     );
   }

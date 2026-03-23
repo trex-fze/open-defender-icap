@@ -7,7 +7,7 @@ export const DashboardPage = () => {
         <div>
           <p className="section-title">Command Deck</p>
           <h2 style={{ margin: 0, fontSize: '2.4rem' }}>Trust & Safety Pulse</h2>
-          <p style={{ color: '#9fb2d0' }}>Live telemetry from ICAP adaptor, Redis queue, and LLM worker.</p>
+          <p style={{ color: 'var(--muted)' }}>Live telemetry from ICAP adaptor, Redis queue, and LLM worker.</p>
         </div>
         <button className="cta-button">Download Report</button>
       </div>
@@ -33,7 +33,7 @@ export const DashboardPage = () => {
         </div>
         <div className="glass-panel">
           <p className="section-title">Review SLA</p>
-          <div className="table-wrapper">
+        <div className="table-wrapper" role="region" tabIndex={0} aria-label="Review SLA table">
             <table>
               <thead>
                 <tr>

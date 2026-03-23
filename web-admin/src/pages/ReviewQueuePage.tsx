@@ -32,7 +32,7 @@ export const ReviewQueuePage = () => {
             ))}
           </div>
         ) : (
-          <div className="table-wrapper">
+          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Review queue table">
             <table>
               <thead>
                 <tr>

@@ -16,10 +16,10 @@ describe('Dashboard flow', () => {
     });
   });
 
-  it('passes axe on main panel (critical impact)', () => {
+  it('passes axe on main panel (serious+)', () => {
     cy.injectAxe();
     cy.checkA11y('.main-panel', {
-      includedImpacts: ['critical'],
+      includedImpacts: ['serious', 'critical'],
     });
   });
 });

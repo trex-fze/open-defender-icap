@@ -21,7 +21,7 @@ export const PolicyDetailPage = () => {
     return (
       <div className="glass-panel">
         <p style={{ color: '#ff9b9b', marginTop: 0 }}>Policy not found.</p>
-        {error ? <p style={{ color: '#9fb2d0' }}>{error}</p> : null}
+        {error ? <p style={{ color: 'var(--muted)' }}>{error}</p> : null}
         <button className="cta-button" onClick={() => navigate('/policies')}>
           Back to policies
         </button>
@@ -35,7 +35,7 @@ export const PolicyDetailPage = () => {
         <div>
           <p className="section-title">Policy Detail</p>
           <h2 style={{ margin: 0 }}>{policy.name}</h2>
-          <p style={{ color: '#9fb2d0' }}>Version {policy.version}</p>
+          <p style={{ color: 'var(--muted)' }}>Version {policy.version}</p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           {isMock ? (
@@ -63,7 +63,7 @@ export const PolicyDetailPage = () => {
 
       <div className="glass-panel">
         <p className="section-title">Rules</p>
-        <div className="table-wrapper">
+        <div className="table-wrapper" role="region" tabIndex={0} aria-label="Policy rules table">
           <table>
             <thead>
               <tr>

@@ -13,10 +13,10 @@ describe('Investigations view', () => {
     cy.get('table tbody tr').should('have.length.greaterThan', 0);
   });
 
-  it('passes axe scan (critical)', () => {
+  it('passes axe scan (serious+)', () => {
     cy.injectAxe();
     cy.checkA11y('.glass-panel', {
-      includedImpacts: ['critical'],
+      includedImpacts: ['serious', 'critical'],
     });
   });
 });

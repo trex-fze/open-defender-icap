@@ -20,7 +20,7 @@ export const PoliciesPage = () => {
       {error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
           <p style={{ margin: 0, color: '#ff9b9b' }}>Failed to load live data: {error}</p>
-          <p style={{ marginTop: '0.35rem', color: '#9fb2d0' }}>
+          <p style={{ marginTop: '0.35rem', color: 'var(--muted)' }}>
             Showing cached mock data so you can keep iterating.
           </p>
         </div>
@@ -40,7 +40,7 @@ export const PoliciesPage = () => {
             ))}
           </div>
         ) : (
-          <div className="table-wrapper">
+          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Policies table">
             <table>
               <thead>
                 <tr>

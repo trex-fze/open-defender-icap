@@ -12,7 +12,7 @@ export const SettingsRbacPage = () => {
       </div>
 
       <div className="glass-panel">
-        <div className="table-wrapper">
+        <div className="table-wrapper" role="region" tabIndex={0} aria-label="RBAC matrix table">
           <table>
             <thead>
               <tr>

@@ -15,7 +15,7 @@ export const TaxonomyPage = () => {
         {taxonomy.categories.map((cat) => (
           <div key={cat.id} className="glass-panel">
             <h3 style={{ marginTop: 0 }}>{cat.name}</h3>
-            <p style={{ color: '#9fb2d0', marginTop: '-0.4rem' }}>Default action: {cat.defaultAction}</p>
+            <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>Default action: {cat.defaultAction}</p>
             <ul style={{ listStyle: 'none', padding: 0 }}>
               {cat.subcategories.map((sub) => (
                 <li

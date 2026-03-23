@@ -32,7 +32,7 @@ export const OverridesPage = () => {
             ))}
           </div>
         ) : (
-          <div className="table-wrapper">
+          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Overrides table">
             <table>
               <thead>
                 <tr>

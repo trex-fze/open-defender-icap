@@ -8,6 +8,7 @@
   --stone: #0f172a;
   --citrus: #fdd744;
   --peach: #ff7a7a;
+  --muted: #d7e5ff;
   --foam: #88f5e6;
   --sky: #3d9df3;
   --sand: #f5f4ef;
@@ -56,7 +57,7 @@ a {
 .nav-link {
   padding: 0.65rem 0.9rem;
   border-radius: 0.75rem;
-  color: #9fb2d0;
+  color: var(--muted);
   font-weight: 500;
   transition: background 0.2s ease, color 0.2s ease;
 }
@@ -105,6 +106,12 @@ a {
 .table-wrapper {
   width: 100%;
   overflow-x: auto;
+  outline: none;
+}
+
+.table-wrapper:focus-visible {
+  outline: 2px solid var(--foam);
+  outline-offset: 4px;
 }
 
 table {
@@ -127,32 +134,36 @@ tr:hover td {
 .chip {
   display: inline-flex;
   align-items: center;
-  padding: 0.2rem 0.55rem;
+  padding: 0.25rem 0.65rem;
   border-radius: 999px;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   letter-spacing: 0.02em;
+  border: 1px solid transparent;
 }
 
 .chip--green {
-  background: rgba(136, 245, 230, 0.15);
-  color: #88f5e6;
+  background: rgba(8, 55, 63, 0.95);
+  color: #9ef7eb;
+  border-color: rgba(158, 247, 235, 0.4);
 }
 
 .chip--amber {
-  background: rgba(253, 215, 68, 0.15);
-  color: #fdd744;
+  background: rgba(63, 46, 7, 0.95);
+  color: #ffe17f;
+  border-color: rgba(255, 225, 127, 0.45);
 }
 
 .chip--red {
-  background: rgba(255, 122, 122, 0.18);
-  color: #ff9b9b;
+  background: rgba(78, 15, 28, 0.95);
+  color: #ffb9c6;
+  border-color: rgba(255, 185, 198, 0.4);
 }
 
 .section-title {
   font-size: 1rem;
   text-transform: uppercase;
   letter-spacing: 0.18em;
-  color: rgba(255, 255, 255, 0.65);
+  color: #d7e2ff;
   margin-bottom: 0.75rem;
 }
 
