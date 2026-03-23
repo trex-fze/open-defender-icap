@@ -1,8 +1,9 @@
 use anyhow::Result;
-use axum::{routing::get, Router};
+use axum::{extract::State, routing::get, Json, Router};
 use once_cell::sync::Lazy;
 use prometheus::{self, Encoder, Histogram, HistogramOpts, IntCounter, TextEncoder};
-use std::net::SocketAddr;
+use serde::Serialize;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -105,8 +106,33 @@ async fn metrics_handler() -> String {
     String::from_utf8(buffer).unwrap()
 }
 
-pub async fn serve_metrics(host: &str, port: u16) -> Result<()> {
-    let router = Router::new().route("/metrics", get(|| async { metrics_handler().await }));
+#[derive(Debug, Clone, Serialize)]
+pub enum ProviderRole {
+    #[serde(rename = "primary")]
+    Primary,
+    #[serde(rename = "fallback")]
+    Fallback,
+    #[serde(rename = "legacy")]
+    Legacy,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderSummary {
+    pub name: String,
+    pub provider_type: String,
+    pub endpoint: String,
+    pub role: ProviderRole,
+}
+
+pub async fn serve_metrics(
+    host: &str,
+    port: u16,
+    providers: Arc<Vec<ProviderSummary>>,
+) -> Result<()> {
+    let router = Router::new()
+        .route("/metrics", get(|| async { metrics_handler().await }))
+        .route("/providers", get(providers_handler))
+        .with_state(providers);
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
     let listener = TcpListener::bind(addr).await?;
     info!(
@@ -117,4 +143,10 @@ pub async fn serve_metrics(host: &str, port: u16) -> Result<()> {
     );
     axum::serve(listener, router).await?;
     Ok(())
+}
+
+async fn providers_handler(
+    State(providers): State<Arc<Vec<ProviderSummary>>>,
+) -> Json<Vec<ProviderSummary>> {
+    Json((*providers).clone())
 }

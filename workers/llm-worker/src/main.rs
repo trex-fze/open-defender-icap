@@ -9,9 +9,7 @@ use schema::{LlmResponse, PromptPayload};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use std::collections::HashMap;
-use std::env;
-use std::time::Duration;
+use std::{collections::HashMap, env, sync::Arc, time::Duration};
 use tokio::{signal, time::Instant};
 use tokio_stream::StreamExt;
 use tracing::{error, info, Level};
@@ -69,6 +67,20 @@ enum ProviderKind {
     CustomJson,
 }
 
+impl ProviderKind {
+    fn label(&self) -> &'static str {
+        match self {
+            ProviderKind::LmStudio => "lmstudio",
+            ProviderKind::Ollama => "ollama",
+            ProviderKind::Vllm => "vllm",
+            ProviderKind::Openai => "openai",
+            ProviderKind::Anthropic => "anthropic",
+            ProviderKind::OpenaiCompatible => "openai_compatible",
+            ProviderKind::CustomJson => "custom_json",
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone, Default)]
 struct RoutingConfig {
@@ -99,7 +111,26 @@ impl WorkerConfig {
             } else {
                 None
             };
-            return Ok(ProviderRouter { primary, fallback });
+            let mut catalog = Vec::new();
+            catalog.push(metrics::ProviderSummary {
+                name: primary.name.clone(),
+                provider_type: primary.kind.label().to_string(),
+                endpoint: primary.endpoint.clone(),
+                role: metrics::ProviderRole::Primary,
+            });
+            if let Some(fallback_ref) = fallback.as_ref() {
+                catalog.push(metrics::ProviderSummary {
+                    name: fallback_ref.name.clone(),
+                    provider_type: fallback_ref.kind.label().to_string(),
+                    endpoint: fallback_ref.endpoint.clone(),
+                    role: metrics::ProviderRole::Fallback,
+                });
+            }
+            return Ok(ProviderRouter {
+                primary,
+                fallback,
+                catalog: Arc::new(catalog),
+            });
         }
 
         // fallback to legacy fields
@@ -123,6 +154,12 @@ impl WorkerConfig {
                 api_key,
             },
             fallback: None,
+            catalog: Arc::new(vec![metrics::ProviderSummary {
+                name: "legacy".into(),
+                provider_type: ProviderKind::CustomJson.label().to_string(),
+                endpoint: "(config file)".into(),
+                role: metrics::ProviderRole::Legacy,
+            }]),
         })
     }
 
@@ -151,6 +188,7 @@ struct ResolvedProvider {
 struct ProviderRouter {
     primary: ResolvedProvider,
     fallback: Option<ResolvedProvider>,
+    catalog: Arc<Vec<metrics::ProviderSummary>>,
 }
 
 impl ProviderRouter {
@@ -160,6 +198,10 @@ impl ProviderRouter {
             list.push(fallback);
         }
         list
+    }
+
+    fn catalog(&self) -> Arc<Vec<metrics::ProviderSummary>> {
+        Arc::clone(&self.catalog)
     }
 }
 
@@ -223,10 +265,13 @@ async fn main() -> Result<()> {
         }
     };
 
+    let provider_catalog = router.catalog();
+
     let metrics_host = cfg.metrics_host.clone();
     let metrics_port = cfg.metrics_port;
+    let catalog_for_metrics = provider_catalog.clone();
     tokio::spawn(async move {
-        if let Err(err) = metrics::serve_metrics(&metrics_host, metrics_port).await {
+        if let Err(err) = metrics::serve_metrics(&metrics_host, metrics_port, catalog_for_metrics).await {
             error!(target = "svc-llm-worker", %err, "metrics server exited");
         }
     });

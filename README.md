@@ -150,6 +150,7 @@ flowchart LR
 - Supported `type` values: `ollama`, `lmstudio`, `vllm`, `openai`, `openai_compatible`, `anthropic`, `custom_json` (legacy HTTP).
 - Offline providers (Ollama/LM Studio) run locally via docker-compose overlays; online providers require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
 - The worker automatically records provider names in logs/metrics; fallback triggers if the primary fails.
+- Query configured providers anytime: `curl http://localhost:19015/providers | jq`.
 
 ## FAQ
 
