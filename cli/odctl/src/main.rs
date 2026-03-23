@@ -1,14 +1,20 @@
-use std::{fs, path::PathBuf, time::Duration};
+use std::{
+    fs,
+    path::PathBuf,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use common_types::PolicyAction;
+use dirs::config_dir;
 use policy_dsl::{Conditions as RuleConditions, PolicyDocument, PolicyRule as DslPolicyRule};
 use reqwest::Client;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
+    time::sleep,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -65,7 +71,18 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 enum AuthCmd {
-    Login,
+    Login {
+        #[clap(long, env = "OD_OIDC_CLIENT_ID")]
+        client_id: Option<String>,
+        #[clap(long = "device-url", env = "OD_OIDC_DEVICE_URL")]
+        device_url: Option<String>,
+        #[clap(long = "token-url", env = "OD_OIDC_TOKEN_URL")]
+        token_url: Option<String>,
+        #[clap(long, env = "OD_OIDC_SCOPE")]
+        scope: Option<String>,
+        #[clap(long, env = "OD_OIDC_AUDIENCE")]
+        audience: Option<String>,
+    },
     Logout,
     Status,
 }
@@ -170,14 +187,214 @@ enum LogsCmd {
     },
 }
 
+const DEFAULT_OIDC_SCOPE: &str = "openid profile email offline_access";
+const DEFAULT_DEVICE_URL: &str = "https://login.example.com/oauth/device/code";
+const DEFAULT_TOKEN_URL: &str = "https://login.example.com/oauth/token";
+const DEFAULT_CLIENT_ID: &str = "odctl-dev";
+
+#[derive(Debug, Clone)]
+struct DeviceFlowConfig {
+    client_id: String,
+    device_url: String,
+    token_url: String,
+    scope: String,
+    audience: Option<String>,
+}
+
+impl DeviceFlowConfig {
+    fn new(
+        client_id: Option<String>,
+        device_url: Option<String>,
+        token_url: Option<String>,
+        scope: Option<String>,
+        audience: Option<String>,
+    ) -> Self {
+        Self {
+            client_id: client_id.unwrap_or_else(|| DEFAULT_CLIENT_ID.to_string()),
+            device_url: device_url.unwrap_or_else(|| DEFAULT_DEVICE_URL.to_string()),
+            token_url: token_url.unwrap_or_else(|| DEFAULT_TOKEN_URL.to_string()),
+            scope: scope.unwrap_or_else(|| DEFAULT_OIDC_SCOPE.to_string()),
+            audience,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AuthSession {
+    access_token: String,
+    refresh_token: Option<String>,
+    token_type: Option<String>,
+    scope: Option<String>,
+    expires_at: Option<i64>,
+    obtained_at: Option<i64>,
+    client_id: String,
+    token_endpoint: String,
+    device_endpoint: Option<String>,
+    audience: Option<String>,
+}
+
+impl AuthSession {
+    fn is_expired(&self) -> bool {
+        if let Some(exp) = self.expires_at {
+            current_timestamp() + 60 >= exp // refresh one minute early
+        } else {
+            false
+        }
+    }
+}
+
+fn session_file() -> Result<PathBuf> {
+    let mut dir = config_dir().ok_or_else(|| anyhow!("unable to locate config directory"))?;
+    dir.push("odctl");
+    fs::create_dir_all(&dir)?;
+    dir.push("session.json");
+    Ok(dir)
+}
+
+fn load_session() -> Result<Option<AuthSession>> {
+    let path = session_file()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = fs::read_to_string(&path)?;
+    let session = serde_json::from_str::<AuthSession>(&data)?;
+    Ok(Some(session))
+}
+
+fn save_session(session: &AuthSession) -> Result<()> {
+    let path = session_file()?;
+    let data = serde_json::to_string_pretty(session)?;
+    fs::write(&path, data)?;
+    Ok(())
+}
+
+fn delete_session() -> Result<()> {
+    let path = session_file()?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+async fn resolve_token(cli_token: Option<String>) -> Result<Option<String>> {
+    if let Some(token) = cli_token {
+        if !token.trim().is_empty() {
+            return Ok(Some(token));
+        }
+    }
+    let mut session = match load_session()? {
+        Some(session) => session,
+        None => {
+            return Err(anyhow!(
+                "No stored session. Run `odctl auth login` or provide --token."
+            ))
+        }
+    };
+    if session.is_expired() {
+        if session.refresh_token.is_none() {
+            return Err(anyhow!("Access token expired and no refresh token available. Please run `odctl auth login`."));
+        }
+        session = refresh_session(&session).await?;
+        save_session(&session)?;
+    }
+    Ok(Some(session.access_token.clone()))
+}
+
+async fn refresh_session(session: &AuthSession) -> Result<AuthSession> {
+    let refresh = session
+        .refresh_token
+        .clone()
+        .ok_or_else(|| anyhow!("missing refresh token"))?;
+    let client = Client::new();
+    let mut params = vec![
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh.as_str()),
+        ("client_id", session.client_id.as_str()),
+    ];
+    if let Some(scope) = &session.scope {
+        params.push(("scope", scope.as_str()));
+    }
+    if let Some(aud) = &session.audience {
+        params.push(("audience", aud.as_str()));
+    }
+    let resp = client
+        .post(&session.token_endpoint)
+        .form(&params)
+        .send()
+        .await?
+        .error_for_status()?;
+    let token = resp.json::<TokenResponse>().await?;
+    build_session_from_token(session, token)
+}
+
+fn build_session_from_token(base: &AuthSession, token: TokenResponse) -> Result<AuthSession> {
+    let expires_at = token
+        .expires_in
+        .map(|ttl| current_timestamp() + ttl as i64)
+        .or(base.expires_at);
+    Ok(AuthSession {
+        access_token: token.access_token,
+        refresh_token: token.refresh_token.or_else(|| base.refresh_token.clone()),
+        token_type: token.token_type.or_else(|| base.token_type.clone()),
+        scope: token.scope.or_else(|| base.scope.clone()),
+        expires_at,
+        obtained_at: Some(current_timestamp()),
+        client_id: base.client_id.clone(),
+        token_endpoint: base.token_endpoint.clone(),
+        device_endpoint: base.device_endpoint.clone(),
+        audience: base.audience.clone(),
+    })
+}
+
+fn current_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    #[serde(default)]
+    verification_uri_complete: Option<String>,
+    expires_in: u64,
+    #[serde(default = "default_interval")]
+    interval: u64,
+}
+
+const fn default_interval() -> u64 {
+    5
+}
+
+#[derive(Debug, Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    token_type: Option<String>,
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    expires_in: Option<u64>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_target(false).init();
     let cli = Cli::parse();
-    let client = ApiClient::new(&cli.base_url, cli.token.clone())?;
+    if let Commands::Auth(cmd) = &cli.command {
+        handle_auth(cmd).await?;
+        return Ok(());
+    }
+
+    let token = resolve_token(cli.token.clone()).await?;
+    let client = ApiClient::new(&cli.base_url, token)?;
 
     match &cli.command {
-        Commands::Auth(cmd) => handle_auth(cmd).await?,
         Commands::Env { url } => handle_env(url.as_deref().unwrap_or(&cli.base_url)).await?,
         Commands::Policy(cmd) => handle_policy(cmd, &client, cli.json).await?,
         Commands::Override(cmd) => handle_override(cmd, &client, cli.json).await?,
@@ -186,6 +403,7 @@ async fn main() -> Result<()> {
         Commands::Report(cmd) => handle_report(cmd, &client, cli.json).await?,
         Commands::Logs(cmd) => handle_logs(cmd, &client, cli.json).await?,
         Commands::Smoke { profile } => run_smoke(profile).await?,
+        Commands::Auth(_) => unreachable!(),
     }
 
     Ok(())
@@ -193,14 +411,132 @@ async fn main() -> Result<()> {
 
 async fn handle_auth(cmd: &AuthCmd) -> Result<()> {
     match cmd {
-        AuthCmd::Login => {
-            println!("Launching device flow... (placeholder)");
-            println!("Visit https://login.example/device and enter code AX1Z-H3TQ");
+        AuthCmd::Login {
+            client_id,
+            device_url,
+            token_url,
+            scope,
+            audience,
+        } => {
+            let config = DeviceFlowConfig::new(
+                client_id.clone(),
+                device_url.clone(),
+                token_url.clone(),
+                scope.clone(),
+                audience.clone(),
+            );
+            perform_device_login(config).await?;
         }
-        AuthCmd::Logout => println!("Tokens cleared (placeholder)."),
-        AuthCmd::Status => println!("Authenticated via OD_ADMIN_TOKEN (placeholder)."),
+        AuthCmd::Logout => {
+            delete_session()?;
+            println!("Logged out and cleared stored tokens.");
+        }
+        AuthCmd::Status => match load_session()? {
+            Some(session) => {
+                println!("Client ID : {}", session.client_id);
+                if let Some(exp) = session.expires_at {
+                    let remaining = exp.saturating_sub(current_timestamp());
+                    println!("Access exp: {}s", remaining);
+                }
+                if session.refresh_token.is_some() {
+                    println!("Refresh  : available");
+                }
+                println!(
+                    "Audience  : {}",
+                    session.audience.clone().unwrap_or_else(|| "-".into())
+                );
+            }
+            None => println!("No stored session. Use 'odctl auth login' to authenticate."),
+        },
     }
     Ok(())
+}
+
+async fn perform_device_login(cfg: DeviceFlowConfig) -> Result<()> {
+    let client = Client::new();
+    let device_resp = client
+        .post(&cfg.device_url)
+        .form(&DeviceCodeRequest {
+            client_id: &cfg.client_id,
+            scope: &cfg.scope,
+            audience: cfg.audience.as_deref(),
+        })
+        .send()
+        .await?
+        .error_for_status()?;
+    let device = device_resp.json::<DeviceCodeResponse>().await?;
+
+    println!(
+        "Open {}",
+        device
+            .verification_uri_complete
+            .clone()
+            .unwrap_or(device.verification_uri.clone())
+    );
+    println!("Enter code: {}", device.user_code);
+
+    let mut interval = Duration::from_secs(device.interval.max(1));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(device.expires_in);
+
+    let request = DeviceTokenRequest {
+        client_id: &cfg.client_id,
+        device_code: &device.device_code,
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        audience: cfg.audience.as_deref(),
+    };
+
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            return Err(anyhow!("Device code expired before approval"));
+        }
+        let resp = client.post(&cfg.token_url).form(&request).send().await?;
+        if resp.status().is_success() {
+            let token = resp.json::<TokenResponse>().await?;
+            let base = AuthSession {
+                access_token: String::new(),
+                refresh_token: None,
+                token_type: None,
+                scope: Some(cfg.scope.clone()),
+                expires_at: None,
+                obtained_at: Some(current_timestamp()),
+                client_id: cfg.client_id.clone(),
+                token_endpoint: cfg.token_url.clone(),
+                device_endpoint: Some(cfg.device_url.clone()),
+                audience: cfg.audience.clone(),
+            };
+            let mut session = build_session_from_token(&base, token)?;
+            session.scope = base.scope.clone();
+            save_session(&session)?;
+            println!("Authentication successful. Tokens stored.");
+            return Ok(());
+        }
+
+        if resp.status() == reqwest::StatusCode::BAD_REQUEST {
+            let err_body = resp.json::<DeviceErrorResponse>().await?;
+            match err_body.error.as_str() {
+                "authorization_pending" => {
+                    sleep(interval).await;
+                    continue;
+                }
+                "slow_down" => {
+                    interval += Duration::from_secs(5);
+                    sleep(interval).await;
+                    continue;
+                }
+                "expired_token" => return Err(anyhow!("Device code expired")),
+                other => {
+                    return Err(anyhow!(
+                        "Device flow failed: {} {}",
+                        other,
+                        err_body.error_description.unwrap_or_default()
+                    ))
+                }
+            }
+        } else {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Token request failed: {}", text));
+        }
+    }
 }
 
 async fn handle_env(url: &str) -> Result<()> {
@@ -906,4 +1242,28 @@ struct CliLogRecord {
     command: String,
     result: Option<String>,
     created_at: String,
+}
+
+#[derive(Serialize)]
+struct DeviceCodeRequest<'a> {
+    client_id: &'a str,
+    scope: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audience: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct DeviceTokenRequest<'a> {
+    client_id: &'a str,
+    device_code: &'a str,
+    grant_type: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audience: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
+struct DeviceErrorResponse {
+    error: String,
+    #[serde(default)]
+    error_description: Option<String>,
 }
