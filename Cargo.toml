@@ -9,6 +9,7 @@ members = [
     "services/event-ingester",
     "workers/llm-worker",
     "workers/reclass-worker",
+    "workers/page-fetcher",
     "cli/odctl"
 ]
 resolver = "2"

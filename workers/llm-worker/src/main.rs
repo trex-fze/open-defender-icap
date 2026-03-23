@@ -525,8 +525,8 @@ async fn invoke_llm(
     let start = Instant::now();
     let result = match provider.kind {
         ProviderKind::Ollama => invoke_ollama(provider, job).await,
+        ProviderKind::LmStudio => invoke_lmstudio_chat(provider, job).await,
         ProviderKind::Openai
-        | ProviderKind::LmStudio
         | ProviderKind::Vllm
         | ProviderKind::OpenaiCompatible => invoke_openai_chat(provider, job).await,
         ProviderKind::Anthropic => invoke_anthropic(provider, job).await,
@@ -596,6 +596,7 @@ async fn invoke_openai_chat(
         "model": model,
         "temperature": 0.0,
         "response_format": {"type": "json_object"},
+        "max_tokens": 256,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": build_prompt(job)}
@@ -620,6 +621,46 @@ async fn invoke_openai_chat(
         .choices
         .first()
         .ok_or_else(|| anyhow!("openai response missing choices"))?;
+    let content = message.message.content_text()?;
+    parse_llm_json_text(&content)
+}
+
+async fn invoke_lmstudio_chat(
+    provider: &ResolvedProvider,
+    job: &ClassificationJobPayload,
+) -> Result<LlmResponse> {
+    let client = Client::new();
+    let model = provider.model.as_deref().unwrap_or("lmstudio-model");
+    let body = json!({
+        "model": model,
+        "temperature": 0.0,
+        "stream": false,
+        "response_format": {"type": "json_object"},
+        "max_tokens": 256,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": build_prompt(job)}
+        ]
+    });
+
+    let mut request = client
+        .post(&provider.endpoint)
+        .header("Content-Type", "application/json");
+    if !provider.api_key.is_empty() {
+        request = request.header("Authorization", format!("Bearer {}", provider.api_key));
+    }
+    request = apply_provider_headers(request, provider);
+    request = apply_timeout(request, provider);
+    let response = request.json(&body).send().await?;
+    let response = response.error_for_status()?;
+    let payload: OpenAiChatResponse = response.json().await.map_err(|err| {
+        metrics::record_invalid_response();
+        err
+    })?;
+    let message = payload
+        .choices
+        .first()
+        .ok_or_else(|| anyhow!("lm studio response missing choices"))?;
     let content = message.message.content_text()?;
     parse_llm_json_text(&content)
 }
