@@ -1,0 +1,43 @@
+{
+  "index_patterns": ["traffic-events-*"] ,
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "refresh_interval": "30s"
+    },
+    "mappings": {
+      "_source": { "enabled": true },
+      "dynamic": true,
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "ingested_at": { "type": "date" },
+        "trace_id": { "type": "keyword" },
+        "od": {
+          "properties": {
+            "environment": { "type": "keyword" },
+            "service": { "type": "keyword" },
+            "source": { "type": "keyword" }
+          }
+        },
+        "source": {
+          "properties": {
+            "ip": { "type": "ip" }
+          }
+        },
+        "url": {
+          "properties": {
+            "full": { "type": "keyword", "ignore_above": 2048 }
+          }
+        },
+        "user": {
+          "properties": {
+            "id": { "type": "keyword" }
+          }
+        },
+        "category": { "type": "keyword" },
+        "recommended_action": { "type": "keyword" }
+      }
+    }
+  }
+}

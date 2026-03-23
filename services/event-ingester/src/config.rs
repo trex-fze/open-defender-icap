@@ -5,12 +5,16 @@ pub struct IngestConfig {
     pub bind_addr: String,
     pub elastic_url: String,
     pub elastic_index_prefix: String,
+    pub elastic_index_pattern: String,
+    pub elastic_template_name: String,
+    pub elastic_ilm_name: String,
     pub elastic_api_key: Option<String>,
     pub elastic_username: Option<String>,
     pub elastic_password: Option<String>,
     pub filebeat_secret: Option<String>,
     pub log_level: String,
     pub ingest_retry_attempts: usize,
+    pub apply_templates: bool,
 }
 
 impl IngestConfig {
@@ -19,6 +23,9 @@ impl IngestConfig {
             bind_addr: env_or("OD_INGEST_BIND", "0.0.0.0:19100"),
             elastic_url: env_req("OD_ELASTIC_URL")?,
             elastic_index_prefix: env_or("OD_ELASTIC_INDEX_PREFIX", "traffic-events"),
+            elastic_index_pattern: env_or("OD_ELASTIC_INDEX_PATTERN", "traffic-events-*"),
+            elastic_template_name: env_or("OD_ELASTIC_TEMPLATE_NAME", "traffic-events-template"),
+            elastic_ilm_name: env_or("OD_ELASTIC_ILM_NAME", "traffic-events-ilm"),
             elastic_api_key: env::var("OD_ELASTIC_API_KEY")
                 .ok()
                 .filter(|v| !v.is_empty()),
@@ -33,6 +40,9 @@ impl IngestConfig {
                 .filter(|v| !v.is_empty()),
             log_level: env_or("OD_LOG", "info"),
             ingest_retry_attempts: env_or("OD_INGEST_RETRY_ATTEMPTS", "3").parse().unwrap_or(3),
+            apply_templates: env_or("OD_ELASTIC_APPLY_TEMPLATES", "true")
+                .parse()
+                .unwrap_or(true),
         })
     }
 }

@@ -60,11 +60,7 @@ impl ElasticWriter {
                 .post(&url)
                 .header("Content-Type", "application/x-ndjson")
                 .body(body.clone());
-            if let Some(key) = &self.api_key {
-                req = req.header("Authorization", format!("ApiKey {}", key));
-            } else if let (Some(user), Some(pass)) = (&self.username, &self.password) {
-                req = req.basic_auth(user, Some(pass));
-            }
+            req = self.attach_auth(req);
 
             match req.send().await {
                 Ok(response) => {
@@ -96,6 +92,43 @@ impl ElasticWriter {
                     warn!(target = "svc-ingest", %err, attempt, "bulk request error, retrying");
                 }
             }
+        }
+    }
+
+    pub async fn put_index_template(&self, name: &str, template: &Value) -> anyhow::Result<()> {
+        let url = format!("{}/_index_template/{}", self.base_url, name);
+        self.put_json(&url, template).await
+    }
+
+    pub async fn put_ilm_policy(&self, name: &str, policy: &Value) -> anyhow::Result<()> {
+        let url = format!("{}/_ilm/policy/{}", self.base_url, name);
+        self.put_json(&url, policy).await
+    }
+
+    async fn put_json(&self, url: &str, body: &Value) -> anyhow::Result<()> {
+        let mut req = self.client.put(url).json(body);
+        req = self.attach_auth(req);
+        let resp = req.send().await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            Err(anyhow::anyhow!(
+                "elastic request failed {}: {}",
+                status,
+                text
+            ))
+        }
+    }
+
+    fn attach_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(key) = &self.api_key {
+            req.header("Authorization", format!("ApiKey {}", key))
+        } else if let (Some(user), Some(pass)) = (&self.username, &self.password) {
+            req.basic_auth(user, Some(pass))
+        } else {
+            req
         }
     }
 }

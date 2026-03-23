@@ -9,7 +9,7 @@
 | Task ID | Description | Owner | Dependencies | Status |
 | --- | --- | --- | --- | --- |
 | S6-T1 | Build event ingestion pipeline (Filebeat/ingester) | SRE | Stage 3 audits | ✅ | Event ingester service + Filebeat shipper wired to Elasticsearch via compose |
-| S6-T2 | Define ES index templates + ILM policies | Data Eng | S6-T1 | ⬜ |
+| S6-T2 | Define ES index templates + ILM policies | Data Eng | S6-T1 | 🔄 | Template/ILM stubs added to `deploy/elastic/` (pending review) |
 | S6-T3 | Create Kibana dashboards per Spec §16 | SOC | S6-T2 | ⬜ |
 | S6-T4 | Expose Prometheus metrics + alerts | SRE | S1–S4 metrics | ⬜ |
 | S6-T5 | Implement report APIs + CLI helpers | Backend Eng | S5 API | ⬜ |

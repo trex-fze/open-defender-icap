@@ -1,8 +1,11 @@
+mod bootstrap;
 mod config;
 mod elastic;
 mod models;
 
-use axum::{extract::State, http::HeaderMap, http::StatusCode, routing::get, routing::post, Json, Router};
+use axum::{
+    extract::State, http::HeaderMap, http::StatusCode, routing::get, routing::post, Json, Router,
+};
 use config::IngestConfig;
 use elastic::ElasticWriter;
 use models::{FilebeatEnvelope, HealthResponse};
@@ -30,6 +33,10 @@ async fn main() -> anyhow::Result<()> {
         config.elastic_password.clone(),
         config.ingest_retry_attempts,
     )?;
+    if config.apply_templates {
+        bootstrap::ensure_assets(&writer, &config).await?;
+    }
+
     let state = AppState {
         writer,
         shared_secret: config.filebeat_secret.clone(),
