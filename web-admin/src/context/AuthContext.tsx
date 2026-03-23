@@ -29,7 +29,7 @@ type AuthContextValue = {
   setTokens: (tokens: AuthTokens | null) => void;
 };
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 const defaultUser: UserProfile = {
   name: 'Avery Quinn',

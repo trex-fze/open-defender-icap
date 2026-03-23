@@ -52,7 +52,7 @@ type GuardProps = {
   roles?: Role[];
 };
 
-const ProtectedRoute = ({ children, roles }: GuardProps) => {
+export const ProtectedRoute = ({ children, roles }: GuardProps) => {
   const { user, hasAnyRole } = useAuth();
   if (!user) {
     return <Navigate to="/login" replace />;
