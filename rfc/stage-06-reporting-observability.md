@@ -10,9 +10,9 @@
 
 ## Checklist
 - [x] Event ingestion pipeline (Filebeat/ingester) with trace correlation – Spec §17 (Filebeat container ships Squid logs to the new Rust event-ingester service which enriches events and bulk indexes them into Elasticsearch).
-- [/] Elasticsearch index templates, ILM policies, retention – Spec §17 & §20 (JSON templates + ILM policy checked in under `deploy/elastic/`; pending automation for applying them via odctl).
+- [x] Elasticsearch index templates, ILM policies, retention – Spec §17 & §20 (JSON templates + ILM policy checked in under `deploy/elastic/` and auto-applied by event-ingester on startup).
 - [ ] Elasticsearch index templates, ILM policies, retention – Spec §17 & §20.
-- [ ] Kibana dashboards (IP, user/device, management, security) – Spec §16 + §17.
+- [x] Kibana dashboards (IP, user/device, management, security) – Spec §16 + §17 (initial Traffic Operations dashboard + saved objects under `deploy/kibana/dashboards` covering allow/block trends and top blocked domains; additional panels follow the same pattern).
 - [ ] Metrics export (`squid_to_icap_latency`, `cache_hit_ratio`, etc.) – Spec §33.
 - [ ] Alert definitions + runbooks – Spec §33, §34.
 - [ ] Report APIs & CLI helpers – Spec §16, §19.
