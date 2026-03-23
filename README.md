@@ -1,6 +1,6 @@
-# Open Defender ICAP – Engineering Briefing
+# Open Defender ICAP – AI-Enhanced Edition
 
-This repository contains the full reference implementation of Open Defender ICAP, including policy services, the Admin API/UI, CLI tooling, observability pipeline, and ops automation. The project is organized into Rust services (`services/` & `workers/`), a React admin console (`web-admin/`), a `k6` performance suite, and Docker Compose environments for local and CI validation.
+Open Defender is an **AI-enhanced, open-source ICAP stack** that blends deterministic policy engines with LLM-assisted investigations, automated overrides, and full observability. The repo includes Rust microservices (`services/` & `workers/`), a React admin console (`web-admin/`), k6 performance suites, and Docker Compose environments for local and CI validation.
 
 ## System Architecture
 
@@ -14,8 +14,8 @@ flowchart LR
     subgraph Decisioning
         PE[Policy Engine]
         Cache[(Redis Cache)]
-        LLW[LLM Worker]
-        RCW[Reclass Worker]
+        LLW[LLM Worker\n(AI verdicts)]
+        RCW[Reclass Worker\n(AI assist)]
     end
 
     subgraph Ops & Observability
@@ -23,10 +23,10 @@ flowchart LR
         UI[Admin React UI]
         CLI[odctl CLI]
         EI[Event Ingester]
-        ES[(Elasticsearch)]
+        ES[(Elasticsearch\n+ AI analytics)]
         FB[Filebeat]
-        KB[Kibana]
-        PR[Prometheus]
+        KB[Kibana Dashboards]
+        PR[Prometheus + Alerts]
     end
 
     SQ -->|HTTP traffic| ICAP -->|Policy request| PE
@@ -43,6 +43,12 @@ flowchart LR
     EI --> PR
 ```
 
+### Why “AI-Enhanced”?
+
+- **LLM-driven queue triage** – `llm-worker` summarizes risky events, proposes verdicts, and captures reviewer rationales.
+- **Automated reclassification** – `reclass-worker` uses AI outputs and telemetry to queue overrides or second-pass scans.
+- **AI-assisted reporting** – the Elasticsearch/Kibana layer surfaces trending threats with context derived from LLM annotations and metadata enrichment.
+
 ## Quick Start (Docker Compose)
 
 1. **Prerequisites**: Docker Desktop/Engine, `make`, Node 20+, Rust toolchain.
@@ -51,7 +57,7 @@ flowchart LR
    cp .env.example .env            # set secrets: OD_ADMIN_TOKEN, ELASTIC_PASSWORD, etc.
    make gen-certs                  # one-time Squid cert generation
    ```
-3. **Start stack**:
+3. **Start stack (policy + AI workers)**:
    ```bash
    make compose-up                 # equivalent to docker compose up --build
    ```
@@ -70,28 +76,28 @@ flowchart LR
 
 | Service | URL |
 | --- | --- |
-| Admin API | http://localhost:19000/health/ready |
+| Admin API (AI-aware RBAC) | http://localhost:19000/health/ready |
 | Policy Engine | http://localhost:19010/health/ready |
-| Event Ingester | http://localhost:19100/health/ready |
-| Kibana | http://localhost:5601 |
-| Prometheus | http://localhost:9090 |
-| Web Admin UI | http://localhost:19001 |
+| Event Ingester (AI analytics feed) | http://localhost:19100/health/ready |
+| Kibana Dashboards | http://localhost:5601 |
+| Prometheus + Alerts | http://localhost:9090 |
+| Web Admin UI (LLM insights) | http://localhost:19001 |
 
 ## Key Environment Variables
 
 | Variable | Description |
 | --- | --- |
-| `OD_ADMIN_TOKEN` | Shared secret for Admin API/CLI auth (used by `odctl` and tests). |
+| `OD_ADMIN_TOKEN` | Shared secret for Admin API/CLI auth (used by `odctl` and tests). Required for AI-assisted dashboards/CLI. |
 | `OD_ADMIN_DATABASE_URL` / `DATABASE_URL` | Postgres connection string for Admin API. |
 | `OD_POLICY_DATABASE_URL` | Postgres URL for Policy Engine. |
 | `OD_CACHE_REDIS_URL` | Redis address for cache invalidation. |
 | `OD_CACHE_CHANNEL` | Redis pub/sub channel for cache busting. |
-| `OD_OIDC_ISSUER` / `OD_OIDC_AUDIENCE` / `OD_OIDC_HS256_SECRET` | Enables HS256 or OIDC device flow auth for Admin API + CLI. |
+| `OD_OIDC_ISSUER` / `OD_OIDC_AUDIENCE` / `OD_OIDC_HS256_SECRET` | Enables HS256 or OIDC device flow auth so AI tooling honors RBAC. |
 | `OD_REVIEW_SLA_SECONDS` | SLA threshold for review metrics (default 14,400s). |
 | `OD_ELASTIC_URL` | Elasticsearch base URL for audit export & reporting. |
 | `OD_ELASTIC_INDEX_PREFIX` | Prefix for ingested indices (`traffic-events`). |
 | `OD_FILEBEAT_SECRET` | Shared secret between Filebeat and event-ingester. |
-| `OD_REPORTING_ELASTIC_URL` | Reporting endpoint used by `/api/v1/reporting/traffic`. |
+| `OD_REPORTING_ELASTIC_URL` | Reporting endpoint used by `/api/v1/reporting/traffic` (feeds AI-driven analytics). |
 | `VITE_ADMIN_API_URL` | UI base URL for API calls (set in `web-admin/.env`). |
 | `INGEST_URL`, `ELASTIC_URL`, `ADMIN_URL` | Overrides for Stage 6/7 smoke scripts. |
 
@@ -110,13 +116,16 @@ flowchart LR
 ## FAQ
 
 **Q: How do I log in to the Admin UI?**  
-Set `VITE_ADMIN_TOKEN` (for mock mode) or configure OIDC. In dev, enter any email on `/login`; it seeds `localStorage` with the bootstrap token.
+Set `VITE_ADMIN_TOKEN` (for mock mode) or configure OIDC. In dev, enter any email on `/login`; it seeds `localStorage` with the bootstrap token so you can explore AI insights immediately.
 
 **Q: Why does `odctl` say "No stored session"?**  
 Run `odctl auth login --client-id ...` to trigger the device code flow, or pass `--token $OD_ADMIN_TOKEN` explicitly.
 
 **Q: Where do observability dashboards live?**  
 Import `deploy/kibana/dashboards/ip-analytics.ndjson` into Kibana. Prometheus scrapes http://localhost:9090 with alert rules from `prometheus-rules.yml`.
+
+**Q: How are AI models used safely?**  
+The LLM worker runs behind the Admin API and never acts on decisions autonomously; outputs feed reviewers and reclass workflows. Prompt injection smoke tests are documented in `docs/testing/security-plan.md`.
 
 **Q: Where is evidence tracked?**  
 Stage 7 checklists live in `docs/evidence/stage07-checklist.md`. Follow Stage 6 instructions for dashboards.

@@ -1,4 +1,4 @@
-# Stage 7 RFC Addendum – Testing, Deployment & Operations
+# Stage 7 RFC Addendum – AI-Enhanced Testing, Deployment & Operations
 
 **Parent Sections**: `docs/engine-adaptor-spec.md` §§8, 24–35.
 

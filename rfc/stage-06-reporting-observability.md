@@ -1,4 +1,4 @@
-# Stage 6 RFC Addendum – Reporting & Observability
+# Stage 6 RFC Addendum – AI-Enhanced Reporting & Observability
 
 **Parent Sections**: `docs/engine-adaptor-spec.md` §§16, 17, 18, 33.
 

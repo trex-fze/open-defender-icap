@@ -1,6 +1,6 @@
-# Stage 6 Implementation Plan – Reporting & Observability
+# Stage 6 Implementation Plan – AI-Enhanced Reporting & Observability
 
-**Status**: Planned
+**Status**: Planned (AI analytics + telemetry in progress)
 
 ## Objectives
 - Implement Elasticsearch/Kibana dashboards, Prometheus metrics, reporting APIs.
