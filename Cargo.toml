@@ -6,6 +6,7 @@ members = [
     "services/icap-adaptor",
     "services/policy-engine",
     "services/admin-api",
+    "services/event-ingester",
     "workers/llm-worker",
     "workers/reclass-worker",
     "cli/odctl"

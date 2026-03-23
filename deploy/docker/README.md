@@ -3,7 +3,7 @@
 This directory contains the compose stacks used for local development, CI-style integration tests, and lightweight smoke validation. Copy `.env.example` to `.env` at the repo root (never commit `.env`) and adjust secrets such as `OD_ADMIN_TOKEN` or `ELASTIC_PASSWORD` before starting the stack.
 
 ## Compose files
-- `docker-compose.yml`: full developer stack (Redis, Postgres, ICAP adaptor, Policy Engine, Admin API, Squid, Kibana, Elasticsearch, Prometheus, workers, web-admin, odctl runner).
+- `docker-compose.yml`: full developer stack (Redis, Postgres, ICAP adaptor, Policy Engine, Admin API, Squid, Kibana, Elasticsearch, Prometheus, workers, web-admin, odctl runner, **Filebeat + event-ingester** for Stage 6 telemetry).
 - `docker-compose.test.yml`: extends the base stack and adds a `smoke-tests` service that runs `odctl smoke` plus basic override listing; also marks heavy services with the `dev` profile so they can be skipped in CI.
 - `docker-compose.smoke.yml`: minimal stack (Redis, Postgres, Policy Engine, Admin API, ICAP adaptor, odctl runner, smoke tests) for quick validation.
 - **Auth note**: Keep `OD_ADMIN_TOKEN` in `.env` for static token flows, or set `OD_OIDC_ISSUER` / `OD_OIDC_AUDIENCE` / `OD_OIDC_HS256_SECRET` to exercise the OIDC/RBAC guard (ensure issued tokens contain roles such as `policy-admin`, `policy-editor`).
@@ -49,10 +49,11 @@ Run `make gen-certs` once before the first `compose-up`; import `deploy/docker/s
    - `docker compose run --rm odctl-runner odctl seed policies config/policies.json default compose`
 6. Once services are healthy, run `docker compose run --rm odctl-runner odctl smoke icap-adaptor:1344` (already performed automatically in the test/smoke stacks).
 7. Access:
-   - Admin API: http://localhost:19000/health/ready
-   - Policy Engine: http://localhost:19010/health/ready
-   - Kibana: http://localhost:5601 (user `elastic`, password from `.env`)
-   - Prometheus: http://localhost:9090
+    - Admin API: http://localhost:19000/health/ready
+    - Policy Engine: http://localhost:19010/health/ready
+    - Event Ingester: http://localhost:19100/health/ready
+    - Kibana: http://localhost:5601 (user `elastic`, password from `.env`)
+    - Prometheus: http://localhost:9090
    - Squid proxy: http://localhost:3128 (ICAP wired to adaptor)
 
 ## Troubleshooting

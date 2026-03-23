@@ -1,0 +1,33 @@
+filebeat.inputs:
+  - type: filestream
+    id: squid-access
+    enabled: true
+    paths:
+      - /var/log/squid/access.log*
+    parsers:
+      - ndjson:
+          overwrite_keys: true
+          message_key: message
+    fields:
+      od:
+        source: squid
+    fields_under_root: true
+
+processors:
+  - add_fields:
+      target: od
+      fields:
+        environment: ${OD_ENVIRONMENT:dev}
+        service: squid
+  - add_host_metadata: ~
+  - add_cloud_metadata: ~
+
+output.http:
+  hosts: ["${OD_INGEST_ENDPOINT:http://event-ingester:19100}"]
+  path: /ingest/filebeat
+  compression_level: 3
+  headers:
+    X-Filebeat-Secret: ${OD_FILEBEAT_SECRET:changeme-ingest}
+  timeout: 60s
+
+logging.level: info

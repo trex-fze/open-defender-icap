@@ -154,6 +154,25 @@ services:
       admin-api:
         condition: service_started
 
+  event-ingester:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/rust.Dockerfile
+    command: ["event-ingester"]
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      OD_ELASTIC_URL: ${OD_ELASTIC_URL:-http://elasticsearch:9200}
+      OD_ELASTIC_INDEX_PREFIX: ${OD_ELASTIC_INDEX_PREFIX:-traffic-events}
+      OD_ELASTIC_API_KEY: ${OD_ELASTIC_API_KEY:-}
+      OD_ELASTIC_USERNAME: ${OD_ELASTIC_USERNAME:-elastic}
+      OD_ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-changeme-elastic}
+      OD_FILEBEAT_SECRET: ${OD_FILEBEAT_SECRET:-changeme-ingest}
+    ports:
+      - "19100:19100"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
   reclass-worker:
     build:
       context: ../..
@@ -198,6 +217,23 @@ services:
       admin-api:
         condition: service_started
 
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.12.1
+    user: root
+    command: ["filebeat", "-e"]
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - filebeat-data:/usr/share/filebeat/data
+      - squid-logs:/var/log/squid:ro
+    environment:
+      OD_INGEST_ENDPOINT: ${OD_INGEST_ENDPOINT:-http://event-ingester:19100}
+      OD_FILEBEAT_SECRET: ${OD_FILEBEAT_SECRET:-changeme-ingest}
+    depends_on:
+      event-ingester:
+        condition: service_started
+      squid:
+        condition: service_started
+
   odctl-runner:
     build:
       context: ../..
@@ -221,3 +257,4 @@ volumes:
   pg-data:
   es-data:
   squid-logs:
+  filebeat-data:

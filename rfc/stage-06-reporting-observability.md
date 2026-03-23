@@ -9,7 +9,7 @@
 4. Provide report APIs/export tools feeding UI/CLI.
 
 ## Checklist
-- [ ] Event ingestion pipeline (Filebeat/ingester) with trace correlation – Spec §17.
+- [x] Event ingestion pipeline (Filebeat/ingester) with trace correlation – Spec §17 (Filebeat container ships Squid logs to the new Rust event-ingester service which enriches events and bulk indexes them into Elasticsearch).
 - [ ] Elasticsearch index templates, ILM policies, retention – Spec §17 & §20.
 - [ ] Kibana dashboards (IP, user/device, management, security) – Spec §16 + §17.
 - [ ] Metrics export (`squid_to_icap_latency`, `cache_hit_ratio`, etc.) – Spec §33.
