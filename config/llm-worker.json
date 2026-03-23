@@ -6,11 +6,11 @@
   "database_url": "postgres://defender:defender@postgres:5432/defender",
   "providers": [
     {
-      "name": "local-ollama",
-      "type": "ollama",
-      "endpoint": "http://ollama:11434/api/generate",
-      "model": "llama3",
-      "timeout_ms": 20000
+      "name": "lmstudio-edge",
+      "type": "lmstudio",
+      "endpoint": "http://192.168.1.170:1234/v1/chat/completions",
+      "model": "gpt-oss-120b",
+      "timeout_ms": 30000
     },
     {
       "name": "openai-fallback",
@@ -21,7 +21,7 @@
     }
   ],
   "routing": {
-    "default": "local-ollama",
+    "default": "lmstudio-edge",
     "fallback": "openai-fallback",
     "policy": "failover"
   },

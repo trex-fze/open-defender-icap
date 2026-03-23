@@ -125,11 +125,11 @@ flowchart LR
 {
   "providers": [
     {
-      "name": "local-ollama",
-      "type": "ollama",
-      "endpoint": "http://ollama:11434/api/generate",
-      "model": "llama3",
-      "timeout_ms": 20000
+      "name": "lmstudio-edge",
+      "type": "lmstudio",
+      "endpoint": "http://192.168.1.170:1234/v1/chat/completions",
+      "model": "gpt-oss-120b",
+      "timeout_ms": 30000
     },
     {
       "name": "openai-fallback",
@@ -140,7 +140,7 @@ flowchart LR
     }
   ],
   "routing": {
-    "default": "local-ollama",
+    "default": "lmstudio-edge",
     "fallback": "openai-fallback",
     "policy": "failover"
   }
@@ -148,7 +148,7 @@ flowchart LR
 ```
 
 - Supported `type` values: `ollama`, `lmstudio`, `vllm`, `openai`, `openai_compatible`, `anthropic`, `custom_json` (legacy HTTP).
-- Offline providers (Ollama/LM Studio) run locally via docker-compose overlays; online providers require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
+- Offline providers (LM Studio at `http://192.168.1.170:1234`, Ollama, etc.) run on your LAN or compose overlay; online providers require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
 - The worker automatically records provider names in logs/metrics; fallback triggers if the primary fails.
 - Query configured providers anytime: `curl http://localhost:19015/providers | jq`.
 - CLI inspection: `odctl llm providers --url http://localhost:19015/providers`.
