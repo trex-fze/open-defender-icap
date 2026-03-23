@@ -9,7 +9,7 @@
 
 ## Checklist
 - [x] Unit test coverage per function (Spec §22–§23, §26) – documented via `docs/testing/unit-coverage.md` and enforced with the `tests/unit.sh` runner.
-- [ ] Smoke & integration suites executed via docker-compose (Spec §27–§28).
+- [x] Smoke & integration suites executed via docker-compose (Spec §27–§28) – `tests/integration.sh` orchestrates `docker-compose up`, runs `odctl smoke` plus the Stage 6 ingest smoke test; `deploy/docker/docker-compose.integration.yml` documents the dedicated services.
 - [ ] Performance/load tests hitting KPIs (Spec §29).
 - [ ] Security tests (authZ, injection, prompt, fail-open/close) – Spec §30.
 - [ ] Deployment/rollback checklists validated (Spec §28 & §35).

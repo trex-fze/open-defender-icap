@@ -1,0 +1,33 @@
+services:
+  odctl-smoke:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/rust.Dockerfile
+    command: ["odctl", "smoke", "--profile", "compose"]
+    depends_on:
+      admin-api:
+        condition: service_started
+      policy-engine:
+        condition: service_started
+    environment:
+      OD_ADMIN_URL: http://admin-api:19000
+      OD_POLICY_URL: http://policy-engine:19010
+      OD_ADMIN_TOKEN: ${OD_ADMIN_TOKEN:-changeme-admin}
+
+  ingest-smoke:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/rust.Dockerfile
+    command: ["bash", "-lc", "tests/stage06_ingest.sh"]
+    depends_on:
+      event-ingester:
+        condition: service_started
+      admin-api:
+        condition: service_started
+    environment:
+      INGEST_URL: http://event-ingester:19100
+      INGEST_SECRET: ${OD_FILEBEAT_SECRET:-changeme-ingest}
+      ELASTIC_URL: http://elasticsearch:9200
+      ELASTIC_USER: elastic
+      ELASTIC_PASS: ${ELASTIC_PASSWORD:-changeme-elastic}
+      ADMIN_URL: http://admin-api:19000
