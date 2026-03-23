@@ -16,7 +16,7 @@
 | S8-T4 | CLI/Admin tooling (`odctl llm providers`, metrics `/providers`) | CLI/Backend | S8-T1 | ✅ | New `odctl llm providers` command + metrics endpoint catalog |
 | S8-T5 | Provider-level metrics & alerts | SRE | S8-T1–T3 | ✅ | Per-provider counters/latency histograms + Prometheus rules (`stage8-llm-alerts`) |
 | S8-T6 | Compose overlays & docs for LM Studio/Ollama | DevOps | S8-T2 | ✅ | Compose overlays for LM Studio + Ollama; README & integration plan updated |
-| S8-T7 | Security/perf validation (prompt injection, fallback load) | Security/Perf Eng | S8-T2–T4 | 🔄 | `tests/security/llm-prompt-smoke.sh` added; fallback perf + k6 scenario pending |
+| S8-T7 | Security/perf validation (prompt injection, fallback load) | Security/Perf Eng | S8-T2–T4 | ✅ | `tests/security/llm-prompt-smoke.sh` + `tests/perf/llm-failover.sh` cover injection + failover |
 | S8-T8 | Evidence & runbooks (Stage 8) | TPM | S8-T1–S8-T7 | 🔄 | `docs/evidence/stage08-hybrid-ai.md` created; populate after tests |
 
 ## Milestones

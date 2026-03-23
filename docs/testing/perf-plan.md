@@ -4,12 +4,16 @@ We use k6 to validate that the Admin API (policies + reporting endpoints) meets 
 
 ## Scripts
 - `tests/perf/k6-traffic.js`: exercises `/api/v1/reporting/traffic` and `/api/v1/policies` with a steady 20 VU load.
+- `tests/perf/llm-failover.sh`: stops the primary LM Studio container, enqueues a classification job, and verifies fallback providers continue processing.
 
 ## Running locally
 ```bash
 BASE_URL=http://localhost:19000 \
 ADMIN_TOKEN=changeme-admin \
 k6 run tests/perf/k6-traffic.js
+
+# failover smoke (requires docker compose stack + redis-cli + psql)
+tests/perf/llm-failover.sh
 ```
 
 Expected thresholds:
@@ -22,3 +26,4 @@ Expected thresholds:
 
 ## Evidence
 - Capture the k6 summary output and store it under `docs/evidence/stage07/perf/*.txt` as part of S7 signoff.
+- Save the failover smoke log to `docs/evidence/stage08/llm-failover.log`.

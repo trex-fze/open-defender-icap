@@ -120,6 +120,7 @@ flowchart LR
 | Performance | `k6 run tests/perf/k6-traffic.js` | Load test for `/api/v1/reporting/traffic` & `/api/v1/policies`. |
 | Security authZ smoke | `tests/security/authz-smoke.sh` | Confirms 401 for unauthenticated requests and payload validation. |
 | Security prompt-injection | `tests/security/llm-prompt-smoke.sh` | Enqueues malicious payload and verifies llm-worker ignores injection instructions. |
+| Hybrid failover smoke | `tests/perf/llm-failover.sh` | Stops LM Studio container to ensure fallback provider handles jobs. |
 
 ## LLM Provider Configuration
 
@@ -157,6 +158,7 @@ flowchart LR
 - Query configured providers anytime: `curl http://localhost:19015/providers | jq`.
 - CLI inspection: `odctl llm providers --url http://localhost:19015/providers`.
 - Launch LM Studio via docker: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.lmstudio.yml up -d lmstudio` (serves on `http://localhost:1234`).
+- Launch Ollama via docker: `docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.ollama.yml up -d ollama` (serves on `http://localhost:11434`).
 
 ## FAQ
 

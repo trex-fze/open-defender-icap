@@ -13,7 +13,7 @@
 - [x] CLI & metrics endpoints expose provider catalogs (`odctl llm providers`, `/providers`).
 - [x] Per-provider Prometheus metrics/alerts (latency, failure, timeout labels).
 - [x] Compose overlays/instructions for LM Studio/Ollama deployment.
-- [ ] Security/perf suites updated for provider failover + prompt-injection hardening.
+- [x] Security/perf suites updated for provider failover + prompt-injection hardening (`tests/security/llm-prompt-smoke.sh`, `tests/perf/llm-failover.sh`).
 - [ ] Stage 8 evidence bundle (`docs/evidence/stage08-hybrid-ai.md`).
 
 ## Design Summary
