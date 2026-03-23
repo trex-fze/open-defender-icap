@@ -25,7 +25,8 @@ Stage 8 introduced hybrid provider routing but still classifies requests using o
 
 1. **Event Ingester** receives a Stage 6 sample, normalizes `normalized_key`, and writes both to Elasticsearch and Redis (`classification-jobs`).
 2. New **Page Fetch Scheduler** component (in event-ingester) inspects the request and enqueues a job on `page-fetch-jobs` (Redis stream) with URL, headers, normalized key, and fetch policy metadata.
-3. **Page Fetcher Worker** (new Rust binary) consumes `page-fetch-jobs`, performs HTTP GET with configurable timeouts, sanitizes the response (strip scripts/styles, collapse whitespace), and stores the result in Postgres table `page_contents` keyed by normalized key + version.
+3. **Crawl4AI Service** (Dockerized Python agent) receives fetch requests over HTTP; it runs the Crawl4AI pipeline (headless Chromium + extraction templates) to render the page with JavaScript, extract structured text, and return a JSON payload that includes raw HTML, cleaned text, metadata (language, title, HTTP status), and a summary.
+4. **Page Fetcher Worker** (new Rust binary) still orchestrates queueing/retries, but instead of performing raw HTTP GET it invokes the Crawl4AI REST API, validates the response, applies final sanitization/truncation, and stores the result in Postgres table `page_contents` keyed by normalized key + version.
 4. The fetcher publishes a `page-content-ready` event, or the scheduler writes the sanitized blob back into Redis as part of the classification payload (optionally referencing the Postgres row id to avoid large messages).
 5. **LLM Worker** reads the enriched payload, injects the page text snippet (first N chars + summary metadata) into the prompt, and stores the classification + `content_version` for traceability.
 
@@ -36,11 +37,16 @@ Stage 8 introduced hybrid provider routing but still classifies requests using o
   - Deduplicates by normalized key; schedules refresh based on TTL (default 6 hours) to avoid repeated fetches.
   - Provides metrics (`page_fetch_jobs_total`, `page_fetch_skipped_total{reason}`).
 
+- **Crawl4AI Microservice (`deploy/docker/crawl4ai`)**
+  - Python-based service exposing `/crawl` endpoint that accepts URL and policy metadata.
+  - Uses headless Chromium + Crawl4AI extractors to execute JavaScript, capture DOM, remove boilerplate, and detect language.
+  - Supports advanced options (max depth, allowed domains) that we expose via config for future tuning.
+
 - **Page Fetcher Worker (`workers/page-fetcher`)**
-  - Async Tokio service using reqwest with configurable concurrency.
-  - Normalizes text via `lol_html`/`html5ever` or `scraper` crate; stores both raw HTML (compressed) and extracted text snippet (UTF-8) in Postgres.
-  - Emits Prometheus metrics (latency, status codes, bytes, failures) and publishes completion to Redis.
-  - Handles max redirects, TLS errors, robots.txt respect (configurable).
+  - Async Tokio service that reads jobs, calls Crawl4AI’s `/crawl` endpoint, and enforces timeouts/retries.
+  - Validates the returned JSON schema, compresses/stores both raw HTML and `content.cleaned_text` in Postgres, and records crawl metadata (screenshots, HTTP status, timings) when available.
+  - Emits Prometheus metrics (latency, status, bytes, failures, crawl4ai_error codes) and publishes completion to Redis.
+  - Fallback path: if Crawl4AI is unavailable, optionally perform simplified HTTP GET (feature flag) so classification still works.
 
 - **Storage Schema**
   - New table `page_contents` (`id UUID`, `normalized_key`, `fetch_version`, `content_type`, `content_hash`, `raw_bytes BYTEA`, `text_excerpt TEXT`, `fetched_at`, `ttl_seconds`).
@@ -58,23 +64,24 @@ Stage 8 introduced hybrid provider routing but still classifies requests using o
 
 ### Security & Privacy
 
-- Respect allow/deny lists (no intranet fetches by default). Add config `CONTENT_FETCH_ALLOW_PRIVATE=false`.
-- Cap size + sanitize (strip scripts/styles) before storing to mitigate XSS when viewing via admin UI.
-- Record fetch headers + IPs for auditing but keep secrets in `.env`.
+- Respect allow/deny lists (no intranet fetches by default). Add config `CONTENT_FETCH_ALLOW_PRIVATE=false`; Crawl4AI receives the same policy envelope and enforces it before launching Chromium.
+- Cap size + sanitize (strip scripts/styles) before storing to mitigate XSS when viewing via admin UI. Crawl4AI’s cleaned text is already filtered, but we re-run local sanitizers for defense in depth.
+- Record fetch headers + IPs for auditing but keep secrets in `.env`. Crawl4AI credentials/API keys are injected via Docker secrets.
 - Optional AES-GCM encryption at rest for `raw_bytes` (future enhancement, tracked as open question).
 
 ### Observability
 
-- Prometheus metrics: `page_fetch_latency_seconds`, `page_fetch_failures_total{reason}`, `page_content_cached_total`.
+- Prometheus metrics: `page_fetch_latency_seconds`, `page_fetch_failures_total{reason}`, `crawl4ai_requests_total`, `crawl4ai_latency_seconds`, `page_content_cached_total`.
 - New Kibana dashboard panel referencing `page_contents` table (via admin-api endpoint) for analysts.
 - CLI commands: `odctl pages fetch-status --key <normalized_key>`.
 
 ### Rollout Strategy
 
 1. Migrate database (admin-api migration) to add `page_contents` table.
-2. Deploy page-fetcher behind feature flag `OD_ENABLE_PAGE_FETCHER=false`.
-3. When enabled, start with low concurrency (e.g., 2 workers) and small TTL to validate.
-4. Update Stage 6 smoke/perf scripts to assert content presence.
+2. Add Crawl4AI container (or external endpoint) to docker-compose with sensible defaults (headless Chromium cache, 2 workers) and expose configuration docs for operators running their own agents.
+3. Deploy page-fetcher behind feature flag `OD_ENABLE_PAGE_FETCHER=false`.
+4. When enabled, start with low concurrency (e.g., 2 workers) and small TTL to validate.
+5. Update Stage 6 smoke/perf scripts to assert content presence and report crawl4ai latency.
 
 ## Open Questions
 
