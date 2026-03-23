@@ -8,7 +8,7 @@
 3. Produce evidence checklist artifacts for signoffs (architecture, test reports, security, QA, ops).
 
 ## Checklist
-- [ ] Unit test coverage per function (Spec §22–§23, §26).
+- [x] Unit test coverage per function (Spec §22–§23, §26) – documented via `docs/testing/unit-coverage.md` and enforced with the `tests/unit.sh` runner.
 - [ ] Smoke & integration suites executed via docker-compose (Spec §27–§28).
 - [ ] Performance/load tests hitting KPIs (Spec §29).
 - [ ] Security tests (authZ, injection, prompt, fail-open/close) – Spec §30.

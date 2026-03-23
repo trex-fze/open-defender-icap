@@ -8,7 +8,7 @@
 ## Work Breakdown
 | Task ID | Description | Owner | Dependencies | Status |
 | --- | --- | --- | --- | --- |
-| S7-T1 | Unit test coverage review per module | QA/Dev Leads | All stages | ⬜ |
+| S7-T1 | Unit test coverage review per module | QA/Dev Leads | All stages | ✅ | `tests/unit.sh` runner + `docs/testing/unit-coverage.md` checklist |
 | S7-T2 | Integration + smoke suites via docker-compose | QA | S1–S5 | ⬜ |
 | S7-T3 | Performance/load testing (k6/Gatling) | Perf Eng | Core services ready | ⬜ |
 | S7-T4 | Security testing (pen test, prompt injection) | Security | S4 complete | ⬜ |
