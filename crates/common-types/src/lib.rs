@@ -81,6 +81,8 @@ pub struct PolicyDecisionRequest {
     pub entity_level: EntityLevel,
     pub source_ip: String,
     pub user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub group_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

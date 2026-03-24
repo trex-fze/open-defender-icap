@@ -11,7 +11,7 @@ import { ReviewQueuePage } from './pages/ReviewQueuePage';
 import { OverridesPage } from './pages/OverridesPage';
 import { TaxonomyPage } from './pages/TaxonomyPage';
 import { ReportsPage } from './pages/ReportsPage';
-import { SettingsRbacPage } from './pages/SettingsRbacPage';
+import { SettingsIamPage } from './pages/SettingsIamPage';
 import { LoginPage } from './pages/LoginPage';
 import { PendingClassificationsPage } from './pages/PendingClassificationsPage';
 import { DiagnosticsCachePage } from './pages/DiagnosticsCachePage';
@@ -46,7 +46,8 @@ const App = () => {
             <Route path="/reports" element={<ProtectedRoute roles={guard.reports}><ReportsPage /></ProtectedRoute>} />
             <Route path="/diagnostics/cache" element={<ProtectedRoute roles={guard.admin}><DiagnosticsCachePage /></ProtectedRoute>} />
             <Route path="/diagnostics/page-content" element={<ProtectedRoute roles={guard.viewEdit}><DiagnosticsPageContentPage /></ProtectedRoute>} />
-            <Route path="/settings/rbac" element={<ProtectedRoute roles={guard.admin}><SettingsRbacPage /></ProtectedRoute>} />
+            <Route path="/settings/iam/*" element={<ProtectedRoute roles={guard.admin}><SettingsIamPage /></ProtectedRoute>} />
+            <Route path="/settings/rbac" element={<Navigate to="/settings/iam" replace />} />
           </Route>
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

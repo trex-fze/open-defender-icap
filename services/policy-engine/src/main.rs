@@ -65,11 +65,6 @@ async fn main() -> Result<()> {
         .clone()
         .or_else(|| env::var("OD_POLICY_DATABASE_URL").ok())
         .or_else(|| env::var("DATABASE_URL").ok());
-    let admin_token = cfg
-        .admin_token
-        .clone()
-        .or_else(|| env::var("OD_POLICY_ADMIN_TOKEN").ok());
-
     let mut audit_logger = None;
 
     let evaluator = if let Some(db_url) = db_url {
@@ -95,7 +90,7 @@ async fn main() -> Result<()> {
         PolicyEvaluator::from_file(store, cfg.policy_file.clone())
     };
     let auth_settings = AuthSettings::from_env(cfg.auth.clone());
-    let admin_auth = Arc::new(AdminAuth::from_config(admin_token.clone(), auth_settings).await?);
+    let admin_auth = Arc::new(AdminAuth::from_config(auth_settings).await?);
     let state = AppState {
         evaluator: Arc::new(evaluator),
         audit_logger,

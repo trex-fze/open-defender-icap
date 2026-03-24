@@ -299,10 +299,7 @@ impl PageFetcher {
             .to_string();
 
         if !status.is_success() {
-            return Err(anyhow!(
-                "fallback request failed with status {}",
-                status
-            ));
+            return Err(anyhow!("fallback request failed with status {}", status));
         }
 
         let mut raw_html = response.text().await.unwrap_or_default();

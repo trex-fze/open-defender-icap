@@ -9,62 +9,62 @@
 
 ## Data Model and Migrations
 
-- [ ] Add `iam_users` table.
-- [ ] Add `iam_groups` table.
-- [ ] Add `iam_group_members` table.
-- [ ] Add `iam_roles` and `iam_role_permissions` tables.
-- [ ] Add `iam_user_roles` and `iam_group_roles` tables.
-- [ ] Add `iam_service_accounts` table with token hashing.
-- [ ] Add `iam_audit_events` table.
-- [ ] Seed built-in roles and permissions.
+- [x] Add `iam_users` table.
+- [x] Add `iam_groups` table.
+- [x] Add `iam_group_members` table.
+- [x] Add `iam_roles` and `iam_role_permissions` tables.
+- [x] Add `iam_user_roles` and `iam_group_roles` tables.
+- [x] Add `iam_service_accounts` table with token hashing.
+- [x] Add `iam_audit_events` table.
+- [x] Seed built-in roles and permissions.
 - [ ] Add migration verification tests.
 
 ## Admin API
 
-- [ ] Implement IAM repositories/services.
-- [ ] Implement users CRUD endpoints.
-- [ ] Implement groups CRUD endpoints.
-- [ ] Implement membership endpoints.
-- [ ] Implement role assignment endpoints (user/group).
-- [ ] Implement service-account management and token rotation.
-- [ ] Implement effective-role introspection endpoint.
-- [ ] Wire all IAM mutations into audit logging.
+- [x] Implement IAM repositories/services.
+- [x] Implement users CRUD endpoints.
+- [x] Implement groups CRUD endpoints.
+- [x] Implement membership endpoints.
+- [x] Implement role assignment endpoints (user/group).
+- [x] Implement service-account management and token rotation.
+- [x] Implement effective-role introspection endpoint.
+- [x] Wire all IAM mutations into audit logging.
 - [ ] Update API catalog docs.
 
 ## AuthN/AuthZ Engine
 
-- [ ] Refactor middleware to resolve effective roles from DB.
-- [ ] Keep static token compatibility via service principal mapping.
-- [ ] Support OIDC principal mapping by `sub` and email.
+- [x] Refactor middleware to resolve effective roles from DB.
+- [x] Keep static token compatibility via service principal mapping.
+- [x] Support OIDC principal mapping by `sub` and email.
 - [ ] Add compatibility fallback mode flag and docs.
 - [ ] Add authorization unit tests for role matrix paths.
 
 ## Web Admin
 
-- [ ] Remove mock RBAC matrix dependency.
-- [ ] Add `/settings/iam/users` page.
-- [ ] Add `/settings/iam/groups` page.
-- [ ] Add `/settings/iam/roles` page.
-- [ ] Add `/settings/iam/service-accounts` page.
-- [ ] Add `/settings/iam/audit` page.
-- [ ] Implement create/edit/delete and assign/unassign flows.
-- [ ] Align UI role guards with backend enforcement.
+- [x] Remove mock RBAC matrix dependency.
+- [x] Add `/settings/iam/users` page.
+- [x] Add `/settings/iam/groups` page.
+- [x] Add `/settings/iam/roles` page.
+- [x] Add `/settings/iam/service-accounts` page.
+- [x] Add `/settings/iam/audit` page.
+- [x] Implement create/edit/delete and assign/unassign flows.
+- [x] Align UI role guards with backend enforcement.
 - [ ] Add Cypress scenarios for IAM workflows.
 
 ## CLI (`odctl`)
 
-- [ ] Add `odctl iam users ...` commands.
-- [ ] Add `odctl iam groups ...` commands.
-- [ ] Add `odctl iam roles ...` commands.
-- [ ] Add `odctl iam service-accounts ...` commands.
-- [ ] Add `odctl iam whoami` command.
+- [x] Add `odctl iam users ...` commands.
+- [x] Add `odctl iam groups ...` commands.
+- [x] Add `odctl iam roles ...` commands.
+- [x] Add `odctl iam service-accounts ...` commands.
+- [x] Add `odctl iam whoami` command.
 - [ ] Add integration tests and JSON output validation.
 
 ## ICAP Identity Enrichment
 
-- [ ] Parse `X-User` header into `user_id`.
-- [ ] Parse `X-Group` header into `group_ids`.
-- [ ] Validate and sanitize identity header values.
+- [x] Parse `X-User` header into `user_id`.
+- [x] Parse `X-Group` header into `group_ids`.
+- [x] Validate and sanitize identity header values.
 - [ ] Add integration test for user/group-based policy conditions.
 
 ## Security and Rollout

@@ -1,0 +1,1582 @@
+use crate::auth::{require_roles, PrincipalType, UserContext, ROLE_IAM_ADMIN, ROLE_IAM_VIEW};
+use crate::{ApiError, AppState};
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
+use axum::{
+    extract::{Path, Query, State},
+    http::StatusCode,
+    Extension, Json,
+};
+use rand::{distributions::Alphanumeric, Rng};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sqlx::{types::chrono::Utc, PgPool};
+use std::collections::HashSet;
+use thiserror::Error;
+use uuid::Uuid;
+
+#[derive(Clone)]
+pub struct IamService {
+    pool: PgPool,
+}
+
+impl IamService {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    pub async fn list_users(&self) -> Result<Vec<IamUserRecord>, IamError> {
+        let users = sqlx::query_as!(
+            IamUserRecord,
+            r#"
+            SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
+            FROM iam_users
+            ORDER BY created_at DESC
+        "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(users)
+    }
+
+    pub async fn get_user(&self, id: Uuid) -> Result<IamUserRecord, IamError> {
+        let user = sqlx::query_as!(
+            IamUserRecord,
+            r#"
+            SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
+            FROM iam_users
+            WHERE id = $1
+        "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        user.ok_or(IamError::NotFound("user".into()))
+    }
+
+    pub async fn find_user_by_subject(
+        &self,
+        subject: &str,
+    ) -> Result<Option<IamUserRecord>, IamError> {
+        let user = sqlx::query_as!(
+            IamUserRecord,
+            r#"
+            SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
+            FROM iam_users
+            WHERE subject = $1
+        "#,
+            subject
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(user)
+    }
+
+    pub async fn find_user_by_email(&self, email: &str) -> Result<Option<IamUserRecord>, IamError> {
+        let user = sqlx::query_as!(
+            IamUserRecord,
+            r#"
+            SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
+            FROM iam_users
+            WHERE email = $1
+        "#,
+            email
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(user)
+    }
+
+    pub async fn create_user(&self, payload: CreateUserRequest) -> Result<IamUserRecord, IamError> {
+        if payload.email.trim().is_empty() {
+            return Err(IamError::Validation("email required".into()));
+        }
+        let record = sqlx::query_as!(IamUserRecord, r#"
+            INSERT INTO iam_users (id, subject, email, display_name, status)
+            VALUES ($1, $2, $3, $4, COALESCE($5, 'active'))
+            RETURNING id, subject, email, display_name, status, last_login_at, created_at, updated_at
+        "#, Uuid::new_v4(), payload.subject, payload.email.trim(), payload.display_name, payload.status)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_error)?;
+        Ok(record)
+    }
+
+    pub async fn update_user(
+        &self,
+        id: Uuid,
+        payload: UpdateUserRequest,
+    ) -> Result<IamUserRecord, IamError> {
+        let record = sqlx::query_as!(IamUserRecord, r#"
+            UPDATE iam_users
+            SET subject = COALESCE($2, subject),
+                email = COALESCE($3, email),
+                display_name = COALESCE($4, display_name),
+                status = COALESCE($5, status),
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, subject, email, display_name, status, last_login_at, created_at, updated_at
+        "#, id, payload.subject, payload.email, payload.display_name, payload.status)
+        .fetch_optional(&self.pool)
+        .await?;
+        record.ok_or(IamError::NotFound("user".into()))
+    }
+
+    pub async fn disable_user(&self, id: Uuid) -> Result<(), IamError> {
+        let result = sqlx::query!(
+            r#"UPDATE iam_users SET status = 'disabled', updated_at = NOW() WHERE id = $1"#,
+            id
+        )
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(IamError::NotFound("user".into()));
+        }
+        Ok(())
+    }
+
+    pub async fn list_groups(&self) -> Result<Vec<IamGroupRecord>, IamError> {
+        let groups = sqlx::query_as!(
+            IamGroupRecord,
+            r#"
+            SELECT id, name, description, status, created_at, updated_at
+            FROM iam_groups
+            ORDER BY name
+        "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(groups)
+    }
+
+    pub async fn get_group(&self, id: Uuid) -> Result<IamGroupRecord, IamError> {
+        let group = sqlx::query_as!(
+            IamGroupRecord,
+            r#"
+            SELECT id, name, description, status, created_at, updated_at
+            FROM iam_groups
+            WHERE id = $1
+        "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        group.ok_or(IamError::NotFound("group".into()))
+    }
+
+    pub async fn create_group(
+        &self,
+        payload: CreateGroupRequest,
+    ) -> Result<IamGroupRecord, IamError> {
+        if payload.name.trim().is_empty() {
+            return Err(IamError::Validation("name required".into()));
+        }
+        let record = sqlx::query_as!(
+            IamGroupRecord,
+            r#"
+            INSERT INTO iam_groups (id, name, description, status)
+            VALUES ($1, $2, $3, COALESCE($4, 'active'))
+            RETURNING id, name, description, status, created_at, updated_at
+        "#,
+            Uuid::new_v4(),
+            payload.name.trim(),
+            payload.description,
+            payload.status
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_error)?;
+        Ok(record)
+    }
+
+    pub async fn update_group(
+        &self,
+        id: Uuid,
+        payload: UpdateGroupRequest,
+    ) -> Result<IamGroupRecord, IamError> {
+        let record = sqlx::query_as!(
+            IamGroupRecord,
+            r#"
+            UPDATE iam_groups
+            SET name = COALESCE($2, name),
+                description = COALESCE($3, description),
+                status = COALESCE($4, status),
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, name, description, status, created_at, updated_at
+        "#,
+            id,
+            payload.name,
+            payload.description,
+            payload.status
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        record.ok_or(IamError::NotFound("group".into()))
+    }
+
+    pub async fn delete_group(&self, id: Uuid) -> Result<(), IamError> {
+        let result = sqlx::query!("DELETE FROM iam_groups WHERE id = $1", id)
+            .execute(&self.pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            return Err(IamError::NotFound("group".into()));
+        }
+        Ok(())
+    }
+
+    pub async fn list_group_members(&self, group_id: Uuid) -> Result<Vec<IamUserRecord>, IamError> {
+        let members = sqlx::query_as!(IamUserRecord, r#"
+            SELECT u.id, u.subject, u.email, u.display_name, u.status, u.last_login_at, u.created_at, u.updated_at
+            FROM iam_group_members gm
+            JOIN iam_users u ON u.id = gm.user_id
+            WHERE gm.group_id = $1
+            ORDER BY u.email
+        "#, group_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(members)
+    }
+
+    pub async fn add_group_member(&self, group_id: Uuid, user_id: Uuid) -> Result<(), IamError> {
+        sqlx::query!(
+            r#"INSERT INTO iam_group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"#,
+            group_id,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn remove_group_member(&self, group_id: Uuid, user_id: Uuid) -> Result<(), IamError> {
+        let result = sqlx::query!(
+            r#"DELETE FROM iam_group_members WHERE group_id = $1 AND user_id = $2"#,
+            group_id,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(IamError::NotFound("membership".into()));
+        }
+        Ok(())
+    }
+
+    pub async fn list_roles(&self) -> Result<Vec<IamRoleRecord>, IamError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT r.id,
+                   r.name,
+                   r.description,
+                   r.builtin,
+                   r.created_at,
+                   COALESCE(array_agg(p.permission) FILTER (WHERE p.permission IS NOT NULL), '{}') AS permissions
+            FROM iam_roles r
+            LEFT JOIN iam_role_permissions p ON p.role_id = r.id
+            GROUP BY r.id
+            ORDER BY r.name
+        "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let roles = rows
+            .into_iter()
+            .map(|row| IamRoleRecord {
+                id: row.id,
+                name: row.name,
+                description: row.description,
+                builtin: row.builtin,
+                created_at: row.created_at,
+                permissions: row
+                    .permissions
+                    .unwrap_or_default()
+                    .into_iter()
+                    .flatten()
+                    .collect(),
+            })
+            .collect();
+        Ok(roles)
+    }
+
+    pub async fn assign_role_to_user(
+        &self,
+        user_id: Uuid,
+        role: &str,
+    ) -> Result<Vec<String>, IamError> {
+        let role_id = self.role_id_by_name(role).await?;
+        sqlx::query!(
+            r#"INSERT INTO iam_user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"#,
+            user_id,
+            role_id
+        )
+        .execute(&self.pool)
+        .await?;
+        self.user_roles(user_id).await
+    }
+
+    pub async fn revoke_role_from_user(
+        &self,
+        user_id: Uuid,
+        role: &str,
+    ) -> Result<Vec<String>, IamError> {
+        let role_id = self.role_id_by_name(role).await?;
+        sqlx::query!(
+            r#"DELETE FROM iam_user_roles WHERE user_id = $1 AND role_id = $2"#,
+            user_id,
+            role_id
+        )
+        .execute(&self.pool)
+        .await?;
+        self.user_roles(user_id).await
+    }
+
+    pub async fn assign_role_to_group(
+        &self,
+        group_id: Uuid,
+        role: &str,
+    ) -> Result<Vec<String>, IamError> {
+        let role_id = self.role_id_by_name(role).await?;
+        sqlx::query!(
+            r#"INSERT INTO iam_group_roles (group_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"#,
+            group_id,
+            role_id
+        )
+        .execute(&self.pool)
+        .await?;
+        self.group_roles(group_id).await
+    }
+
+    pub async fn revoke_role_from_group(
+        &self,
+        group_id: Uuid,
+        role: &str,
+    ) -> Result<Vec<String>, IamError> {
+        let role_id = self.role_id_by_name(role).await?;
+        sqlx::query!(
+            r#"DELETE FROM iam_group_roles WHERE group_id = $1 AND role_id = $2"#,
+            group_id,
+            role_id
+        )
+        .execute(&self.pool)
+        .await?;
+        self.group_roles(group_id).await
+    }
+
+    pub async fn user_roles(&self, user_id: Uuid) -> Result<Vec<String>, IamError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT DISTINCT r.name
+            FROM iam_roles r
+            WHERE r.id IN (
+                SELECT role_id FROM iam_user_roles WHERE user_id = $1
+                UNION
+                SELECT gr.role_id
+                FROM iam_group_roles gr
+                JOIN iam_group_members gm ON gm.group_id = gr.group_id
+                WHERE gm.user_id = $1
+            )
+            ORDER BY r.name
+        "#,
+            user_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().filter_map(|row| row.name).collect())
+    }
+
+    pub async fn group_roles(&self, group_id: Uuid) -> Result<Vec<String>, IamError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT r.name
+            FROM iam_group_roles gr
+            JOIN iam_roles r ON r.id = gr.role_id
+            WHERE gr.group_id = $1
+            ORDER BY r.name
+        "#,
+            group_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().filter_map(|row| row.name).collect())
+    }
+
+    pub async fn list_service_accounts(&self) -> Result<Vec<ServiceAccountRecord>, IamError> {
+        let accounts = sqlx::query_as!(
+            ServiceAccountRecord,
+            r#"
+            SELECT id, name, description, status, token_hint, created_at, last_rotated_at
+            FROM iam_service_accounts
+            ORDER BY name
+        "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(accounts)
+    }
+
+    pub async fn get_service_account(&self, id: Uuid) -> Result<ServiceAccountRecord, IamError> {
+        let account = sqlx::query_as!(
+            ServiceAccountRecord,
+            r#"
+            SELECT id, name, description, status, token_hint, created_at, last_rotated_at
+            FROM iam_service_accounts
+            WHERE id = $1
+        "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        account.ok_or(IamError::NotFound("service_account".into()))
+    }
+
+    pub async fn create_service_account(
+        &self,
+        payload: CreateServiceAccountRequest,
+    ) -> Result<(ServiceAccountRecord, String), IamError> {
+        if payload.name.trim().is_empty() {
+            return Err(IamError::Validation("name required".into()));
+        }
+        let token = generate_token();
+        let hash = hash_token(&token)?;
+        let hint = token_hint(&token);
+        let record = sqlx::query_as!(ServiceAccountRecord, r#"
+            INSERT INTO iam_service_accounts (id, name, description, token_hash, token_hint, status, last_rotated_at)
+            VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'active'), NOW())
+            RETURNING id, name, description, status, token_hint, created_at, last_rotated_at
+        "#, Uuid::new_v4(), payload.name.trim(), payload.description, hash, hint, payload.status)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_error)?;
+        if !payload.roles.is_empty() {
+            self.replace_service_account_roles(record.id, &payload.roles)
+                .await?;
+        }
+        Ok((record, token))
+    }
+
+    pub async fn rotate_service_account(
+        &self,
+        id: Uuid,
+        payload: Option<UpdateServiceAccountRoles>,
+    ) -> Result<(ServiceAccountRecord, String), IamError> {
+        let token = generate_token();
+        let hash = hash_token(&token)?;
+        let hint = token_hint(&token);
+        let record = sqlx::query_as!(
+            ServiceAccountRecord,
+            r#"
+            UPDATE iam_service_accounts
+            SET token_hash = $2,
+                token_hint = $3,
+                last_rotated_at = NOW()
+            WHERE id = $1
+            RETURNING id, name, description, status, token_hint, created_at, last_rotated_at
+        "#,
+            id,
+            hash,
+            hint
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        let record = record.ok_or(IamError::NotFound("service_account".into()))?;
+        if let Some(update) = payload {
+            if !update.roles.is_empty() {
+                self.replace_service_account_roles(record.id, &update.roles)
+                    .await?;
+            }
+        }
+        Ok((record, token))
+    }
+
+    pub async fn disable_service_account(&self, id: Uuid) -> Result<(), IamError> {
+        let result = sqlx::query!(
+            r#"UPDATE iam_service_accounts SET status = 'disabled' WHERE id = $1"#,
+            id
+        )
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(IamError::NotFound("service_account".into()));
+        }
+        Ok(())
+    }
+
+    pub async fn service_account_roles(&self, id: Uuid) -> Result<Vec<String>, IamError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT r.name
+            FROM iam_service_account_roles sr
+            JOIN iam_roles r ON r.id = sr.role_id
+            WHERE sr.service_account_id = $1
+            ORDER BY r.name
+        "#,
+            id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().filter_map(|row| row.name).collect())
+    }
+
+    pub async fn effective_permissions_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<EffectiveAccess, IamError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT DISTINCT r.id, r.name
+            FROM iam_roles r
+            WHERE r.id IN (
+                SELECT role_id FROM iam_user_roles WHERE user_id = $1
+                UNION
+                SELECT gr.role_id
+                FROM iam_group_roles gr
+                JOIN iam_group_members gm ON gm.group_id = gr.group_id
+                WHERE gm.user_id = $1
+            )
+        "#,
+            user_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let role_ids: Vec<Uuid> = rows.iter().filter_map(|row| row.id).collect();
+        let role_names: HashSet<String> = rows.into_iter().filter_map(|row| row.name).collect();
+        let permissions = if role_ids.is_empty() {
+            HashSet::new()
+        } else {
+            let rows = sqlx::query!(
+                r#"SELECT DISTINCT permission FROM iam_role_permissions WHERE role_id = ANY($1)"#,
+                &role_ids
+            )
+            .fetch_all(&self.pool)
+            .await?;
+            rows.into_iter().filter_map(|row| row.permission).collect()
+        };
+
+        Ok(EffectiveAccess {
+            roles: role_names,
+            permissions,
+        })
+    }
+
+    pub async fn effective_permissions_for_service_account(
+        &self,
+        service_account_id: Uuid,
+    ) -> Result<EffectiveAccess, IamError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT DISTINCT r.id, r.name
+            FROM iam_service_account_roles sr
+            JOIN iam_roles r ON r.id = sr.role_id
+            WHERE sr.service_account_id = $1
+        "#,
+            service_account_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let role_ids: Vec<Uuid> = rows.iter().filter_map(|row| row.id).collect();
+        let role_names: HashSet<String> = rows.into_iter().filter_map(|row| row.name).collect();
+        let permissions = if role_ids.is_empty() {
+            HashSet::new()
+        } else {
+            let rows = sqlx::query!(
+                r#"SELECT DISTINCT permission FROM iam_role_permissions WHERE role_id = ANY($1)"#,
+                &role_ids
+            )
+            .fetch_all(&self.pool)
+            .await?;
+            rows.into_iter().filter_map(|row| row.permission).collect()
+        };
+
+        Ok(EffectiveAccess {
+            roles: role_names,
+            permissions,
+        })
+    }
+
+    pub async fn verify_service_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<ServiceAccountPrincipal>, IamError> {
+        let hint = token_hint(token);
+        let candidates = sqlx::query_as!(
+            ServiceAccountSecret,
+            r#"
+            SELECT id, name, token_hash, status
+            FROM iam_service_accounts
+            WHERE status = 'active' AND token_hint = $1
+        "#,
+            hint
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        for candidate in candidates {
+            if verify_hash(token, &candidate.token_hash)? {
+                let access = self
+                    .effective_permissions_for_service_account(candidate.id)
+                    .await?;
+                return Ok(Some(ServiceAccountPrincipal {
+                    id: candidate.id,
+                    name: candidate.name,
+                    roles: access.roles,
+                    permissions: access.permissions,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    pub async fn record_iam_event(
+        &self,
+        actor: Option<String>,
+        action: &str,
+        target_type: &str,
+        target_id: Option<String>,
+        payload: Value,
+    ) {
+        let _ = sqlx::query!(
+            r#"
+            INSERT INTO iam_audit_events (id, actor, action, target_type, target_id, payload)
+            VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+            Uuid::new_v4(),
+            actor,
+            action,
+            Some(target_type.to_string()),
+            target_id,
+            payload
+        )
+        .execute(&self.pool)
+        .await;
+    }
+
+    pub async fn list_iam_audit(&self, limit: i64) -> Result<Vec<IamAuditRecord>, IamError> {
+        let events = sqlx::query_as!(
+            IamAuditRecord,
+            r#"
+            SELECT id, actor, action, target_type, target_id, payload, created_at
+            FROM iam_audit_events
+            ORDER BY created_at DESC
+            LIMIT $1
+        "#,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(events)
+    }
+
+    async fn replace_service_account_roles(
+        &self,
+        id: Uuid,
+        roles: &[String],
+    ) -> Result<(), IamError> {
+        let role_ids = self.role_ids_by_name(roles).await?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query!(
+            r#"DELETE FROM iam_service_account_roles WHERE service_account_id = $1"#,
+            id
+        )
+        .execute(&mut *tx)
+        .await?;
+        for role_id in role_ids {
+            sqlx::query!(
+                r#"INSERT INTO iam_service_account_roles (service_account_id, role_id) VALUES ($1, $2)"#,
+                id,
+                role_id
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn role_id_by_name(&self, role: &str) -> Result<Uuid, IamError> {
+        let row = sqlx::query!("SELECT id FROM iam_roles WHERE name = $1", role)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.and_then(|r| r.id)
+            .ok_or_else(|| IamError::Validation(format!("unknown role: {}", role)))
+    }
+
+    async fn role_ids_by_name(&self, roles: &[String]) -> Result<Vec<Uuid>, IamError> {
+        if roles.is_empty() {
+            return Ok(vec![]);
+        }
+        let rows = sqlx::query!("SELECT id, name FROM iam_roles WHERE name = ANY($1)", roles)
+            .fetch_all(&self.pool)
+            .await?;
+        let mut ids = Vec::with_capacity(rows.len());
+        let mut found = HashSet::new();
+        for row in &rows {
+            if let (Some(id), Some(name)) = (row.id, row.name.as_deref()) {
+                ids.push(id);
+                found.insert(name.to_string());
+            }
+        }
+        let missing: Vec<String> = roles
+            .iter()
+            .filter(|r| !found.contains(r.as_str()))
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            return Err(IamError::Validation(format!(
+                "unknown role(s): {}",
+                missing.join(", ")
+            )));
+        }
+        Ok(ids)
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum IamError {
+    #[error("not found: {0}")]
+    NotFound(String),
+    #[error("validation failed: {0}")]
+    Validation(String),
+    #[error("database error: {0}")]
+    Db(#[from] sqlx::Error),
+    #[error("crypto error: {0}")]
+    Crypto(String),
+}
+
+impl From<argon2::password_hash::Error> for IamError {
+    fn from(err: argon2::password_hash::Error) -> Self {
+        IamError::Crypto(err.to_string())
+    }
+}
+
+fn map_db_error(err: sqlx::Error) -> IamError {
+    if let sqlx::Error::Database(db_err) = &err {
+        if db_err.constraint().is_some() {
+            return IamError::Validation(db_err.to_string());
+        }
+    }
+    IamError::Db(err)
+}
+
+fn map_iam_error(err: IamError) -> (StatusCode, Json<ApiError>) {
+    match err {
+        IamError::NotFound(resource) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiError::new(
+                "NOT_FOUND",
+                format!("{} not found", resource),
+            )),
+        ),
+        IamError::Validation(msg) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new("VALIDATION_ERROR", msg)),
+        ),
+        IamError::Db(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("DB_ERROR", err.to_string())),
+        ),
+        IamError::Crypto(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("CRYPTO_ERROR", err)),
+        ),
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+pub struct IamUserRecord {
+    pub id: Uuid,
+    pub subject: Option<String>,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub status: String,
+    pub last_login_at: Option<sqlx::types::chrono::DateTime<Utc>>,
+    pub created_at: sqlx::types::chrono::DateTime<Utc>,
+    pub updated_at: sqlx::types::chrono::DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+pub struct IamGroupRecord {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub status: String,
+    pub created_at: sqlx::types::chrono::DateTime<Utc>,
+    pub updated_at: sqlx::types::chrono::DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IamRoleRecord {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub builtin: bool,
+    pub created_at: sqlx::types::chrono::DateTime<Utc>,
+    pub permissions: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+pub struct ServiceAccountRecord {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub status: String,
+    pub token_hint: Option<String>,
+    pub created_at: sqlx::types::chrono::DateTime<Utc>,
+    pub last_rotated_at: Option<sqlx::types::chrono::DateTime<Utc>>,
+}
+
+#[derive(sqlx::FromRow)]
+struct ServiceAccountSecret {
+    pub id: Uuid,
+    pub name: String,
+    pub token_hash: String,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+pub struct IamAuditRecord {
+    pub id: Uuid,
+    pub actor: Option<String>,
+    pub action: String,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub payload: Option<Value>,
+    pub created_at: sqlx::types::chrono::DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateUserRequest {
+    pub subject: Option<String>,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateUserRequest {
+    pub subject: Option<String>,
+    pub email: Option<String>,
+    pub display_name: Option<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateGroupRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateGroupRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AssignRoleRequest {
+    pub role: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateServiceAccountRequest {
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub roles: Vec<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateServiceAccountRoles {
+    #[serde(default)]
+    pub roles: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ServiceAccountWithToken {
+    pub account: ServiceAccountRecord,
+    pub token: String,
+    pub roles: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserDetails {
+    pub user: IamUserRecord,
+    pub roles: Vec<String>,
+    pub groups: Vec<IamGroupRecord>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GroupDetails {
+    pub group: IamGroupRecord,
+    pub members: Vec<IamUserRecord>,
+    pub roles: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuditQuery {
+    #[serde(default = "default_audit_limit")]
+    pub limit: i64,
+}
+
+fn default_audit_limit() -> i64 {
+    100
+}
+
+#[derive(Clone, Debug)]
+pub struct EffectiveAccess {
+    pub roles: HashSet<String>,
+    pub permissions: HashSet<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ServiceAccountPrincipal {
+    pub id: Uuid,
+    pub name: String,
+    pub roles: HashSet<String>,
+    pub permissions: HashSet<String>,
+}
+
+fn generate_token() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .map(char::from)
+        .take(48)
+        .collect()
+}
+
+fn hash_token(token: &str) -> Result<String, argon2::password_hash::Error> {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon = Argon2::default();
+    let hash = argon.hash_password(token.as_bytes(), &salt)?;
+    Ok(hash.to_string())
+}
+
+fn verify_hash(token: &str, hash: &str) -> Result<bool, argon2::password_hash::Error> {
+    let parsed = PasswordHash::new(hash)?;
+    Ok(Argon2::default()
+        .verify_password(token.as_bytes(), &parsed)
+        .is_ok())
+}
+
+fn token_hint(token: &str) -> String {
+    let trimmed = token.trim();
+    let len = trimmed.len();
+    if len <= 8 {
+        trimmed.to_string()
+    } else {
+        trimmed[len - 8..].to_string()
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct WhoAmIResponse {
+    pub actor: String,
+    pub principal_type: PrincipalType,
+    pub principal_id: Option<Uuid>,
+    pub roles: Vec<String>,
+    pub permissions: Vec<String>,
+}
+
+pub async fn list_users_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+) -> Result<Json<Vec<UserDetails>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let users = iam.list_users().await.map_err(map_iam_error)?;
+    let mut results = Vec::with_capacity(users.len());
+    for record in users {
+        let roles = iam.user_roles(record.id).await.map_err(map_iam_error)?;
+        let groups = sqlx::query_as!(
+            IamGroupRecord,
+            r#"
+            SELECT g.id, g.name, g.description, g.status, g.created_at, g.updated_at
+            FROM iam_group_members gm
+            JOIN iam_groups g ON g.id = gm.group_id
+            WHERE gm.user_id = $1
+            ORDER BY g.name
+        "#,
+            record.id
+        )
+        .fetch_all(iam.pool())
+        .await
+        .map_err(map_iam_error)?;
+        results.push(UserDetails {
+            user: record,
+            roles,
+            groups,
+        });
+    }
+    Ok(Json(results))
+}
+
+pub async fn create_user_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Json(payload): Json<CreateUserRequest>,
+) -> Result<Json<UserDetails>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let record = iam.create_user(payload).await.map_err(map_iam_error)?;
+    let details = UserDetails {
+        user: record.clone(),
+        roles: vec![],
+        groups: vec![],
+    };
+    state
+        .log_iam_event(
+            "iam.user.create",
+            Some(user.actor.clone()),
+            "user",
+            Some(record.id.to_string()),
+            json!({
+                "email": record.email,
+                "status": record.status,
+            }),
+        )
+        .await;
+    Ok(Json(details))
+}
+
+pub async fn get_user_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<UserDetails>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let record = iam.get_user(id).await.map_err(map_iam_error)?;
+    let roles = iam.user_roles(id).await.map_err(map_iam_error)?;
+    let groups = sqlx::query_as!(
+        IamGroupRecord,
+        r#"
+        SELECT g.id, g.name, g.description, g.status, g.created_at, g.updated_at
+        FROM iam_group_members gm
+        JOIN iam_groups g ON g.id = gm.group_id
+        WHERE gm.user_id = $1
+        ORDER BY g.name
+    "#,
+        id
+    )
+    .fetch_all(iam.pool())
+    .await
+    .map_err(map_iam_error)?;
+    Ok(Json(UserDetails {
+        user: record,
+        roles,
+        groups,
+    }))
+}
+
+pub async fn update_user_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<UpdateUserRequest>,
+) -> Result<Json<UserDetails>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let record = iam.update_user(id, payload).await.map_err(map_iam_error)?;
+    let roles = iam.user_roles(id).await.map_err(map_iam_error)?;
+    let groups = sqlx::query_as!(
+        IamGroupRecord,
+        r#"
+        SELECT g.id, g.name, g.description, g.status, g.created_at, g.updated_at
+        FROM iam_group_members gm
+        JOIN iam_groups g ON g.id = gm.group_id
+        WHERE gm.user_id = $1
+        ORDER BY g.name
+    "#,
+        id
+    )
+    .fetch_all(iam.pool())
+    .await
+    .map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.user.update",
+            Some(user.actor.clone()),
+            "user",
+            Some(id.to_string()),
+            json!({
+                "status": record.status,
+            }),
+        )
+        .await;
+    Ok(Json(UserDetails {
+        user: record,
+        roles,
+        groups,
+    }))
+}
+
+pub async fn delete_user_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    iam.disable_user(id).await.map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.user.disable",
+            Some(user.actor.clone()),
+            "user",
+            Some(id.to_string()),
+            json!({}),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn list_groups_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+) -> Result<Json<Vec<GroupDetails>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let groups = iam.list_groups().await.map_err(map_iam_error)?;
+    let mut results = Vec::with_capacity(groups.len());
+    for group in groups {
+        let members = iam
+            .list_group_members(group.id)
+            .await
+            .map_err(map_iam_error)?;
+        let roles = iam.group_roles(group.id).await.map_err(map_iam_error)?;
+        results.push(GroupDetails {
+            group,
+            members,
+            roles,
+        });
+    }
+    Ok(Json(results))
+}
+
+pub async fn create_group_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Json(payload): Json<CreateGroupRequest>,
+) -> Result<Json<GroupDetails>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let group = iam.create_group(payload).await.map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.group.create",
+            Some(user.actor.clone()),
+            "group",
+            Some(group.id.to_string()),
+            json!({ "name": group.name }),
+        )
+        .await;
+    Ok(Json(GroupDetails {
+        group,
+        members: vec![],
+        roles: vec![],
+    }))
+}
+
+pub async fn get_group_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<GroupDetails>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let group = iam.get_group(id).await.map_err(map_iam_error)?;
+    let members = iam.list_group_members(id).await.map_err(map_iam_error)?;
+    let roles = iam.group_roles(id).await.map_err(map_iam_error)?;
+    Ok(Json(GroupDetails {
+        group,
+        members,
+        roles,
+    }))
+}
+
+pub async fn update_group_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<UpdateGroupRequest>,
+) -> Result<Json<GroupDetails>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let record = iam.update_group(id, payload).await.map_err(map_iam_error)?;
+    let members = iam.list_group_members(id).await.map_err(map_iam_error)?;
+    let roles = iam.group_roles(id).await.map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.group.update",
+            Some(user.actor.clone()),
+            "group",
+            Some(id.to_string()),
+            json!({ "status": record.status }),
+        )
+        .await;
+    Ok(Json(GroupDetails {
+        group: record,
+        members,
+        roles,
+    }))
+}
+
+pub async fn delete_group_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    iam.delete_group(id).await.map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.group.delete",
+            Some(user.actor.clone()),
+            "group",
+            Some(id.to_string()),
+            json!({}),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn add_member_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<AddMemberRequest>,
+) -> Result<Json<Vec<IamUserRecord>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    iam.add_group_member(id, payload.user_id)
+        .await
+        .map_err(map_iam_error)?;
+    let members = iam.list_group_members(id).await.map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.group.member.add",
+            Some(user.actor.clone()),
+            "group",
+            Some(id.to_string()),
+            json!({ "user_id": payload.user_id }),
+        )
+        .await;
+    Ok(Json(members))
+}
+
+pub async fn list_group_members_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<IamUserRecord>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let members = state
+        .iam()
+        .list_group_members(id)
+        .await
+        .map_err(map_iam_error)?;
+    Ok(Json(members))
+}
+
+pub async fn remove_member_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path((group_id, user_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    iam.remove_group_member(group_id, user_id)
+        .await
+        .map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.group.member.remove",
+            Some(user.actor.clone()),
+            "group",
+            Some(group_id.to_string()),
+            json!({ "user_id": user_id }),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn assign_user_role_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<AssignRoleRequest>,
+) -> Result<Json<Vec<String>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    if payload.role.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new("VALIDATION_ERROR", "role required")),
+        ));
+    }
+    let iam = state.iam();
+    let roles = iam
+        .assign_role_to_user(id, payload.role.trim())
+        .await
+        .map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.user.role.assign",
+            Some(user.actor.clone()),
+            "user",
+            Some(id.to_string()),
+            json!({ "role": payload.role }),
+        )
+        .await;
+    Ok(Json(roles))
+}
+
+pub async fn revoke_user_role_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path((id, role)): Path<(Uuid, String)>,
+) -> Result<Json<Vec<String>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let roles = iam
+        .revoke_role_from_user(id, role.trim())
+        .await
+        .map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.user.role.revoke",
+            Some(user.actor.clone()),
+            "user",
+            Some(id.to_string()),
+            json!({ "role": role }),
+        )
+        .await;
+    Ok(Json(roles))
+}
+
+pub async fn assign_group_role_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<AssignRoleRequest>,
+) -> Result<Json<Vec<String>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    if payload.role.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new("VALIDATION_ERROR", "role required")),
+        ));
+    }
+    let iam = state.iam();
+    let roles = iam
+        .assign_role_to_group(id, payload.role.trim())
+        .await
+        .map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.group.role.assign",
+            Some(user.actor.clone()),
+            "group",
+            Some(id.to_string()),
+            json!({ "role": payload.role }),
+        )
+        .await;
+    Ok(Json(roles))
+}
+
+pub async fn revoke_group_role_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path((id, role)): Path<(Uuid, String)>,
+) -> Result<Json<Vec<String>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let roles = iam
+        .revoke_role_from_group(id, role.trim())
+        .await
+        .map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.group.role.revoke",
+            Some(user.actor.clone()),
+            "group",
+            Some(id.to_string()),
+            json!({ "role": role }),
+        )
+        .await;
+    Ok(Json(roles))
+}
+
+pub async fn list_roles_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+) -> Result<Json<Vec<IamRoleRecord>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let roles = state.iam().list_roles().await.map_err(map_iam_error)?;
+    Ok(Json(roles))
+}
+
+pub async fn list_service_accounts_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+) -> Result<Json<Vec<ServiceAccountDetails>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let accounts = iam.list_service_accounts().await.map_err(map_iam_error)?;
+    let mut results = Vec::with_capacity(accounts.len());
+    for account in accounts {
+        let roles = iam
+            .service_account_roles(account.id)
+            .await
+            .map_err(map_iam_error)?;
+        results.push(ServiceAccountDetails { account, roles });
+    }
+    Ok(Json(results))
+}
+
+pub async fn get_service_account_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ServiceAccountDetails>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let account = iam.get_service_account(id).await.map_err(map_iam_error)?;
+    let roles = iam.service_account_roles(id).await.map_err(map_iam_error)?;
+    Ok(Json(ServiceAccountDetails { account, roles }))
+}
+
+pub async fn create_service_account_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Json(payload): Json<CreateServiceAccountRequest>,
+) -> Result<Json<ServiceAccountWithToken>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let (account, token) = iam
+        .create_service_account(payload)
+        .await
+        .map_err(map_iam_error)?;
+    let roles = iam
+        .service_account_roles(account.id)
+        .await
+        .map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.service_account.create",
+            Some(user.actor.clone()),
+            "service_account",
+            Some(account.id.to_string()),
+            json!({ "name": account.name }),
+        )
+        .await;
+    Ok(Json(ServiceAccountWithToken {
+        account,
+        token,
+        roles,
+    }))
+}
+
+pub async fn rotate_service_account_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<UpdateServiceAccountRoles>,
+) -> Result<Json<ServiceAccountWithToken>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    let (account, token) = iam
+        .rotate_service_account(id, Some(payload))
+        .await
+        .map_err(map_iam_error)?;
+    let roles = iam
+        .service_account_roles(account.id)
+        .await
+        .map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.service_account.rotate",
+            Some(user.actor.clone()),
+            "service_account",
+            Some(account.id.to_string()),
+            json!({}),
+        )
+        .await;
+    Ok(Json(ServiceAccountWithToken {
+        account,
+        token,
+        roles,
+    }))
+}
+
+pub async fn disable_service_account_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    iam.disable_service_account(id)
+        .await
+        .map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.service_account.disable",
+            Some(user.actor.clone()),
+            "service_account",
+            Some(id.to_string()),
+            json!({}),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn whoami_route(
+    Extension(user): Extension<UserContext>,
+) -> Result<Json<WhoAmIResponse>, (StatusCode, Json<ApiError>)> {
+    Ok(Json(WhoAmIResponse {
+        actor: user.actor.clone(),
+        principal_type: user.principal_type.clone(),
+        principal_id: user.principal_id,
+        roles: user.roles_list(),
+        permissions: user.permissions_list(),
+    }))
+}
+
+pub async fn list_audit_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Query(query): Query<AuditQuery>,
+) -> Result<Json<Vec<IamAuditRecord>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let limit = query.limit.clamp(1, 500);
+    let events = state
+        .iam()
+        .list_iam_audit(limit)
+        .await
+        .map_err(map_iam_error)?;
+    Ok(Json(events))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddMemberRequest {
+    pub user_id: Uuid,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ServiceAccountDetails {
+    pub account: ServiceAccountRecord,
+    pub roles: Vec<String>,
+}

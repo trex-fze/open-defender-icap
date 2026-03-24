@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 use std::{sync::Arc, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tracing::{error, info, instrument, Level};
+use tracing::{error, info, instrument, warn, Level};
 
 use cache::CacheClient;
 use common_types::{
@@ -109,6 +109,8 @@ async fn handle_connection(
         tracing::Span::current().record("trace_id", &tracing::field::display(trace_id));
     }
 
+    let identity = extract_identity(&icap_req.headers);
+
     if let Some(decision) = cache.get(&normalized.normalized_key).await? {
         metrics::record_cache_hit();
         info!(
@@ -129,7 +131,8 @@ async fn handle_connection(
         normalized_key: normalized.normalized_key.clone(),
         entity_level: normalized.entity_level.clone(),
         source_ip: icap_req.http_host.clone(),
-        user_id: None,
+        user_id: identity.user_id.clone(),
+        group_ids: identity.group_ids.clone(),
     };
     let start = tokio::time::Instant::now();
     let decision = policy_client.evaluate(&request).await.map_err(|err| {
@@ -226,6 +229,88 @@ fn action_requires_follow_up(action: &PolicyAction, missing_verdict: bool) -> bo
             action,
             PolicyAction::Review | PolicyAction::RequireApproval | PolicyAction::Warn
         )
+}
+
+#[derive(Default, Clone)]
+struct IdentityContext {
+    user_id: Option<String>,
+    group_ids: Vec<String>,
+}
+
+fn extract_identity(headers: &std::collections::HashMap<String, String>) -> IdentityContext {
+    const MAX_GROUPS: usize = 32;
+    let mut ctx = IdentityContext::default();
+    if let Some(value) = headers.get("x-user") {
+        if let Some(clean) = sanitize_identity(value) {
+            ctx.user_id = Some(clean);
+        } else if !value.trim().is_empty() {
+            warn!(
+                target = "svc-icap",
+                header = "X-User",
+                value,
+                "invalid user id header ignored"
+            );
+        }
+    }
+    if let Some(value) = headers.get("x-group") {
+        for part in value.split(&[',', ';'][..]) {
+            if ctx.group_ids.len() >= MAX_GROUPS {
+                break;
+            }
+            if let Some(clean) = sanitize_identity(part) {
+                ctx.group_ids.push(clean);
+            } else if !part.trim().is_empty() {
+                warn!(
+                    target = "svc-icap",
+                    header = "X-Group",
+                    value = part,
+                    "invalid group id ignored"
+                );
+            }
+        }
+    }
+    ctx
+}
+
+fn sanitize_identity(value: &str) -> Option<String> {
+    const MAX_LEN: usize = 128;
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.len() > MAX_LEN {
+        return None;
+    }
+    if trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '@' | '.' | '-' | '_' | ':' | '/'))
+    {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn extracts_valid_identity() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("x-user".into(), "alice@example.com".into());
+        headers.insert("x-group".into(), "team-ops, admins".into());
+        let ctx = extract_identity(&headers);
+        assert_eq!(ctx.user_id.as_deref(), Some("alice@example.com"));
+        assert_eq!(ctx.group_ids, vec!["team-ops", "admins"]);
+    }
+
+    #[test]
+    fn rejects_invalid_tokens() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("x-user".into(), "   ".into());
+        headers.insert("x-group".into(), "valid, bad!!".into());
+        let ctx = extract_identity(&headers);
+        assert!(ctx.user_id.is_none());
+        assert_eq!(ctx.group_ids, vec!["valid"]);
+    }
 }
 
 fn entity_level_str(level: &EntityLevel) -> &'static str {

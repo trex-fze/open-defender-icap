@@ -4,6 +4,7 @@ mod cache;
 mod cache_entries_api;
 mod classification_requests;
 mod cli_logs;
+mod iam;
 mod metrics;
 mod page_contents;
 mod pagination;
@@ -26,6 +27,7 @@ use axum::{
     routing::{delete, get, post, put},
     Extension, Json, Router,
 };
+use iam::IamService;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use sqlx::types::chrono::{DateTime, Utc};
@@ -118,11 +120,16 @@ pub struct AppState {
     audit_logger: AuditLogger,
     metrics: ReviewMetrics,
     reporting_client: Option<ElasticReportingClient>,
+    iam: Arc<IamService>,
 }
 
 impl AppState {
     pub fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    pub fn iam(&self) -> Arc<IamService> {
+        self.iam.clone()
     }
 
     async fn invalidate_override(&self, scope_type: &str, scope_value: &str) {
@@ -239,6 +246,37 @@ impl AppState {
     pub fn reporting_client(&self) -> Option<&ElasticReportingClient> {
         self.reporting_client.as_ref()
     }
+
+    pub async fn log_iam_event<T>(
+        &self,
+        action: &str,
+        actor: Option<String>,
+        target_type: &str,
+        target_id: Option<String>,
+        payload: T,
+    ) where
+        T: Serialize,
+    {
+        let payload_value = serde_json::to_value(&payload).ok();
+        self.iam
+            .record_iam_event(
+                actor.clone(),
+                action,
+                target_type,
+                target_id.clone(),
+                payload_value.clone().unwrap_or(Value::Null),
+            )
+            .await;
+        self.audit_logger
+            .log(AuditEvent {
+                actor,
+                action: action.to_string(),
+                target_type: Some(target_type.to_string()),
+                target_id,
+                payload: payload_value,
+            })
+            .await;
+    }
 }
 
 #[tokio::main]
@@ -274,17 +312,20 @@ async fn main() -> Result<()> {
         .transpose()
         .context("failed to initialize cache invalidator")?
         .map(Arc::new);
-    let admin_auth = Arc::new(
-        AdminAuth::from_config(admin_token.clone(), cfg.auth.clone())
-            .await
-            .context("failed to initialize auth")?,
-    );
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&db_url)
         .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
+
+    let iam_service = Arc::new(IamService::new(pool.clone()));
+
+    let admin_auth = Arc::new(
+        AdminAuth::from_config(admin_token.clone(), cfg.auth.clone(), iam_service.clone())
+            .await
+            .context("failed to initialize auth")?,
+    );
 
     let audit_cfg = cfg.audit.clone().merge_env();
     let metrics_cfg = cfg.metrics.clone().merge_env();
@@ -328,6 +369,7 @@ async fn main() -> Result<()> {
         audit_logger: AuditLogger::new(pool.clone(), elastic_exporter),
         metrics: review_metrics,
         reporting_client,
+        iam: iam_service.clone(),
     };
 
     let auth_layer = {
@@ -409,6 +451,65 @@ async fn main() -> Result<()> {
             "/api/v1/classifications/:normalized_key/unblock",
             post(classification_requests::manual_unblock),
         )
+        .route(
+            "/api/v1/iam/users",
+            get(iam::list_users_route).post(iam::create_user_route),
+        )
+        .route(
+            "/api/v1/iam/users/:id",
+            get(iam::get_user_route)
+                .put(iam::update_user_route)
+                .delete(iam::delete_user_route),
+        )
+        .route(
+            "/api/v1/iam/users/:id/roles",
+            post(iam::assign_user_role_route),
+        )
+        .route(
+            "/api/v1/iam/users/:id/roles/:role",
+            delete(iam::revoke_user_role_route),
+        )
+        .route(
+            "/api/v1/iam/groups",
+            get(iam::list_groups_route).post(iam::create_group_route),
+        )
+        .route(
+            "/api/v1/iam/groups/:id",
+            get(iam::get_group_route)
+                .put(iam::update_group_route)
+                .delete(iam::delete_group_route),
+        )
+        .route(
+            "/api/v1/iam/groups/:id/members",
+            get(iam::list_group_members_route).post(iam::add_member_route),
+        )
+        .route(
+            "/api/v1/iam/groups/:id/members/:user_id",
+            delete(iam::remove_member_route),
+        )
+        .route(
+            "/api/v1/iam/groups/:id/roles",
+            post(iam::assign_group_role_route),
+        )
+        .route(
+            "/api/v1/iam/groups/:id/roles/:role",
+            delete(iam::revoke_group_role_route),
+        )
+        .route("/api/v1/iam/roles", get(iam::list_roles_route))
+        .route(
+            "/api/v1/iam/service-accounts",
+            get(iam::list_service_accounts_route).post(iam::create_service_account_route),
+        )
+        .route(
+            "/api/v1/iam/service-accounts/:id",
+            get(iam::get_service_account_route).delete(iam::disable_service_account_route),
+        )
+        .route(
+            "/api/v1/iam/service-accounts/:id/rotate",
+            post(iam::rotate_service_account_route),
+        )
+        .route("/api/v1/iam/whoami", get(iam::whoami_route))
+        .route("/api/v1/iam/audit", get(iam::list_audit_route))
         .route(
             "/api/v1/page-contents/:normalized_key",
             get(page_contents::get_page_content),

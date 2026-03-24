@@ -76,7 +76,7 @@ export const adminGetJson = async <T>(
   return (await resp.json()) as T;
 };
 
-export const adminPostJson = async <TResponse, TBody>(
+export const adminPostJson = async <TResponse, TBody = unknown>(
   ctx: AdminApiContext,
   path: string,
   body: TBody,
@@ -95,7 +95,7 @@ export const adminPostJson = async <TResponse, TBody>(
   return (await resp.json()) as TResponse;
 };
 
-export const adminPutJson = async <TResponse, TBody>(
+export const adminPutJson = async <TResponse, TBody = unknown>(
   ctx: AdminApiContext,
   path: string,
   body: TBody,

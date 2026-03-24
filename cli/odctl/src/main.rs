@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use common_types::PolicyAction;
 use dirs::config_dir;
 use policy_dsl::{Conditions as RuleConditions, PolicyDocument, PolicyRule as DslPolicyRule};
-use reqwest::Client;
+use reqwest::{header, Client};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sqlx::{migrate::Migrator, postgres::PgPoolOptions};
 use tokio::{
@@ -73,6 +73,8 @@ enum Commands {
     Logs(LogsCmd),
     #[clap(subcommand)]
     Llm(LlmCmd),
+    #[clap(subcommand)]
+    Iam(IamCmd),
     Smoke {
         #[clap(long, default_value = "staging")]
         profile: String,
@@ -270,6 +272,103 @@ enum LlmCmd {
     Providers {
         #[clap(long, default_value = "http://localhost:19015/providers")]
         url: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum IamCmd {
+    #[clap(subcommand)]
+    Users(IamUsersCmd),
+    #[clap(subcommand)]
+    Groups(IamGroupsCmd),
+    #[clap(subcommand)]
+    Roles(IamRolesCmd),
+    #[clap(subcommand)]
+    ServiceAccounts(IamServiceAccountCmd),
+    Whoami,
+}
+
+#[derive(Subcommand, Debug)]
+enum IamUsersCmd {
+    List,
+    Create {
+        #[clap(long)]
+        email: String,
+        #[clap(long)]
+        display_name: Option<String>,
+        #[clap(long)]
+        subject: Option<String>,
+        #[clap(long, default_value = "active")]
+        status: String,
+    },
+    Disable {
+        id: String,
+    },
+    AssignRole {
+        id: String,
+        role: String,
+    },
+    RevokeRole {
+        id: String,
+        role: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum IamGroupsCmd {
+    List,
+    Create {
+        #[clap(long)]
+        name: String,
+        #[clap(long)]
+        description: Option<String>,
+    },
+    Delete {
+        id: String,
+    },
+    AddMember {
+        id: String,
+        #[clap(long)]
+        user_id: String,
+    },
+    RemoveMember {
+        id: String,
+        #[clap(long)]
+        user_id: String,
+    },
+    AssignRole {
+        id: String,
+        role: String,
+    },
+    RevokeRole {
+        id: String,
+        role: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum IamRolesCmd {
+    List,
+}
+
+#[derive(Subcommand, Debug)]
+enum IamServiceAccountCmd {
+    List,
+    Create {
+        #[clap(long)]
+        name: String,
+        #[clap(long)]
+        description: Option<String>,
+        #[clap(long = "role")]
+        roles: Vec<String>,
+    },
+    Rotate {
+        id: String,
+        #[clap(long = "role")]
+        roles: Vec<String>,
+    },
+    Disable {
+        id: String,
     },
 }
 
@@ -499,6 +598,7 @@ async fn main() -> Result<()> {
         Commands::Report(cmd) => handle_report(cmd, &client, cli.json).await?,
         Commands::Logs(cmd) => handle_logs(cmd, &client, cli.json).await?,
         Commands::Llm(cmd) => handle_llm(cmd, cli.json).await?,
+        Commands::Iam(cmd) => handle_iam(cmd, &client, cli.json).await?,
         Commands::Smoke { profile } => run_smoke(profile).await?,
         Commands::Auth(_) => unreachable!(),
     }
@@ -1201,6 +1301,296 @@ async fn handle_llm(cmd: &LlmCmd, json: bool) -> Result<()> {
     Ok(())
 }
 
+async fn handle_iam(cmd: &IamCmd, client: &ApiClient, json: bool) -> Result<()> {
+    match cmd {
+        IamCmd::Users(sub) => handle_iam_users(sub, client, json).await?,
+        IamCmd::Groups(sub) => handle_iam_groups(sub, client, json).await?,
+        IamCmd::Roles(sub) => handle_iam_roles(sub, client, json).await?,
+        IamCmd::ServiceAccounts(sub) => handle_iam_service_accounts(sub, client, json).await?,
+        IamCmd::Whoami => {
+            let response: WhoAmIResponse = client.get("/api/v1/iam/whoami", &[]).await?;
+            if json {
+                print_json(&response)?;
+            } else {
+                println!("Actor           : {}", response.actor);
+                println!("Principal Type  : {}", response.principal_type);
+                if let Some(id) = response.principal_id {
+                    println!("Principal ID    : {}", id);
+                }
+                println!("Roles           : {}", response.roles.join(", "));
+                println!("Permissions     : {}", response.permissions.join(", "));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_iam_users(cmd: &IamUsersCmd, client: &ApiClient, json: bool) -> Result<()> {
+    match cmd {
+        IamUsersCmd::List => {
+            let users: Vec<IamUserDetails> = client.get("/api/v1/iam/users", &[]).await?;
+            if json {
+                print_json(&users)?;
+            } else if users.is_empty() {
+                println!("No users found");
+            } else {
+                let rows = users
+                    .iter()
+                    .map(|user| {
+                        vec![
+                            user.user.id.to_string(),
+                            user.user.email.clone(),
+                            user.user.status.clone(),
+                            user.roles.join(", "),
+                        ]
+                    })
+                    .collect();
+                print_table(&["ID", "Email", "Status", "Roles"], rows);
+            }
+        }
+        IamUsersCmd::Create {
+            email,
+            display_name,
+            subject,
+            status,
+        } => {
+            let payload = CreateUserPayload {
+                email: email.clone(),
+                display_name: display_name.clone(),
+                subject: subject.clone(),
+                status: status.clone(),
+            };
+            let detail: IamUserDetails = client.post("/api/v1/iam/users", &payload).await?;
+            if json {
+                print_json(&detail)?;
+            } else {
+                println!("Created user {} ({})", detail.user.id, detail.user.email);
+            }
+        }
+        IamUsersCmd::Disable { id } => {
+            client.delete(&format!("/api/v1/iam/users/{id}")).await?;
+            println!("Disabled user {id}");
+        }
+        IamUsersCmd::AssignRole { id, role } => {
+            let payload = RoleChangePayload { role: role.clone() };
+            let roles: Vec<String> = client
+                .post(&format!("/api/v1/iam/users/{id}/roles"), &payload)
+                .await?;
+            if json {
+                print_json(&roles)?;
+            } else {
+                println!("Roles now: {}", roles.join(", "));
+            }
+        }
+        IamUsersCmd::RevokeRole { id, role } => {
+            let roles: Vec<String> = client
+                .delete_json(&format!("/api/v1/iam/users/{}/roles/{}", id, encode(role)))
+                .await?;
+            if json {
+                print_json(&roles)?;
+            } else {
+                println!("Roles now: {}", roles.join(", "));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_iam_groups(cmd: &IamGroupsCmd, client: &ApiClient, json: bool) -> Result<()> {
+    match cmd {
+        IamGroupsCmd::List => {
+            let groups: Vec<IamGroupDetails> = client.get("/api/v1/iam/groups", &[]).await?;
+            if json {
+                print_json(&groups)?;
+            } else if groups.is_empty() {
+                println!("No groups found");
+            } else {
+                let rows = groups
+                    .iter()
+                    .map(|group| {
+                        vec![
+                            group.group.id.to_string(),
+                            group.group.name.clone(),
+                            group.members.len().to_string(),
+                            group.roles.join(", "),
+                        ]
+                    })
+                    .collect();
+                print_table(&["ID", "Name", "Members", "Roles"], rows);
+            }
+        }
+        IamGroupsCmd::Create { name, description } => {
+            let payload = CreateGroupPayload {
+                name: name.clone(),
+                description: description.clone(),
+            };
+            let detail: IamGroupDetails = client.post("/api/v1/iam/groups", &payload).await?;
+            if json {
+                print_json(&detail)?;
+            } else {
+                println!("Created group {}", detail.group.name);
+            }
+        }
+        IamGroupsCmd::Delete { id } => {
+            client.delete(&format!("/api/v1/iam/groups/{id}")).await?;
+            println!("Deleted group {id}");
+        }
+        IamGroupsCmd::AddMember { id, user_id } => {
+            let payload = AddGroupMemberPayload {
+                user_id: user_id.clone(),
+            };
+            let members: Vec<IamUserRecord> = client
+                .post(&format!("/api/v1/iam/groups/{id}/members"), &payload)
+                .await?;
+            if json {
+                print_json(&members)?;
+            } else {
+                println!("Group {id} now has {} members", members.len());
+            }
+        }
+        IamGroupsCmd::RemoveMember { id, user_id } => {
+            client
+                .delete(&format!("/api/v1/iam/groups/{id}/members/{user_id}"))
+                .await?;
+            println!("Removed member {user_id} from group {id}");
+        }
+        IamGroupsCmd::AssignRole { id, role } => {
+            let payload = RoleChangePayload { role: role.clone() };
+            let roles: Vec<String> = client
+                .post(&format!("/api/v1/iam/groups/{id}/roles"), &payload)
+                .await?;
+            if json {
+                print_json(&roles)?;
+            } else {
+                println!("Group roles: {}", roles.join(", "));
+            }
+        }
+        IamGroupsCmd::RevokeRole { id, role } => {
+            let roles: Vec<String> = client
+                .delete_json(&format!("/api/v1/iam/groups/{}/roles/{}", id, encode(role)))
+                .await?;
+            if json {
+                print_json(&roles)?;
+            } else {
+                println!("Group roles: {}", roles.join(", "));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_iam_roles(cmd: &IamRolesCmd, client: &ApiClient, json: bool) -> Result<()> {
+    match cmd {
+        IamRolesCmd::List => {
+            let roles: Vec<IamRoleRecord> = client.get("/api/v1/iam/roles", &[]).await?;
+            if json {
+                print_json(&roles)?;
+            } else if roles.is_empty() {
+                println!("No roles found");
+            } else {
+                let rows = roles
+                    .iter()
+                    .map(|role| {
+                        vec![
+                            role.name.clone(),
+                            role.permissions.join(", "),
+                            role.builtin.to_string(),
+                        ]
+                    })
+                    .collect();
+                print_table(&["Role", "Permissions", "Builtin"], rows);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_iam_service_accounts(
+    cmd: &IamServiceAccountCmd,
+    client: &ApiClient,
+    json: bool,
+) -> Result<()> {
+    match cmd {
+        IamServiceAccountCmd::List => {
+            let accounts: Vec<ServiceAccountDetails> =
+                client.get("/api/v1/iam/service-accounts", &[]).await?;
+            if json {
+                print_json(&accounts)?;
+            } else if accounts.is_empty() {
+                println!("No service accounts found");
+            } else {
+                let rows = accounts
+                    .iter()
+                    .map(|entry| {
+                        vec![
+                            entry.account.id.to_string(),
+                            entry.account.name.clone(),
+                            entry.account.status.clone(),
+                            entry.roles.join(", "),
+                            entry
+                                .account
+                                .token_hint
+                                .clone()
+                                .unwrap_or_else(|| "-".into()),
+                        ]
+                    })
+                    .collect();
+                print_table(&["ID", "Name", "Status", "Roles", "Token Hint"], rows);
+            }
+        }
+        IamServiceAccountCmd::Create {
+            name,
+            description,
+            roles,
+        } => {
+            let payload = CreateServiceAccountPayload {
+                name: name.clone(),
+                description: description.clone(),
+                status: Some("active".into()),
+                roles: roles.clone(),
+            };
+            let record: ServiceAccountWithToken = client
+                .post("/api/v1/iam/service-accounts", &payload)
+                .await?;
+            if json {
+                print_json(&record)?;
+            } else {
+                println!("Created service account {}", record.account.name);
+                println!("Token: {}", record.token);
+                println!("Copy this token now; it will not be shown again.");
+            }
+        }
+        IamServiceAccountCmd::Rotate { id, roles } => {
+            let payload = RotateServiceAccountPayload {
+                roles: if roles.is_empty() {
+                    None
+                } else {
+                    Some(roles.clone())
+                },
+            };
+            let record: ServiceAccountWithToken = client
+                .post(
+                    &format!("/api/v1/iam/service-accounts/{id}/rotate"),
+                    &payload,
+                )
+                .await?;
+            if json {
+                print_json(&record)?;
+            } else {
+                println!("Rotated service account {}", record.account.name);
+                println!("New token: {}", record.token);
+            }
+        }
+        IamServiceAccountCmd::Disable { id } => {
+            client
+                .delete(&format!("/api/v1/iam/service-accounts/{id}"))
+                .await?;
+            println!("Disabled service account {id}");
+        }
+    }
+    Ok(())
+}
+
 fn load_policy_document(file: &PathBuf) -> Result<PolicyDocument> {
     let path = file
         .to_str()
@@ -1484,10 +1874,21 @@ impl ApiClient {
         Ok(())
     }
 
+    async fn delete_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let req = self.http.delete(url);
+        let resp = self.send(req).await?;
+        Ok(resp.json().await?)
+    }
+
     async fn send(&self, req: reqwest::RequestBuilder) -> Result<reqwest::Response> {
         let mut builder = req;
         if let Some(token) = &self.token {
-            builder = builder.header("X-Admin-Token", token);
+            if looks_like_jwt(token) {
+                builder = builder.header(header::AUTHORIZATION, format!("Bearer {}", token));
+            } else {
+                builder = builder.header("X-Admin-Token", token);
+            }
         }
         let resp = builder.send().await?;
         if resp.status().is_success() {
@@ -1498,6 +1899,11 @@ impl ApiClient {
             Err(anyhow!("request failed: {status} -> {body}"))
         }
     }
+}
+
+fn looks_like_jwt(token: &str) -> bool {
+    let parts: Vec<&str> = token.split('.').collect();
+    parts.len() == 3 && parts.iter().all(|segment| !segment.is_empty())
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1735,6 +2141,85 @@ struct CliLogRecord {
     created_at: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct IamUserRecord {
+    id: Uuid,
+    subject: Option<String>,
+    email: String,
+    display_name: Option<String>,
+    status: String,
+    last_login_at: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct IamGroupRecord {
+    id: Uuid,
+    name: String,
+    description: Option<String>,
+    status: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct IamUserDetails {
+    user: IamUserRecord,
+    roles: Vec<String>,
+    groups: Vec<IamGroupRecord>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct IamGroupDetails {
+    group: IamGroupRecord,
+    members: Vec<IamUserRecord>,
+    roles: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct IamRoleRecord {
+    id: Uuid,
+    name: String,
+    description: Option<String>,
+    builtin: bool,
+    created_at: String,
+    permissions: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ServiceAccountRecord {
+    id: Uuid,
+    name: String,
+    description: Option<String>,
+    status: String,
+    token_hint: Option<String>,
+    created_at: String,
+    last_rotated_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ServiceAccountDetails {
+    account: ServiceAccountRecord,
+    roles: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ServiceAccountWithToken {
+    account: ServiceAccountRecord,
+    token: String,
+    roles: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct WhoAmIResponse {
+    actor: String,
+    principal_type: String,
+    principal_id: Option<Uuid>,
+    roles: Vec<String>,
+    permissions: Vec<String>,
+}
+
 #[derive(Serialize)]
 struct DeviceCodeRequest<'a> {
     client_id: &'a str,
@@ -1757,4 +2242,48 @@ struct DeviceErrorResponse {
     error: String,
     #[serde(default)]
     error_description: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CreateUserPayload {
+    email: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subject: Option<String>,
+    status: String,
+}
+
+#[derive(Serialize)]
+struct RoleChangePayload {
+    role: String,
+}
+
+#[derive(Serialize)]
+struct CreateGroupPayload {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AddGroupMemberPayload {
+    user_id: String,
+}
+
+#[derive(Serialize)]
+struct CreateServiceAccountPayload {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
+    #[serde(default)]
+    roles: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct RotateServiceAccountPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    roles: Option<Vec<String>>,
 }

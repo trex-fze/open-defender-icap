@@ -125,9 +125,3 @@ export const reports = [
     },
   },
 ];
-
-export const rbacMatrix = [
-  { name: 'Avery Quinn', email: 'avery@example.com', roles: ['policy-admin', 'review-approver'] },
-  { name: 'Blair Soto', email: 'blair@example.com', roles: ['policy-editor', 'policy-viewer'] },
-  { name: 'Casey Lin', email: 'casey@example.com', roles: ['auditor'] },
-];

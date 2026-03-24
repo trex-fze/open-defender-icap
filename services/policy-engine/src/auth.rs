@@ -4,15 +4,10 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
-use chrono::Utc;
-use hmac::{Hmac, Mac};
+use reqwest::{Client, StatusCode as ReqStatus};
 use serde::Deserialize;
-use sha2::Sha256;
 use std::{collections::HashSet, env, sync::Arc};
-
-type HmacSha256 = Hmac<Sha256>;
+use tracing::error;
 
 const ROLE_POLICY_ADMIN: &str = "policy-admin";
 const ROLE_POLICY_EDITOR: &str = "policy-editor";
@@ -20,95 +15,78 @@ const ROLE_POLICY_VIEWER: &str = "policy-viewer";
 
 #[derive(Clone)]
 pub struct AdminAuth {
-    static_token: Option<String>,
-    static_roles: Vec<String>,
-    jwt: Option<JwtValidator>,
+    resolver_url: String,
+    client: Client,
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct AuthSettings {
-    pub static_roles: Option<Vec<String>>,
-    pub oidc_issuer: Option<String>,
-    pub oidc_audience: Option<String>,
-    pub oidc_hs256_secret: Option<String>,
+    pub resolver_url: Option<String>,
 }
 
 impl AuthSettings {
     pub fn from_env(value: Option<Self>) -> Self {
         let mut settings = value.unwrap_or_default();
-        if let Ok(secret) = env::var("OD_OIDC_HS256_SECRET") {
-            settings.oidc_hs256_secret = Some(secret);
-        }
-        if let Ok(issuer) = env::var("OD_OIDC_ISSUER") {
-            settings.oidc_issuer = Some(issuer);
-        }
-        if let Ok(aud) = env::var("OD_OIDC_AUDIENCE") {
-            settings.oidc_audience = Some(aud);
-        }
-        if settings
-            .static_roles
-            .as_ref()
-            .map_or(true, |r| r.is_empty())
-        {
-            settings.static_roles = Some(default_roles());
+        if let Ok(url) = env::var("OD_IAM_RESOLVER_URL") {
+            settings.resolver_url = Some(url);
         }
         settings
     }
 }
 
-fn default_roles() -> Vec<String> {
-    vec![
-        ROLE_POLICY_ADMIN.into(),
-        ROLE_POLICY_EDITOR.into(),
-        ROLE_POLICY_VIEWER.into(),
-    ]
-}
-
 impl AdminAuth {
-    pub async fn from_config(
-        token: Option<String>,
-        settings: AuthSettings,
-    ) -> anyhow::Result<Self> {
-        let merged = settings;
-        let jwt = if let (Some(secret), Some(issuer), Some(audience)) = (
-            merged.oidc_hs256_secret.clone(),
-            merged.oidc_issuer.clone(),
-            merged.oidc_audience.clone(),
-        ) {
-            Some(JwtValidator::new(secret, issuer, audience))
-        } else {
-            None
-        };
-
+    pub async fn from_config(settings: AuthSettings) -> anyhow::Result<Self> {
+        let resolver_url = settings
+            .resolver_url
+            .unwrap_or_else(|| "http://localhost:19000/api/v1/iam/whoami".to_string());
+        let client = Client::builder().build()?;
         Ok(Self {
-            static_token: token,
-            static_roles: merged.static_roles.unwrap_or_else(default_roles),
-            jwt,
+            resolver_url,
+            client,
         })
     }
 
-    pub fn authenticate(&self, req: &Request<Body>) -> Result<UserContext, StatusCode> {
-        if let Some(jwt) = &self.jwt {
-            if let Some(token) = bearer_token(req) {
-                return jwt.validate(token).map_err(|_| StatusCode::UNAUTHORIZED);
-            }
+    pub async fn authenticate(
+        &self,
+        bearer: Option<String>,
+        admin: Option<String>,
+    ) -> Result<UserContext, StatusCode> {
+        let has_auth = bearer.is_some() || admin.is_some();
+
+        if !has_auth {
+            return Ok(UserContext::system());
         }
 
-        if let Some(expected) = self.static_token.as_deref() {
-            if let Some(provided) = req
-                .headers()
-                .get("X-Admin-Token")
-                .and_then(|v| v.to_str().ok())
-            {
-                if provided == expected {
-                    return Ok(UserContext::from_static(&self.static_roles));
-                }
-            }
-            return Err(StatusCode::UNAUTHORIZED);
+        let mut builder = self.client.get(&self.resolver_url);
+        if let Some(authz) = bearer {
+            builder = builder.header("Authorization", authz);
+        }
+        if let Some(token) = admin {
+            builder = builder.header("X-Admin-Token", token);
         }
 
-        Ok(UserContext::system())
+        let response = builder.send().await.map_err(|err| {
+            error!(target = "svc-policy", %err, "failed to contact IAM resolver");
+            StatusCode::BAD_GATEWAY
+        })?;
+
+        match response.status() {
+            ReqStatus::OK => {
+                let identity = response.json::<ResolverIdentity>().await.map_err(|err| {
+                    error!(target = "svc-policy", %err, "failed to parse IAM resolver response");
+                    StatusCode::BAD_GATEWAY
+                })?;
+                Ok(UserContext::from_identity(identity))
+            }
+            ReqStatus::UNAUTHORIZED => Err(StatusCode::UNAUTHORIZED),
+            ReqStatus::FORBIDDEN => Err(StatusCode::FORBIDDEN),
+            status => {
+                let body = response.text().await.unwrap_or_default();
+                error!(target = "svc-policy", %status, body, "IAM resolver returned error");
+                Err(StatusCode::BAD_GATEWAY)
+            }
+        }
     }
 }
 
@@ -117,16 +95,20 @@ pub async fn enforce_admin(
     mut req: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let user = auth.authenticate(&req)?;
-    req.extensions_mut().insert(user);
-    Ok(next.run(req).await)
-}
-
-fn bearer_token(req: &Request<Body>) -> Option<&str> {
-    req.headers()
+    let bearer = req
+        .headers()
         .get(header::AUTHORIZATION)
         .and_then(|hv| hv.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
+        .map(|value| value.to_string());
+    let admin = req
+        .headers()
+        .get("X-Admin-Token")
+        .and_then(|hv| hv.to_str().ok())
+        .map(|value| value.to_string());
+    let user = auth.authenticate(bearer, admin).await?;
+    req.extensions_mut().insert(user);
+    Ok(next.run(req).await)
 }
 
 #[derive(Clone, Debug)]
@@ -143,17 +125,10 @@ impl UserContext {
         }
     }
 
-    fn from_static(roles: &[String]) -> Self {
+    fn from_identity(identity: ResolverIdentity) -> Self {
         Self {
-            actor: "static-admin".into(),
-            roles: roles.iter().cloned().collect(),
-        }
-    }
-
-    fn from_claims(actor: String, roles: Vec<String>) -> Self {
-        Self {
-            actor,
-            roles: roles.into_iter().collect(),
+            actor: identity.actor,
+            roles: identity.roles.into_iter().collect(),
         }
     }
 
@@ -162,132 +137,20 @@ impl UserContext {
     }
 }
 
-#[derive(Clone)]
-struct JwtValidator {
-    secret: Vec<u8>,
-    issuer: String,
-    audience: String,
-}
-
-impl JwtValidator {
-    fn new(secret: String, issuer: String, audience: String) -> Self {
-        Self {
-            secret: secret.into_bytes(),
-            issuer,
-            audience,
-        }
-    }
-
-    fn validate(&self, token: &str) -> Result<UserContext, AuthError> {
-        let parts: Vec<&str> = token.split('.').collect();
-        if parts.len() != 3 {
-            return Err(AuthError::InvalidFormat);
-        }
-        let header = decode_segment(parts[0])?;
-        let payload = decode_segment(parts[1])?;
-        verify_signature(&self.secret, parts[0], parts[1], parts[2])?;
-
-        let header: JwtHeader =
-            serde_json::from_slice(&header).map_err(|_| AuthError::InvalidFormat)?;
-        if header.alg != "HS256" {
-            return Err(AuthError::InvalidFormat);
-        }
-
-        let claims: Claims =
-            serde_json::from_slice(&payload).map_err(|_| AuthError::InvalidFormat)?;
-        claims.validate(&self.issuer, &self.audience)?;
-        let actor = claims
-            .preferred_username
-            .clone()
-            .or(claims.email.clone())
-            .unwrap_or_else(|| claims.sub.clone());
-        let roles = claims.compute_roles();
-        Ok(UserContext::from_claims(actor, roles))
-    }
-}
-
-fn decode_segment(segment: &str) -> Result<Vec<u8>, AuthError> {
-    URL_SAFE_NO_PAD
-        .decode(segment)
-        .map_err(|_| AuthError::InvalidFormat)
-}
-
-fn verify_signature(
-    secret: &[u8],
-    header: &str,
-    payload: &str,
-    signature: &str,
-) -> Result<(), AuthError> {
-    let mut mac = HmacSha256::new_from_slice(secret).map_err(|_| AuthError::InvalidFormat)?;
-    let signing_input = format!("{}.{}", header, payload);
-    mac.update(signing_input.as_bytes());
-    let expected = mac.finalize().into_bytes();
-    let provided = decode_segment(signature)?;
-    if expected.as_slice() == provided.as_slice() {
-        Ok(())
-    } else {
-        Err(AuthError::InvalidSignature)
-    }
-}
-
 #[derive(Deserialize)]
-struct JwtHeader {
-    alg: String,
+struct ResolverIdentity {
+    actor: String,
+    roles: Vec<String>,
+    #[allow(dead_code)]
+    permissions: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Claims {
-    sub: String,
-    iss: String,
-    #[serde(default)]
-    aud: Option<String>,
-    #[serde(default)]
-    exp: Option<i64>,
-    #[serde(default)]
-    preferred_username: Option<String>,
-    #[serde(default)]
-    email: Option<String>,
-    #[serde(default)]
-    roles: Option<Vec<String>>,
-    #[serde(default)]
-    scope: Option<String>,
-}
-
-impl Claims {
-    fn validate(&self, issuer: &str, audience: &str) -> Result<(), AuthError> {
-        if self.iss != issuer {
-            return Err(AuthError::InvalidIssuer);
-        }
-        if self.aud.as_deref() != Some(audience) {
-            return Err(AuthError::InvalidAudience);
-        }
-        if let Some(exp) = self.exp {
-            if Utc::now().timestamp() > exp {
-                return Err(AuthError::Expired);
-            }
-        }
-        Ok(())
-    }
-
-    fn compute_roles(&self) -> Vec<String> {
-        if let Some(roles) = &self.roles {
-            if !roles.is_empty() {
-                return roles.clone();
-            }
-        }
-        if let Some(scope) = &self.scope {
-            return scope.split_whitespace().map(|s| s.to_string()).collect();
-        }
-        default_roles()
-    }
-}
-
-enum AuthError {
-    InvalidFormat,
-    InvalidSignature,
-    InvalidIssuer,
-    InvalidAudience,
-    Expired,
+fn default_roles() -> Vec<String> {
+    vec![
+        ROLE_POLICY_ADMIN.into(),
+        ROLE_POLICY_EDITOR.into(),
+        ROLE_POLICY_VIEWER.into(),
+    ]
 }
 
 pub fn require_roles(ctx: &UserContext, roles: &[&str]) -> Result<(), StatusCode> {
