@@ -44,4 +44,4 @@ This checklist tracks implementation progress for Stage 10 and maps directly to 
 - [x] Every currently exposed Admin API management route has a corresponding UI workflow.
 - [x] No placeholder management action remains in production routes.
 - [x] Role-based nav/action availability aligns with backend-enforced permissions.
-- [ ] Web admin test suite (unit + e2e) and integration smoke remain green.
+- [x] Web admin test suite (unit + e2e) and integration smoke remain green.
