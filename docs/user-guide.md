@@ -69,7 +69,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 
 ## 7. React Admin UI
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
-- Routes: Dashboard, Investigations, Policies, Review queue, **Pending Sites** (lists `ContentPending` keys with a one-click manual-unblock action), Overrides, Taxonomy, Reports, Settings.
+- Routes: Dashboard, Investigations, Policies (+ draft create/publish), Review queue (resolve actions), **Pending Sites** (structured manual decision flow), Overrides (CRUD), Taxonomy (category/subcategory CRUD), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs).
 - Authentication: OIDC login; RBAC controlling navigation.
 - Build: `npm run build`; deploy static assets behind reverse proxy.
 - Frontend expansion roadmap: see `rfc/stage-10-frontend-management-parity.md` and `implementation-plan/stage-10-frontend-management-parity.md` for full management-feature parity scope.
