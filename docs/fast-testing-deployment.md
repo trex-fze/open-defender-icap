@@ -30,7 +30,15 @@ If you want browser/device traffic to pass through the stack:
 1. Configure client proxy settings:
    - HTTP proxy: `localhost:3128`
    - HTTPS proxy: `localhost:3128`
-2. Generate and trust the Squid CA certificate:
+2. Ensure Squid allows your client source IP:
+   - The compose testing profile currently allows all client source IPs to avoid Docker Desktop source-IP translation issues during local tests.
+   - If Squid does not contain explicit `http_access allow` rules, traffic will fail with `TCP_DENIED/403`.
+   - Current local ACL policy in `deploy/docker/squid/squid.conf`:
+     - allows all source clients in local test mode
+     - allows `CONNECT` only to SSL port `443`
+     - denies unsafe ports and then applies final deny rule
+   - Security note: keep this profile for local/dev testing only. For shared networks or production, restrict source ACLs to your trusted subnets.
+3. Generate and trust the Squid CA certificate:
    - Run `make gen-certs`
    - Import `deploy/docker/squid/certs/ca.pem` into the OS/browser trust store
 
@@ -191,6 +199,10 @@ Use `down -v` only when you explicitly need a clean local data state.
   - The destination is in content-first pending state; allow/block verdict is still being produced.
 - Why do HTTPS sites show certificate warnings in browser tests?
   - The Squid CA cert is not trusted on the client yet.
+- I set macOS proxy to `localhost:3128` but I cannot browse internet. Why?
+  - Check Squid ACLs first. Missing `http_access allow` rules cause blanket `TCP_DENIED/403` responses.
+  - Check logs with `docker compose -f deploy/docker/docker-compose.yml logs --tail=100 squid`.
+  - If you changed `squid.conf`, restart the stack so ACL changes apply.
 - How do I run fast repeat tests?
   - Use `INTEGRATION_BUILD=0 tests/integration.sh`.
 - How do I force a full clean validation?
@@ -203,6 +215,10 @@ Use `down -v` only when you explicitly need a clean local data state.
 ## 9) Additional relevant information
 
 - Keep failure artifacts from `tests/artifacts/content-pending/` when debugging classification timing or queue behavior.
+- When changing `deploy/docker/squid/squid.conf`, apply safely with:
+  1. `docker compose -f deploy/docker/docker-compose.yml down`
+  2. `docker compose -f deploy/docker/docker-compose.yml up -d --build`
+  3. `docker compose -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl migrate run all`
 - If integration fails, isolate by stage:
   1. `odctl smoke --profile compose`
   2. `tests/stage06_ingest.sh`
