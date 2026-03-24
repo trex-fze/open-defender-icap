@@ -37,11 +37,11 @@ This checklist tracks implementation progress for Stage 10 and maps directly to 
 - [x] Add/expand unit tests for new hooks/pages.
 - [x] Add/expand Cypress flows for policy/review/diagnostics parity.
 - [x] Add accessibility pass for forms, dialogs, and action tables.
-- [ ] Update operator/user docs with screenshots and runbook steps.
+- [x] Update operator/user docs with screenshots and runbook steps.
 
 ## Acceptance Tracking
 
-- [ ] Every currently exposed Admin API management route has a corresponding UI workflow.
-- [ ] No placeholder management action remains in production routes.
-- [ ] Role-based nav/action availability aligns with backend-enforced permissions.
+- [x] Every currently exposed Admin API management route has a corresponding UI workflow.
+- [x] No placeholder management action remains in production routes.
+- [x] Role-based nav/action availability aligns with backend-enforced permissions.
 - [ ] Web admin test suite (unit + e2e) and integration smoke remain green.

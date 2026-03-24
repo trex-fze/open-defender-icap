@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useReviewQueueData } from '../hooks/useReviewQueueData';
 
 export const InvestigationsPage = () => {
+  const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const { data, loading, error, isMock } = useReviewQueueData();
 
@@ -30,7 +32,7 @@ export const InvestigationsPage = () => {
           <p className="section-title">Investigations</p>
           <h2 style={{ margin: 0 }}>Classification History & Cache</h2>
         </div>
-        <button className="cta-button">Open Timeline</button>
+        <button className="cta-button" onClick={() => navigate('/review-queue')}>Open Review Queue</button>
       </div>
 
       {error ? (

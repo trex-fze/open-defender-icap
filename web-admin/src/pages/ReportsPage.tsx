@@ -2,6 +2,25 @@ import { useMemo, useState } from 'react';
 import { useReportsData } from '../hooks/useReportsData';
 import { useTrafficReportData } from '../hooks/useTrafficReportData';
 
+const toCsvValue = (value: string | number) => {
+  const text = String(value);
+  if (text.includes(',') || text.includes('"') || text.includes('\n')) {
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+  return text;
+};
+
+const downloadCsv = (filename: string, rows: Array<Array<string | number>>) => {
+  const csv = rows.map((row) => row.map(toCsvValue).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
 export const ReportsPage = () => {
   const [dimension, setDimension] = useState('category');
   const [range, setRange] = useState('24h');
@@ -20,6 +39,33 @@ export const ReportsPage = () => {
     }));
   }, [traffic.data]);
 
+  const exportCsv = () => {
+    const rows: Array<Array<string | number>> = [
+      ['section', 'key', 'value', 'meta'],
+    ];
+
+    if (report) {
+      Object.entries(report.metrics).forEach(([action, value]) => {
+        rows.push(['aggregate', action, value, `${report.dimension}:${report.period}`]);
+      });
+    }
+
+    const trafficData = traffic.data;
+    if (trafficData) {
+      trendRows.forEach((row) => {
+        rows.push(['traffic-trend', row.action, row.total, `${row.buckets} buckets`]);
+      });
+      trafficData.top_blocked_domains.forEach((row) => {
+        rows.push(['top-blocked-domain', row.key, row.doc_count, trafficData.range]);
+      });
+      trafficData.top_categories.forEach((row) => {
+        rows.push(['top-category', row.key, row.doc_count, trafficData.range]);
+      });
+    }
+
+    downloadCsv(`open-defender-reports-${dimension}-${range}.csv`, rows);
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -27,7 +73,7 @@ export const ReportsPage = () => {
           <p className="section-title">Reporting</p>
           <h2 style={{ margin: 0 }}>Aggregates & KPIs</h2>
         </div>
-        <button className="cta-button">Export CSV</button>
+        <button className="cta-button" onClick={exportCsv}>Export CSV</button>
       </div>
 
       <div className="glass-panel">

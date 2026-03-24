@@ -1,7 +1,9 @@
 import { kpis, reviewQueue } from '../data/mockData';
 import { useOpsStatus } from '../hooks/useOpsStatus';
+import { useNavigate } from 'react-router-dom';
 
 export const DashboardPage = () => {
+  const navigate = useNavigate();
   const { data: ops, loading: opsLoading, error: opsError } = useOpsStatus();
 
   return (
@@ -12,7 +14,7 @@ export const DashboardPage = () => {
           <h2 style={{ margin: 0, fontSize: '2.4rem' }}>Trust & Safety Pulse</h2>
           <p style={{ color: 'var(--muted)' }}>Live telemetry from ICAP adaptor, Redis queue, and LLM worker.</p>
         </div>
-        <button className="cta-button">Download Report</button>
+        <button className="cta-button" onClick={() => navigate('/reports')}>Open Reports</button>
       </div>
 
       <div className="kpi-grid">

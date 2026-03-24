@@ -18,7 +18,6 @@ export const SettingsRbacPage = () => {
           <p className="section-title">RBAC</p>
           <h2 style={{ margin: 0 }}>Role assignments</h2>
         </div>
-        <button className="cta-button">Invite User</button>
       </div>
 
       <form className="glass-panel" onSubmit={onLoadLogs}>

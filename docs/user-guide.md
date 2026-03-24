@@ -72,6 +72,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - Routes: Dashboard, Investigations, Policies (+ draft create/publish), Review queue (resolve actions), **Pending Sites** (structured manual decision flow), Overrides (CRUD), Taxonomy (category/subcategory CRUD), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs).
 - Authentication: OIDC login; RBAC controlling navigation.
 - Build: `npm run build`; deploy static assets behind reverse proxy.
+- Operator runbook and screenshot checklist: `docs/runbooks/stage10-web-admin-operator-runbook.md`.
 - Frontend expansion roadmap: see `rfc/stage-10-frontend-management-parity.md` and `implementation-plan/stage-10-frontend-management-parity.md` for full management-feature parity scope.
 
 ## 8. Docker & Compose Workflows
