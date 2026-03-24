@@ -4,7 +4,7 @@ This reference lists every HTTP endpoint exposed by the services in this reposit
 
 **Conventions**
 
-- `X-Admin-Token` refers to the static token configured for either the Admin API or the policy engine. When OIDC is enabled, bearer tokens must contain the roles noted in each table.
+- `X-Admin-Token` refers to the static token configured for either the Admin API or the policy engine. When OIDC is enabled, bearer tokens must contain the roles noted in each table. The policy engine now trusts the Admin API IAM resolver, so whatever credentials you use against `/api/v1/iam/whoami` will automatically flow to downstream services.
 - Timestamps are ISO 8601 strings (`2026-03-24T10:15:30Z`).
 - All JSON bodies use UTF‑8 and should include `Content-Type: application/json`.
 - Metrics endpoints return Prometheus text exposition format and do not require auth.
@@ -81,6 +81,24 @@ All routes require `X-Admin-Token` or a JWT with the listed roles. Pagination pa
 | `POST` | `/api/v1/classifications/:normalized_key/unblock` | Manually approve or reclassify a blocked site. | `policy-editor` role; body `{ action, primary_category, subcategory, risk_level, confidence?, reason? }`. | Returns the persisted classification row; also invalidates caches. |
 | `GET` | `/health/ready`, `/health/live` | Health probes. | — |
 | `GET` | `/metrics` | Prometheus metrics (review SLA, cache invalidations). | Requires DB access to sync gauges. |
+
+### Identity & Access Management
+
+| Method | Path | Description | Roles |
+| --- | --- | --- | --- |
+| `GET`/`POST` | `/api/v1/iam/users` | List or create IAM users (email + optional OIDC subject). | `iam:manage` (policy-admin). |
+| `GET`/`PUT`/`DELETE` | `/api/v1/iam/users/:id` | Fetch, update, or disable a user. | `iam:manage` for mutations, `iam:view` for reads. |
+| `POST`/`DELETE` | `/api/v1/iam/users/:id/roles` | Assign or revoke role bindings for a user. | `iam:manage`. |
+| `GET`/`POST` | `/api/v1/iam/groups` | List/create groups (name + description). | `iam:view` / `iam:manage`. |
+| `GET`/`PUT`/`DELETE` | `/api/v1/iam/groups/:id` | Inspect or update a group. | `iam:manage` for writes, `iam:view` for reads. |
+| `POST`/`DELETE` | `/api/v1/iam/groups/:id/members` | Add/remove members from a group. | `iam:manage`. |
+| `POST`/`DELETE` | `/api/v1/iam/groups/:id/roles` | Assign or revoke role bindings for a group. | `iam:manage`. |
+| `GET` | `/api/v1/iam/roles` | List builtin roles and permissions. | `iam:view`. |
+| `GET`/`POST` | `/api/v1/iam/service-accounts` | List or create service accounts (returns hashed token + rotate endpoint). | `iam:view` / `iam:manage`. |
+| `POST` | `/api/v1/iam/service-accounts/:id/rotate` | Rotate a service-account token (optionally replacing roles). | `iam:manage`. |
+| `DELETE` | `/api/v1/iam/service-accounts/:id` | Disable a service account. | `iam:manage`. |
+| `GET` | `/api/v1/iam/whoami` | Introspect the caller’s effective roles and permissions. | Any authenticated caller. |
+| `GET` | `/api/v1/iam/audit` | Paginated IAM audit log (mutations + metadata). | `iam:view` (policy-admin or auditor). |
 
 ---
 

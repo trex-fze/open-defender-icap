@@ -4,8 +4,8 @@
 
 - [x] Completed repository auth/RBAC capability study.
 - [x] Identified current gaps (no IAM persistence, mock UI matrix, no group forwarding in adaptor).
-- [ ] Finalize role-to-permission map and least-privilege policy.
-- [ ] Finalize compatibility strategy for static token + JWT claim fallback.
+- [x] Finalize role-to-permission map and least-privilege policy.
+- [x] Finalize compatibility strategy for static token + JWT claim fallback.
 
 ## Data Model and Migrations
 
@@ -17,7 +17,7 @@
 - [x] Add `iam_service_accounts` table with token hashing.
 - [x] Add `iam_audit_events` table.
 - [x] Seed built-in roles and permissions.
-- [ ] Add migration verification tests.
+- [x] Add migration verification tests.
 
 ## Admin API
 
@@ -29,15 +29,15 @@
 - [x] Implement service-account management and token rotation.
 - [x] Implement effective-role introspection endpoint.
 - [x] Wire all IAM mutations into audit logging.
-- [ ] Update API catalog docs.
+- [x] Update API catalog docs.
 
 ## AuthN/AuthZ Engine
 
 - [x] Refactor middleware to resolve effective roles from DB.
 - [x] Keep static token compatibility via service principal mapping.
 - [x] Support OIDC principal mapping by `sub` and email.
-- [ ] Add compatibility fallback mode flag and docs.
-- [ ] Add authorization unit tests for role matrix paths.
+- [x] Add compatibility fallback mode flag and docs.
+- [x] Add authorization unit tests for role matrix paths.
 
 ## Web Admin
 
@@ -49,7 +49,7 @@
 - [x] Add `/settings/iam/audit` page.
 - [x] Implement create/edit/delete and assign/unassign flows.
 - [x] Align UI role guards with backend enforcement.
-- [ ] Add Cypress scenarios for IAM workflows.
+- [x] Add Cypress scenarios for IAM workflows.
 
 ## CLI (`odctl`)
 
@@ -58,19 +58,19 @@
 - [x] Add `odctl iam roles ...` commands.
 - [x] Add `odctl iam service-accounts ...` commands.
 - [x] Add `odctl iam whoami` command.
-- [ ] Add integration tests and JSON output validation.
+- [x] Add integration tests and JSON output validation.
 
 ## ICAP Identity Enrichment
 
 - [x] Parse `X-User` header into `user_id`.
 - [x] Parse `X-Group` header into `group_ids`.
 - [x] Validate and sanitize identity header values.
-- [ ] Add integration test for user/group-based policy conditions.
+- [x] Add integration test for user/group-based policy conditions.
 
 ## Security and Rollout
 
-- [ ] Add authz smoke matrix for unauthenticated/unauthorized/authorized paths.
-- [ ] Add IAM audit integrity checks.
-- [ ] Add migration and rollback runbook for IAM rollout.
-- [ ] Run full integration suite in compose mode.
-- [ ] Final acceptance signoff.
+- [x] Add authz smoke matrix for unauthenticated/unauthorized/authorized paths.
+- [x] Add IAM audit integrity checks.
+- [x] Add migration and rollback runbook for IAM rollout.
+- [x] Run full integration suite in compose mode.
+- [x] Final acceptance signoff.

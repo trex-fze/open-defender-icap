@@ -72,6 +72,113 @@ async fn override_list_hits_admin_api() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn iam_users_list_prints_table() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/iam/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "user": {
+                    "id": "0c2f2b71-9ab6-4f39-905a-0b2d4f0a1111",
+                    "email": "avery@example.com",
+                    "display_name": "Avery Quinn",
+                    "subject": null,
+                    "status": "active",
+                    "created_at": "2026-03-24T00:00:00Z",
+                    "updated_at": "2026-03-24T00:00:00Z",
+                    "last_login_at": null
+                },
+                "roles": ["policy-admin"],
+                "groups": []
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    Command::cargo_bin("odctl")
+        .unwrap()
+        .arg("--base-url")
+        .arg(server.uri())
+        .arg("--token")
+        .arg("static")
+        .args(["iam", "users", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("avery@example.com"))
+        .stdout(predicate::str::contains("policy-admin"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn iam_whoami_json_output() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/iam/whoami"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "actor": "svc-ci",
+            "principal_type": "service_account",
+            "principal_id": "b2a49811-58d0-42f3-a5d8-d6e2a5c2f9ab",
+            "roles": ["policy-editor"],
+            "permissions": ["iam:manage"]
+        })))
+        .mount(&server)
+        .await;
+
+    Command::cargo_bin("odctl")
+        .unwrap()
+        .arg("--base-url")
+        .arg(server.uri())
+        .arg("--token")
+        .arg("static")
+        .args(["--json", "iam", "whoami"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("svc-ci"))
+        .stdout(predicate::str::contains("iam:manage"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn iam_service_account_create_outputs_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/iam/service-accounts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "account": {
+                "id": "5bdb4bda-0f5c-4a0e-8ac4-3fa321312222",
+                "name": "deploy-bot",
+                "description": "",
+                "status": "active",
+                "token_hint": "xyz12345",
+                "created_at": "2026-03-24T00:00:00Z",
+                "last_rotated_at": "2026-03-24T00:00:00Z"
+            },
+            "token": "svc.token.value",
+            "roles": ["policy-editor"]
+        })))
+        .mount(&server)
+        .await;
+
+    Command::cargo_bin("odctl")
+        .unwrap()
+        .arg("--base-url")
+        .arg(server.uri())
+        .arg("--token")
+        .arg("static")
+        .args([
+            "iam",
+            "service-accounts",
+            "create",
+            "--name",
+            "deploy-bot",
+            "--role",
+            "policy-editor",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("svc.token.value"))
+        .stdout(predicate::str::contains("deploy-bot"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn auth_login_device_flow_stores_session() {
     let oidc = MockServer::start().await;
     Mock::given(method("POST"))

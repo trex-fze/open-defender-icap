@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgPool, Row};
 use tracing::error;
-use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct PendingQuery {

@@ -12,7 +12,7 @@ use axum::{
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sqlx::{types::chrono::Utc, PgPool};
+use sqlx::{types::chrono::Utc, PgPool, Row};
 use std::collections::HashSet;
 use thiserror::Error;
 use uuid::Uuid;
@@ -32,13 +32,12 @@ impl IamService {
     }
 
     pub async fn list_users(&self) -> Result<Vec<IamUserRecord>, IamError> {
-        let users = sqlx::query_as!(
-            IamUserRecord,
+        let users = sqlx::query_as::<_, IamUserRecord>(
             r#"
             SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
             FROM iam_users
             ORDER BY created_at DESC
-        "#
+        "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -46,15 +45,14 @@ impl IamService {
     }
 
     pub async fn get_user(&self, id: Uuid) -> Result<IamUserRecord, IamError> {
-        let user = sqlx::query_as!(
-            IamUserRecord,
+        let user = sqlx::query_as::<_, IamUserRecord>(
             r#"
             SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
             FROM iam_users
             WHERE id = $1
         "#,
-            id
         )
+        .bind(id)
         .fetch_optional(&self.pool)
         .await?;
         user.ok_or(IamError::NotFound("user".into()))
@@ -64,30 +62,28 @@ impl IamService {
         &self,
         subject: &str,
     ) -> Result<Option<IamUserRecord>, IamError> {
-        let user = sqlx::query_as!(
-            IamUserRecord,
+        let user = sqlx::query_as::<_, IamUserRecord>(
             r#"
             SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
             FROM iam_users
             WHERE subject = $1
         "#,
-            subject
         )
+        .bind(subject)
         .fetch_optional(&self.pool)
         .await?;
         Ok(user)
     }
 
     pub async fn find_user_by_email(&self, email: &str) -> Result<Option<IamUserRecord>, IamError> {
-        let user = sqlx::query_as!(
-            IamUserRecord,
+        let user = sqlx::query_as::<_, IamUserRecord>(
             r#"
             SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
             FROM iam_users
             WHERE email = $1
         "#,
-            email
         )
+        .bind(email)
         .fetch_optional(&self.pool)
         .await?;
         Ok(user)
@@ -97,11 +93,18 @@ impl IamService {
         if payload.email.trim().is_empty() {
             return Err(IamError::Validation("email required".into()));
         }
-        let record = sqlx::query_as!(IamUserRecord, r#"
+        let record = sqlx::query_as::<_, IamUserRecord>(
+            r#"
             INSERT INTO iam_users (id, subject, email, display_name, status)
             VALUES ($1, $2, $3, $4, COALESCE($5, 'active'))
             RETURNING id, subject, email, display_name, status, last_login_at, created_at, updated_at
-        "#, Uuid::new_v4(), payload.subject, payload.email.trim(), payload.display_name, payload.status)
+        "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(payload.subject)
+        .bind(payload.email.trim().to_string())
+        .bind(payload.display_name)
+        .bind(payload.status)
         .fetch_one(&self.pool)
         .await
         .map_err(map_db_error)?;
@@ -113,7 +116,8 @@ impl IamService {
         id: Uuid,
         payload: UpdateUserRequest,
     ) -> Result<IamUserRecord, IamError> {
-        let record = sqlx::query_as!(IamUserRecord, r#"
+        let record = sqlx::query_as::<_, IamUserRecord>(
+            r#"
             UPDATE iam_users
             SET subject = COALESCE($2, subject),
                 email = COALESCE($3, email),
@@ -122,17 +126,23 @@ impl IamService {
                 updated_at = NOW()
             WHERE id = $1
             RETURNING id, subject, email, display_name, status, last_login_at, created_at, updated_at
-        "#, id, payload.subject, payload.email, payload.display_name, payload.status)
+        "#,
+        )
+        .bind(id)
+        .bind(payload.subject)
+        .bind(payload.email)
+        .bind(payload.display_name)
+        .bind(payload.status)
         .fetch_optional(&self.pool)
         .await?;
         record.ok_or(IamError::NotFound("user".into()))
     }
 
     pub async fn disable_user(&self, id: Uuid) -> Result<(), IamError> {
-        let result = sqlx::query!(
+        let result = sqlx::query(
             r#"UPDATE iam_users SET status = 'disabled', updated_at = NOW() WHERE id = $1"#,
-            id
         )
+        .bind(id)
         .execute(&self.pool)
         .await?;
         if result.rows_affected() == 0 {
@@ -142,13 +152,12 @@ impl IamService {
     }
 
     pub async fn list_groups(&self) -> Result<Vec<IamGroupRecord>, IamError> {
-        let groups = sqlx::query_as!(
-            IamGroupRecord,
+        let groups = sqlx::query_as::<_, IamGroupRecord>(
             r#"
             SELECT id, name, description, status, created_at, updated_at
             FROM iam_groups
             ORDER BY name
-        "#
+        "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -156,15 +165,14 @@ impl IamService {
     }
 
     pub async fn get_group(&self, id: Uuid) -> Result<IamGroupRecord, IamError> {
-        let group = sqlx::query_as!(
-            IamGroupRecord,
+        let group = sqlx::query_as::<_, IamGroupRecord>(
             r#"
             SELECT id, name, description, status, created_at, updated_at
             FROM iam_groups
             WHERE id = $1
         "#,
-            id
         )
+        .bind(id)
         .fetch_optional(&self.pool)
         .await?;
         group.ok_or(IamError::NotFound("group".into()))
@@ -177,18 +185,17 @@ impl IamService {
         if payload.name.trim().is_empty() {
             return Err(IamError::Validation("name required".into()));
         }
-        let record = sqlx::query_as!(
-            IamGroupRecord,
+        let record = sqlx::query_as::<_, IamGroupRecord>(
             r#"
             INSERT INTO iam_groups (id, name, description, status)
             VALUES ($1, $2, $3, COALESCE($4, 'active'))
             RETURNING id, name, description, status, created_at, updated_at
         "#,
-            Uuid::new_v4(),
-            payload.name.trim(),
-            payload.description,
-            payload.status
         )
+        .bind(Uuid::new_v4())
+        .bind(payload.name.trim().to_string())
+        .bind(payload.description)
+        .bind(payload.status)
         .fetch_one(&self.pool)
         .await
         .map_err(map_db_error)?;
@@ -200,8 +207,7 @@ impl IamService {
         id: Uuid,
         payload: UpdateGroupRequest,
     ) -> Result<IamGroupRecord, IamError> {
-        let record = sqlx::query_as!(
-            IamGroupRecord,
+        let record = sqlx::query_as::<_, IamGroupRecord>(
             r#"
             UPDATE iam_groups
             SET name = COALESCE($2, name),
@@ -211,18 +217,19 @@ impl IamService {
             WHERE id = $1
             RETURNING id, name, description, status, created_at, updated_at
         "#,
-            id,
-            payload.name,
-            payload.description,
-            payload.status
         )
+        .bind(id)
+        .bind(payload.name)
+        .bind(payload.description)
+        .bind(payload.status)
         .fetch_optional(&self.pool)
         .await?;
         record.ok_or(IamError::NotFound("group".into()))
     }
 
     pub async fn delete_group(&self, id: Uuid) -> Result<(), IamError> {
-        let result = sqlx::query!("DELETE FROM iam_groups WHERE id = $1", id)
+        let result = sqlx::query("DELETE FROM iam_groups WHERE id = $1")
+            .bind(id)
             .execute(&self.pool)
             .await?;
         if result.rows_affected() == 0 {
@@ -232,37 +239,39 @@ impl IamService {
     }
 
     pub async fn list_group_members(&self, group_id: Uuid) -> Result<Vec<IamUserRecord>, IamError> {
-        let members = sqlx::query_as!(IamUserRecord, r#"
+        let members = sqlx::query_as::<_, IamUserRecord>(
+            r#"
             SELECT u.id, u.subject, u.email, u.display_name, u.status, u.last_login_at, u.created_at, u.updated_at
             FROM iam_group_members gm
             JOIN iam_users u ON u.id = gm.user_id
             WHERE gm.group_id = $1
             ORDER BY u.email
-        "#, group_id)
+        "#,
+        )
+        .bind(group_id)
         .fetch_all(&self.pool)
         .await?;
         Ok(members)
     }
 
     pub async fn add_group_member(&self, group_id: Uuid, user_id: Uuid) -> Result<(), IamError> {
-        sqlx::query!(
+        sqlx::query(
             r#"INSERT INTO iam_group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"#,
-            group_id,
-            user_id
         )
+        .bind(group_id)
+        .bind(user_id)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
     pub async fn remove_group_member(&self, group_id: Uuid, user_id: Uuid) -> Result<(), IamError> {
-        let result = sqlx::query!(
-            r#"DELETE FROM iam_group_members WHERE group_id = $1 AND user_id = $2"#,
-            group_id,
-            user_id
-        )
-        .execute(&self.pool)
-        .await?;
+        let result =
+            sqlx::query(r#"DELETE FROM iam_group_members WHERE group_id = $1 AND user_id = $2"#)
+                .bind(group_id)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?;
         if result.rows_affected() == 0 {
             return Err(IamError::NotFound("membership".into()));
         }
@@ -270,7 +279,7 @@ impl IamService {
     }
 
     pub async fn list_roles(&self) -> Result<Vec<IamRoleRecord>, IamError> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT r.id,
                    r.name,
@@ -282,7 +291,7 @@ impl IamService {
             LEFT JOIN iam_role_permissions p ON p.role_id = r.id
             GROUP BY r.id
             ORDER BY r.name
-        "#
+        "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -290,13 +299,13 @@ impl IamService {
         let roles = rows
             .into_iter()
             .map(|row| IamRoleRecord {
-                id: row.id,
-                name: row.name,
-                description: row.description,
-                builtin: row.builtin,
-                created_at: row.created_at,
+                id: row.get("id"),
+                name: row.get("name"),
+                description: row.get("description"),
+                builtin: row.get("builtin"),
+                created_at: row.get("created_at"),
                 permissions: row
-                    .permissions
+                    .get::<Option<Vec<Option<String>>>, _>("permissions")
                     .unwrap_or_default()
                     .into_iter()
                     .flatten()
@@ -312,11 +321,11 @@ impl IamService {
         role: &str,
     ) -> Result<Vec<String>, IamError> {
         let role_id = self.role_id_by_name(role).await?;
-        sqlx::query!(
+        sqlx::query(
             r#"INSERT INTO iam_user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"#,
-            user_id,
-            role_id
         )
+        .bind(user_id)
+        .bind(role_id)
         .execute(&self.pool)
         .await?;
         self.user_roles(user_id).await
@@ -328,13 +337,11 @@ impl IamService {
         role: &str,
     ) -> Result<Vec<String>, IamError> {
         let role_id = self.role_id_by_name(role).await?;
-        sqlx::query!(
-            r#"DELETE FROM iam_user_roles WHERE user_id = $1 AND role_id = $2"#,
-            user_id,
-            role_id
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query(r#"DELETE FROM iam_user_roles WHERE user_id = $1 AND role_id = $2"#)
+            .bind(user_id)
+            .bind(role_id)
+            .execute(&self.pool)
+            .await?;
         self.user_roles(user_id).await
     }
 
@@ -344,11 +351,11 @@ impl IamService {
         role: &str,
     ) -> Result<Vec<String>, IamError> {
         let role_id = self.role_id_by_name(role).await?;
-        sqlx::query!(
+        sqlx::query(
             r#"INSERT INTO iam_group_roles (group_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"#,
-            group_id,
-            role_id
         )
+        .bind(group_id)
+        .bind(role_id)
         .execute(&self.pool)
         .await?;
         self.group_roles(group_id).await
@@ -360,18 +367,16 @@ impl IamService {
         role: &str,
     ) -> Result<Vec<String>, IamError> {
         let role_id = self.role_id_by_name(role).await?;
-        sqlx::query!(
-            r#"DELETE FROM iam_group_roles WHERE group_id = $1 AND role_id = $2"#,
-            group_id,
-            role_id
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query(r#"DELETE FROM iam_group_roles WHERE group_id = $1 AND role_id = $2"#)
+            .bind(group_id)
+            .bind(role_id)
+            .execute(&self.pool)
+            .await?;
         self.group_roles(group_id).await
     }
 
     pub async fn user_roles(&self, user_id: Uuid) -> Result<Vec<String>, IamError> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT DISTINCT r.name
             FROM iam_roles r
@@ -385,15 +390,18 @@ impl IamService {
             )
             ORDER BY r.name
         "#,
-            user_id
         )
+        .bind(user_id)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.into_iter().filter_map(|row| row.name).collect())
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| row.get::<Option<String>, _>("name"))
+            .collect())
     }
 
     pub async fn group_roles(&self, group_id: Uuid) -> Result<Vec<String>, IamError> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT r.name
             FROM iam_group_roles gr
@@ -401,21 +409,23 @@ impl IamService {
             WHERE gr.group_id = $1
             ORDER BY r.name
         "#,
-            group_id
         )
+        .bind(group_id)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.into_iter().filter_map(|row| row.name).collect())
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| row.get::<Option<String>, _>("name"))
+            .collect())
     }
 
     pub async fn list_service_accounts(&self) -> Result<Vec<ServiceAccountRecord>, IamError> {
-        let accounts = sqlx::query_as!(
-            ServiceAccountRecord,
+        let accounts = sqlx::query_as::<_, ServiceAccountRecord>(
             r#"
             SELECT id, name, description, status, token_hint, created_at, last_rotated_at
             FROM iam_service_accounts
             ORDER BY name
-        "#
+        "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -423,15 +433,14 @@ impl IamService {
     }
 
     pub async fn get_service_account(&self, id: Uuid) -> Result<ServiceAccountRecord, IamError> {
-        let account = sqlx::query_as!(
-            ServiceAccountRecord,
+        let account = sqlx::query_as::<_, ServiceAccountRecord>(
             r#"
             SELECT id, name, description, status, token_hint, created_at, last_rotated_at
             FROM iam_service_accounts
             WHERE id = $1
         "#,
-            id
         )
+        .bind(id)
         .fetch_optional(&self.pool)
         .await?;
         account.ok_or(IamError::NotFound("service_account".into()))
@@ -447,11 +456,19 @@ impl IamService {
         let token = generate_token();
         let hash = hash_token(&token)?;
         let hint = token_hint(&token);
-        let record = sqlx::query_as!(ServiceAccountRecord, r#"
+        let record = sqlx::query_as::<_, ServiceAccountRecord>(
+            r#"
             INSERT INTO iam_service_accounts (id, name, description, token_hash, token_hint, status, last_rotated_at)
             VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'active'), NOW())
             RETURNING id, name, description, status, token_hint, created_at, last_rotated_at
-        "#, Uuid::new_v4(), payload.name.trim(), payload.description, hash, hint, payload.status)
+        "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(payload.name.trim().to_string())
+        .bind(payload.description)
+        .bind(hash)
+        .bind(hint)
+        .bind(payload.status)
         .fetch_one(&self.pool)
         .await
         .map_err(map_db_error)?;
@@ -470,8 +487,7 @@ impl IamService {
         let token = generate_token();
         let hash = hash_token(&token)?;
         let hint = token_hint(&token);
-        let record = sqlx::query_as!(
-            ServiceAccountRecord,
+        let record = sqlx::query_as::<_, ServiceAccountRecord>(
             r#"
             UPDATE iam_service_accounts
             SET token_hash = $2,
@@ -480,10 +496,10 @@ impl IamService {
             WHERE id = $1
             RETURNING id, name, description, status, token_hint, created_at, last_rotated_at
         "#,
-            id,
-            hash,
-            hint
         )
+        .bind(id)
+        .bind(hash)
+        .bind(hint)
         .fetch_optional(&self.pool)
         .await?;
         let record = record.ok_or(IamError::NotFound("service_account".into()))?;
@@ -497,12 +513,11 @@ impl IamService {
     }
 
     pub async fn disable_service_account(&self, id: Uuid) -> Result<(), IamError> {
-        let result = sqlx::query!(
-            r#"UPDATE iam_service_accounts SET status = 'disabled' WHERE id = $1"#,
-            id
-        )
-        .execute(&self.pool)
-        .await?;
+        let result =
+            sqlx::query(r#"UPDATE iam_service_accounts SET status = 'disabled' WHERE id = $1"#)
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
         if result.rows_affected() == 0 {
             return Err(IamError::NotFound("service_account".into()));
         }
@@ -510,7 +525,7 @@ impl IamService {
     }
 
     pub async fn service_account_roles(&self, id: Uuid) -> Result<Vec<String>, IamError> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT r.name
             FROM iam_service_account_roles sr
@@ -518,18 +533,21 @@ impl IamService {
             WHERE sr.service_account_id = $1
             ORDER BY r.name
         "#,
-            id
         )
+        .bind(id)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.into_iter().filter_map(|row| row.name).collect())
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| row.get::<Option<String>, _>("name"))
+            .collect())
     }
 
     pub async fn effective_permissions_for_user(
         &self,
         user_id: Uuid,
     ) -> Result<EffectiveAccess, IamError> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT DISTINCT r.id, r.name
             FROM iam_roles r
@@ -542,23 +560,31 @@ impl IamService {
                 WHERE gm.user_id = $1
             )
         "#,
-            user_id
         )
+        .bind(user_id)
         .fetch_all(&self.pool)
         .await?;
 
-        let role_ids: Vec<Uuid> = rows.iter().filter_map(|row| row.id).collect();
-        let role_names: HashSet<String> = rows.into_iter().filter_map(|row| row.name).collect();
+        let role_ids: Vec<Uuid> = rows
+            .iter()
+            .filter_map(|row| row.get::<Option<Uuid>, _>("id"))
+            .collect();
+        let role_names: HashSet<String> = rows
+            .into_iter()
+            .filter_map(|row| row.get::<Option<String>, _>("name"))
+            .collect();
         let permissions = if role_ids.is_empty() {
             HashSet::new()
         } else {
-            let rows = sqlx::query!(
+            let rows = sqlx::query(
                 r#"SELECT DISTINCT permission FROM iam_role_permissions WHERE role_id = ANY($1)"#,
-                &role_ids
             )
+            .bind(&role_ids)
             .fetch_all(&self.pool)
             .await?;
-            rows.into_iter().filter_map(|row| row.permission).collect()
+            rows.into_iter()
+                .filter_map(|row| row.get::<Option<String>, _>("permission"))
+                .collect()
         };
 
         Ok(EffectiveAccess {
@@ -571,30 +597,38 @@ impl IamService {
         &self,
         service_account_id: Uuid,
     ) -> Result<EffectiveAccess, IamError> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT DISTINCT r.id, r.name
             FROM iam_service_account_roles sr
             JOIN iam_roles r ON r.id = sr.role_id
             WHERE sr.service_account_id = $1
         "#,
-            service_account_id
         )
+        .bind(service_account_id)
         .fetch_all(&self.pool)
         .await?;
 
-        let role_ids: Vec<Uuid> = rows.iter().filter_map(|row| row.id).collect();
-        let role_names: HashSet<String> = rows.into_iter().filter_map(|row| row.name).collect();
+        let role_ids: Vec<Uuid> = rows
+            .iter()
+            .filter_map(|row| row.get::<Option<Uuid>, _>("id"))
+            .collect();
+        let role_names: HashSet<String> = rows
+            .into_iter()
+            .filter_map(|row| row.get::<Option<String>, _>("name"))
+            .collect();
         let permissions = if role_ids.is_empty() {
             HashSet::new()
         } else {
-            let rows = sqlx::query!(
+            let rows = sqlx::query(
                 r#"SELECT DISTINCT permission FROM iam_role_permissions WHERE role_id = ANY($1)"#,
-                &role_ids
             )
+            .bind(&role_ids)
             .fetch_all(&self.pool)
             .await?;
-            rows.into_iter().filter_map(|row| row.permission).collect()
+            rows.into_iter()
+                .filter_map(|row| row.get::<Option<String>, _>("permission"))
+                .collect()
         };
 
         Ok(EffectiveAccess {
@@ -608,15 +642,14 @@ impl IamService {
         token: &str,
     ) -> Result<Option<ServiceAccountPrincipal>, IamError> {
         let hint = token_hint(token);
-        let candidates = sqlx::query_as!(
-            ServiceAccountSecret,
+        let candidates = sqlx::query_as::<_, ServiceAccountSecret>(
             r#"
-            SELECT id, name, token_hash, status
+            SELECT id, name, token_hash
             FROM iam_service_accounts
             WHERE status = 'active' AND token_hint = $1
         "#,
-            hint
         )
+        .bind(hint)
         .fetch_all(&self.pool)
         .await?;
 
@@ -644,33 +677,32 @@ impl IamService {
         target_id: Option<String>,
         payload: Value,
     ) {
-        let _ = sqlx::query!(
+        let _ = sqlx::query(
             r#"
             INSERT INTO iam_audit_events (id, actor, action, target_type, target_id, payload)
             VALUES ($1, $2, $3, $4, $5, $6)
         "#,
-            Uuid::new_v4(),
-            actor,
-            action,
-            Some(target_type.to_string()),
-            target_id,
-            payload
         )
+        .bind(Uuid::new_v4())
+        .bind(actor)
+        .bind(action)
+        .bind(Some(target_type.to_string()))
+        .bind(target_id)
+        .bind(payload)
         .execute(&self.pool)
         .await;
     }
 
     pub async fn list_iam_audit(&self, limit: i64) -> Result<Vec<IamAuditRecord>, IamError> {
-        let events = sqlx::query_as!(
-            IamAuditRecord,
+        let events = sqlx::query_as::<_, IamAuditRecord>(
             r#"
             SELECT id, actor, action, target_type, target_id, payload, created_at
             FROM iam_audit_events
             ORDER BY created_at DESC
             LIMIT $1
         "#,
-            limit
         )
+        .bind(limit)
         .fetch_all(&self.pool)
         .await?;
         Ok(events)
@@ -683,30 +715,29 @@ impl IamService {
     ) -> Result<(), IamError> {
         let role_ids = self.role_ids_by_name(roles).await?;
         let mut tx = self.pool.begin().await?;
-        sqlx::query!(
-            r#"DELETE FROM iam_service_account_roles WHERE service_account_id = $1"#,
-            id
-        )
-        .execute(&mut *tx)
-        .await?;
-        for role_id in role_ids {
-            sqlx::query!(
-                r#"INSERT INTO iam_service_account_roles (service_account_id, role_id) VALUES ($1, $2)"#,
-                id,
-                role_id
-            )
+        sqlx::query(r#"DELETE FROM iam_service_account_roles WHERE service_account_id = $1"#)
+            .bind(id)
             .execute(&mut *tx)
             .await?;
+        for role_id in role_ids {
+            sqlx::query(
+                r#"INSERT INTO iam_service_account_roles (service_account_id, role_id) VALUES ($1, $2)"#,
+            )
+            .bind(id)
+            .bind(role_id)
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit().await?;
         Ok(())
     }
 
     async fn role_id_by_name(&self, role: &str) -> Result<Uuid, IamError> {
-        let row = sqlx::query!("SELECT id FROM iam_roles WHERE name = $1", role)
+        let row = sqlx::query("SELECT id FROM iam_roles WHERE name = $1")
+            .bind(role)
             .fetch_optional(&self.pool)
             .await?;
-        row.and_then(|r| r.id)
+        row.and_then(|r| r.get::<Option<Uuid>, _>("id"))
             .ok_or_else(|| IamError::Validation(format!("unknown role: {}", role)))
     }
 
@@ -714,15 +745,19 @@ impl IamService {
         if roles.is_empty() {
             return Ok(vec![]);
         }
-        let rows = sqlx::query!("SELECT id, name FROM iam_roles WHERE name = ANY($1)", roles)
+        let rows = sqlx::query("SELECT id, name FROM iam_roles WHERE name = ANY($1)")
+            .bind(roles)
             .fetch_all(&self.pool)
             .await?;
         let mut ids = Vec::with_capacity(rows.len());
         let mut found = HashSet::new();
         for row in &rows {
-            if let (Some(id), Some(name)) = (row.id, row.name.as_deref()) {
+            if let (Some(id), Some(name)) = (
+                row.get::<Option<Uuid>, _>("id"),
+                row.get::<Option<String>, _>("name"),
+            ) {
                 ids.push(id);
-                found.insert(name.to_string());
+                found.insert(name);
             }
         }
         let missing: Vec<String> = roles
@@ -839,7 +874,6 @@ struct ServiceAccountSecret {
     pub id: Uuid,
     pub name: String,
     pub token_hash: String,
-    pub status: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
@@ -999,8 +1033,7 @@ pub async fn list_users_route(
     let mut results = Vec::with_capacity(users.len());
     for record in users {
         let roles = iam.user_roles(record.id).await.map_err(map_iam_error)?;
-        let groups = sqlx::query_as!(
-            IamGroupRecord,
+        let groups = sqlx::query_as::<_, IamGroupRecord>(
             r#"
             SELECT g.id, g.name, g.description, g.status, g.created_at, g.updated_at
             FROM iam_group_members gm
@@ -1008,11 +1041,11 @@ pub async fn list_users_route(
             WHERE gm.user_id = $1
             ORDER BY g.name
         "#,
-            record.id
         )
+        .bind(record.id)
         .fetch_all(iam.pool())
         .await
-        .map_err(map_iam_error)?;
+        .map_err(|err| map_iam_error(map_db_error(err)))?;
         results.push(UserDetails {
             user: record,
             roles,
@@ -1059,8 +1092,7 @@ pub async fn get_user_route(
     let iam = state.iam();
     let record = iam.get_user(id).await.map_err(map_iam_error)?;
     let roles = iam.user_roles(id).await.map_err(map_iam_error)?;
-    let groups = sqlx::query_as!(
-        IamGroupRecord,
+    let groups = sqlx::query_as::<_, IamGroupRecord>(
         r#"
         SELECT g.id, g.name, g.description, g.status, g.created_at, g.updated_at
         FROM iam_group_members gm
@@ -1068,11 +1100,11 @@ pub async fn get_user_route(
         WHERE gm.user_id = $1
         ORDER BY g.name
     "#,
-        id
     )
+    .bind(id)
     .fetch_all(iam.pool())
     .await
-    .map_err(map_iam_error)?;
+    .map_err(|err| map_iam_error(map_db_error(err)))?;
     Ok(Json(UserDetails {
         user: record,
         roles,
@@ -1090,8 +1122,7 @@ pub async fn update_user_route(
     let iam = state.iam();
     let record = iam.update_user(id, payload).await.map_err(map_iam_error)?;
     let roles = iam.user_roles(id).await.map_err(map_iam_error)?;
-    let groups = sqlx::query_as!(
-        IamGroupRecord,
+    let groups = sqlx::query_as::<_, IamGroupRecord>(
         r#"
         SELECT g.id, g.name, g.description, g.status, g.created_at, g.updated_at
         FROM iam_group_members gm
@@ -1099,11 +1130,11 @@ pub async fn update_user_route(
         WHERE gm.user_id = $1
         ORDER BY g.name
     "#,
-        id
     )
+    .bind(id)
     .fetch_all(iam.pool())
     .await
-    .map_err(map_iam_error)?;
+    .map_err(|err| map_iam_error(map_db_error(err)))?;
     state
         .log_iam_event(
             "iam.user.update",

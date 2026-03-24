@@ -401,3 +401,39 @@ impl ToVerdict for DecisionRequest {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_request() -> DecisionRequest {
+        DecisionRequest {
+            normalized_key: "domain:example.com".into(),
+            entity_level: "domain".into(),
+            source_ip: "192.0.2.10".into(),
+            user_id: Some("alice@example.com".into()),
+            group_ids: Some(vec!["global-admins".into()]),
+            category_hint: None,
+            risk_hint: None,
+            confidence_hint: None,
+        }
+    }
+
+    #[test]
+    fn matches_user_condition() {
+        let mut cond = Conditions::default();
+        cond.users = Some(vec!["alice@example.com".into()]);
+        assert!(matches_conditions(&cond, &base_request()));
+        cond.users = Some(vec!["bob@example.com".into()]);
+        assert!(!matches_conditions(&cond, &base_request()));
+    }
+
+    #[test]
+    fn matches_group_condition() {
+        let mut cond = Conditions::default();
+        cond.groups = Some(vec!["global-admins".into()]);
+        assert!(matches_conditions(&cond, &base_request()));
+        cond.groups = Some(vec!["finance".into()]);
+        assert!(!matches_conditions(&cond, &base_request()));
+    }
+}

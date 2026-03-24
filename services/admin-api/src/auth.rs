@@ -12,6 +12,7 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::{collections::HashSet, env, sync::Arc};
+use tracing::error;
 use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -274,6 +275,7 @@ impl UserContext {
         self.roles.contains(role)
     }
 
+    #[allow(dead_code)]
     pub fn has_permission(&self, permission: &str) -> bool {
         self.permissions.contains(permission)
     }
@@ -439,7 +441,10 @@ fn map_auth_error(err: &AuthError) -> StatusCode {
         | AuthError::InvalidAudience
         | AuthError::Expired => StatusCode::UNAUTHORIZED,
         AuthError::NotProvisioned | AuthError::Disabled => StatusCode::FORBIDDEN,
-        AuthError::Database(_) | AuthError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        AuthError::Database(msg) | AuthError::Internal(msg) => {
+            error!(target = "svc-admin", %msg, "auth middleware failure");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -466,3 +471,34 @@ pub const ROLE_CACHE_ADMIN: &[&str] = &[ROLE_POLICY_ADMIN];
 pub const ROLE_AUDIT_VIEW: &[&str] = &[ROLE_POLICY_ADMIN, ROLE_AUDITOR];
 pub const ROLE_IAM_VIEW: &[&str] = &[ROLE_POLICY_ADMIN, ROLE_AUDITOR];
 pub const ROLE_IAM_ADMIN: &[&str] = &[ROLE_POLICY_ADMIN];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn require_roles_accepts_any_matching_role() {
+        let ctx = UserContext::from_fallback(
+            "alice".into(),
+            vec![ROLE_POLICY_VIEWER.into(), ROLE_AUDITOR.into()],
+        );
+        assert!(require_roles(&ctx, ROLE_REPORTING_VIEW).is_ok());
+        assert_eq!(require_roles(&ctx, ROLE_IAM_ADMIN), Err(StatusCode::FORBIDDEN));
+    }
+
+    #[test]
+    fn service_account_permissions_round_trip() {
+        let mut roles = HashSet::new();
+        roles.insert(ROLE_POLICY_ADMIN.into());
+        let mut permissions = HashSet::new();
+        permissions.insert("iam:manage".into());
+        let ctx = UserContext::from_service_account(ServiceAccountPrincipal {
+            id: Uuid::new_v4(),
+            name: "svc-ci".into(),
+            roles,
+            permissions,
+        });
+        assert!(ctx.has_role(ROLE_POLICY_ADMIN));
+        assert!(ctx.has_permission("iam:manage"));
+    }
+}
