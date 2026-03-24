@@ -5,6 +5,7 @@ import { AuthProvider, Role, useAuth } from './context/AuthContext';
 import { DashboardPage } from './pages/DashboardPage';
 import { InvestigationsPage } from './pages/InvestigationsPage';
 import { PoliciesPage } from './pages/PoliciesPage';
+import { PolicyCreatePage } from './pages/PolicyCreatePage';
 import { PolicyDetailPage } from './pages/PolicyDetailPage';
 import { ReviewQueuePage } from './pages/ReviewQueuePage';
 import { OverridesPage } from './pages/OverridesPage';
@@ -34,6 +35,7 @@ const App = () => {
             <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
             <Route path="/investigations" element={<ProtectedRoute roles={guard.viewer}><InvestigationsPage /></ProtectedRoute>} />
             <Route path="/policies" element={<ProtectedRoute roles={guard.viewEdit}><PoliciesPage /></ProtectedRoute>} />
+            <Route path="/policies/new" element={<ProtectedRoute roles={guard.editOnly}><PolicyCreatePage /></ProtectedRoute>} />
             <Route path="/policies/:policyId" element={<ProtectedRoute roles={guard.viewEdit}><PolicyDetailPage /></ProtectedRoute>} />
             <Route path="/review-queue" element={<ProtectedRoute roles={guard.review}><ReviewQueuePage /></ProtectedRoute>} />
             <Route path="/overrides" element={<ProtectedRoute roles={guard.editOnly}><OverridesPage /></ProtectedRoute>} />

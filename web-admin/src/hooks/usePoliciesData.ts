@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { PolicySummary, PolicyRule } from '../data/mockData';
+import { adminGetJson, type AdminApiContext } from '../api/adminClient';
+import type { PolicyRule } from '../data/mockData';
 import { policies } from '../data/mockData';
 import { useAdminApi } from './useAdminApi';
 
@@ -105,16 +106,12 @@ export const usePoliciesData = (): PoliciesState => {
 
     const run = async () => {
       try {
-        const url = new URL('/api/v1/policies', baseUrl);
-        url.searchParams.set('include_drafts', 'true');
-        const resp = await fetch(url, {
-          headers,
-          signal: controller.signal,
-        });
-        if (!resp.ok) {
-          throw new Error(`Request failed (${resp.status})`);
-        }
-        const body = (await resp.json()) as PolicyListResponse;
+        const body = await adminGetJson<PolicyListResponse>(
+          { baseUrl, canCallApi, headers } as AdminApiContext,
+          '/api/v1/policies',
+          { include_drafts: true },
+          { signal: controller.signal },
+        );
         const next = (body.data ?? []).map(mapSummary);
         if (!cancelled) {
           setState({ data: next, loading: false, isMock: false });
@@ -174,15 +171,12 @@ export const usePolicyDetail = (policyId?: string): PolicyDetailState => {
 
     const run = async () => {
       try {
-        const url = new URL(`/api/v1/policies/${policyId}`, baseUrl);
-        const resp = await fetch(url, {
-          headers,
-          signal: controller.signal,
-        });
-        if (!resp.ok) {
-          throw new Error(`Request failed (${resp.status})`);
-        }
-        const body = (await resp.json()) as ApiPolicyDetail;
+        const body = await adminGetJson<ApiPolicyDetail>(
+          { baseUrl, canCallApi, headers } as AdminApiContext,
+          `/api/v1/policies/${policyId}`,
+          undefined,
+          { signal: controller.signal },
+        );
         if (!cancelled) {
           setState({ data: mapDetail(body), loading: false, isMock: false });
         }

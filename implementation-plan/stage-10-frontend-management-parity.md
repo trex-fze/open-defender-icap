@@ -4,6 +4,8 @@
 **Depends on**: Stage 5/6/7/9 delivered APIs and compose integration  
 **Primary Targets**: `web-admin/`, plus optional Admin API aggregation endpoints where required
 
+Execution tracking checklist: `implementation-plan/stage-10-checklist.md`
+
 ## 1) Delivery Strategy
 
 Implement in five phases to reduce risk and keep a continuously usable UI:

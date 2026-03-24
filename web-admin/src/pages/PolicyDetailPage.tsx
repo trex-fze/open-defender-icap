@@ -1,10 +1,24 @@
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { usePolicyDetail } from '../hooks/usePoliciesData';
+import { usePolicyMutations } from '../hooks/usePolicyMutations';
 
 export const PolicyDetailPage = () => {
   const { policyId } = useParams<{ policyId: string }>();
   const navigate = useNavigate();
   const { data: policy, loading, error, isMock } = usePolicyDetail(policyId);
+  const { publishPolicy, busy, error: mutationError, canCallApi } = usePolicyMutations();
+  const [publishMessage, setPublishMessage] = useState<string | undefined>();
+
+  const handlePublish = async () => {
+    if (!policyId || !policy) return;
+    try {
+      await publishPolicy(policyId, `Published via web-admin for ${policy.name}`);
+      setPublishMessage('Policy published successfully. Refresh the list to verify active version.');
+    } catch {
+      setPublishMessage(undefined);
+    }
+  };
 
   if (loading) {
     return (
@@ -49,8 +63,10 @@ export const PolicyDetailPage = () => {
           <button
             className="cta-button"
             style={{ background: 'linear-gradient(120deg,#ff9b9b,#fdd744)', color: '#060b17' }}
+            onClick={handlePublish}
+            disabled={busy || isMock || !canCallApi}
           >
-            Publish Draft
+            {busy ? 'Publishing...' : 'Publish Draft'}
           </button>
         </div>
       </div>
@@ -58,6 +74,18 @@ export const PolicyDetailPage = () => {
       {error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
           <p style={{ margin: 0, color: '#ff9b9b' }}>Unable to reach Admin API: {error}</p>
+        </div>
+      ) : null}
+
+      {mutationError ? (
+        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+          <p style={{ margin: 0, color: '#ff9b9b' }}>Publish failed: {mutationError}</p>
+        </div>
+      ) : null}
+
+      {publishMessage ? (
+        <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
+          <p style={{ margin: 0, color: '#9ef7eb' }}>{publishMessage}</p>
         </div>
       ) : null}
 
