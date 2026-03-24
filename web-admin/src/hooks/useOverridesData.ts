@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { adminGetJson, type AdminApiContext } from '../api/adminClient';
 import { overrides } from '../data/mockData';
+import { queryKeys } from './queryKeys';
 import { useAdminApi } from './useAdminApi';
 
 export type OverrideRow = {
@@ -60,78 +61,38 @@ const mapOverride = (record: ApiOverrideRecord): OverrideRow => ({
 
 export const useOverridesData = () => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
-  const [state, setState] = useState<OverrideState>({
-    data: fallbackRows,
-    loading: Boolean(canCallApi),
-    isMock: !canCallApi,
-  });
+  const enabled = Boolean(baseUrl && canCallApi);
 
-  useEffect(() => {
-    if (!baseUrl || !canCallApi) {
-      setState({ data: fallbackRows, loading: false, isMock: true });
-      return;
-    }
-
-    let cancelled = false;
-    const controller = new AbortController();
-    const fetchOverrides = async (signal?: AbortSignal) => {
-      setState((prev) => ({ ...prev, loading: true, error: undefined }));
-      try {
-        const body = await adminGetJson<ApiOverrideRecord[]>(
-          { baseUrl, canCallApi, headers } as AdminApiContext,
-          '/api/v1/overrides',
-          undefined,
-          { signal },
-        );
-        if (!cancelled) {
-          setState({ data: body.map(mapOverride), loading: false, isMock: false });
-        }
-      } catch (err) {
-        if (signal?.aborted || cancelled) {
-          return;
-        }
-        setState({
-          data: fallbackRows,
-          loading: false,
-          error: err instanceof Error ? err.message : 'Failed to fetch overrides',
-          isMock: true,
-        });
-      }
-    };
-
-    fetchOverrides(controller.signal);
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [baseUrl, canCallApi, headers]);
-
-  const refresh = async () => {
-    const controller = new AbortController();
-    if (!baseUrl || !canCallApi) {
-      setState({ data: fallbackRows, loading: false, isMock: true });
-      return;
-    }
-
-    setState((prev) => ({ ...prev, loading: true, error: undefined }));
-    try {
+  const query = useQuery({
+    queryKey: queryKeys.overrides(baseUrl),
+    enabled,
+    queryFn: async () => {
       const body = await adminGetJson<ApiOverrideRecord[]>(
         { baseUrl, canCallApi, headers } as AdminApiContext,
         '/api/v1/overrides',
-        undefined,
-        { signal: controller.signal },
       );
-      setState({ data: body.map(mapOverride), loading: false, isMock: false });
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      setState({
-        data: fallbackRows,
-        loading: false,
-        error: err instanceof Error ? err.message : 'Failed to fetch overrides',
-        isMock: true,
-      });
-    }
+      return body.map(mapOverride);
+    },
+  });
+
+  const refresh = async () => {
+    await query.refetch();
   };
+
+  const state: OverrideState = !enabled
+    ? { data: fallbackRows, loading: false, isMock: true }
+    : query.isError
+      ? {
+          data: fallbackRows,
+          loading: false,
+          error: query.error instanceof Error ? query.error.message : 'Failed to fetch overrides',
+          isMock: true,
+        }
+      : {
+          data: query.data ?? fallbackRows,
+          loading: query.isLoading,
+          isMock: false,
+        };
 
   return {
     ...state,

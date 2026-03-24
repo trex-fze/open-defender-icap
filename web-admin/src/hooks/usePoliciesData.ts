@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { adminGetJson, type AdminApiContext } from '../api/adminClient';
 import type { PolicyRule } from '../data/mockData';
 import { policies } from '../data/mockData';
+import { queryKeys } from './queryKeys';
 import { useAdminApi } from './useAdminApi';
 
 export type PolicyListItem = {
@@ -88,120 +90,87 @@ const mockDetail = (policyId: string | undefined): PolicyDetail | undefined => {
 
 export const usePoliciesData = (): PoliciesState => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
-  const [state, setState] = useState<PoliciesState>({
-    data: mockSummaries,
-    loading: Boolean(canCallApi),
-    isMock: !canCallApi,
+  const enabled = Boolean(baseUrl && canCallApi);
+
+  const query = useQuery({
+    queryKey: queryKeys.policies(baseUrl),
+    enabled,
+    queryFn: async () => {
+      const body = await adminGetJson<PolicyListResponse>(
+        { baseUrl, canCallApi, headers } as AdminApiContext,
+        '/api/v1/policies',
+        { include_drafts: true },
+      );
+      return (body.data ?? []).map(mapSummary);
+    },
   });
 
-  useEffect(() => {
-    if (!baseUrl || !canCallApi) {
-      setState({ data: mockSummaries, loading: false, isMock: true });
-      return;
-    }
+  if (!enabled) {
+    return { data: mockSummaries, loading: false, isMock: true };
+  }
 
-    let cancelled = false;
-    const controller = new AbortController();
-    setState((prev) => ({ ...prev, loading: true, error: undefined }));
-
-    const run = async () => {
-      try {
-        const body = await adminGetJson<PolicyListResponse>(
-          { baseUrl, canCallApi, headers } as AdminApiContext,
-          '/api/v1/policies',
-          { include_drafts: true },
-          { signal: controller.signal },
-        );
-        const next = (body.data ?? []).map(mapSummary);
-        if (!cancelled) {
-          setState({ data: next, loading: false, isMock: false });
-        }
-      } catch (err) {
-        if (controller.signal.aborted || cancelled) {
-          return;
-        }
-        console.warn('[Policies] falling back to mock data', err);
-        setState({
-          data: mockSummaries,
-          loading: false,
-          error: err instanceof Error ? err.message : 'Failed to reach Admin API',
-          isMock: true,
-        });
-      }
+  if (query.isError) {
+    return {
+      data: mockSummaries,
+      loading: false,
+      error: query.error instanceof Error ? query.error.message : 'Failed to reach Admin API',
+      isMock: true,
     };
+  }
 
-    run();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [baseUrl, canCallApi, headers]);
-
-  return state;
+  return {
+    data: query.data ?? mockSummaries,
+    loading: query.isLoading,
+    error: undefined,
+    isMock: false,
+  };
 };
 
 export const usePolicyDetail = (policyId?: string): PolicyDetailState => {
   const fallback = useMemo(() => mockDetail(policyId), [policyId]);
   const { baseUrl, canCallApi, headers } = useAdminApi();
-  const [state, setState] = useState<PolicyDetailState>({
-    data: fallback,
-    loading: Boolean(canCallApi && policyId),
-    isMock: !canCallApi,
+  const enabled = Boolean(baseUrl && canCallApi && policyId);
+
+  const query = useQuery({
+    queryKey: queryKeys.policyDetail(baseUrl, policyId),
+    enabled,
+    queryFn: async () => {
+      const body = await adminGetJson<ApiPolicyDetail>(
+        { baseUrl, canCallApi, headers } as AdminApiContext,
+        `/api/v1/policies/${policyId}`,
+      );
+      return mapDetail(body);
+    },
   });
 
-  useEffect(() => {
-    if (!policyId) {
-      setState({
-        data: undefined,
-        loading: false,
-        error: 'Missing policy id',
-        isMock: true,
-      });
-      return;
-    }
-
-    if (!baseUrl || !canCallApi) {
-      setState({ data: fallback, loading: false, isMock: true });
-      return;
-    }
-
-    let cancelled = false;
-    const controller = new AbortController();
-    setState((prev) => ({ ...prev, loading: true, error: undefined }));
-
-    const run = async () => {
-      try {
-        const body = await adminGetJson<ApiPolicyDetail>(
-          { baseUrl, canCallApi, headers } as AdminApiContext,
-          `/api/v1/policies/${policyId}`,
-          undefined,
-          { signal: controller.signal },
-        );
-        if (!cancelled) {
-          setState({ data: mapDetail(body), loading: false, isMock: false });
-        }
-      } catch (err) {
-        if (controller.signal.aborted || cancelled) {
-          return;
-        }
-        console.warn('[PolicyDetail] falling back to mock data', err);
-        setState({
-          data: fallback,
-          loading: false,
-          error: err instanceof Error ? err.message : 'Failed to reach Admin API',
-          isMock: true,
-        });
-      }
+  if (!policyId) {
+    return {
+      data: undefined,
+      loading: false,
+      error: 'Missing policy id',
+      isMock: true,
     };
+  }
 
-    run();
-    return () => {
-      cancelled = true;
-      controller.abort();
+  if (!enabled) {
+    return { data: fallback, loading: false, isMock: true };
+  }
+
+  if (query.isError) {
+    return {
+      data: fallback,
+      loading: false,
+      error: query.error instanceof Error ? query.error.message : 'Failed to reach Admin API',
+      isMock: true,
     };
-  }, [policyId, fallback, baseUrl, canCallApi, headers]);
+  }
 
-  return state;
+  return {
+    data: query.data ?? fallback,
+    loading: query.isLoading,
+    error: undefined,
+    isMock: false,
+  };
 };
 
 const mapSummary = (item: ApiPolicySummary): PolicyListItem => ({

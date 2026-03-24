@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { adminGetJson, type AdminApiContext } from '../api/adminClient';
 import { reviewQueue } from '../data/mockData';
+import { queryKeys } from './queryKeys';
 import { useAdminApi } from './useAdminApi';
 
 export type ReviewQueueRow = {
@@ -69,80 +70,38 @@ const mapReviewRecord = (record: ApiReviewRecord): ReviewQueueRow => ({
 
 export const useReviewQueueData = () => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
-  const [state, setState] = useState<ReviewQueueState>({
-    data: fallbackRows,
-    loading: Boolean(canCallApi),
-    isMock: !canCallApi,
+  const enabled = Boolean(baseUrl && canCallApi);
+
+  const query = useQuery({
+    queryKey: queryKeys.reviewQueue(baseUrl),
+    enabled,
+    queryFn: async () => {
+      const body = await adminGetJson<ApiReviewRecord[]>(
+        { baseUrl, canCallApi, headers } as AdminApiContext,
+        '/api/v1/review-queue',
+      );
+      return body.map(mapReviewRecord);
+    },
   });
 
-  useEffect(() => {
-    if (!baseUrl || !canCallApi) {
-      setState({ data: fallbackRows, loading: false, isMock: true });
-      return;
-    }
-
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const fetchQueue = async (signal?: AbortSignal) => {
-      setState((prev) => ({ ...prev, loading: true, error: undefined }));
-      try {
-        const body = await adminGetJson<ApiReviewRecord[]>(
-          { baseUrl, canCallApi, headers } as AdminApiContext,
-          '/api/v1/review-queue',
-          undefined,
-          { signal },
-        );
-        if (!cancelled) {
-          setState({ data: body.map(mapReviewRecord), loading: false, isMock: false });
-        }
-      } catch (err) {
-        if (signal?.aborted || cancelled) {
-          return;
-        }
-        setState({
-          data: fallbackRows,
-          loading: false,
-          error: err instanceof Error ? err.message : 'Failed to fetch review queue',
-          isMock: true,
-        });
-      }
-    };
-
-    fetchQueue(controller.signal);
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [baseUrl, canCallApi, headers]);
-
   const refresh = async () => {
-    const controller = new AbortController();
-    await (async () => {
-      if (!baseUrl || !canCallApi) {
-        setState({ data: fallbackRows, loading: false, isMock: true });
-        return;
-      }
-      setState((prev) => ({ ...prev, loading: true, error: undefined }));
-      try {
-        const body = await adminGetJson<ApiReviewRecord[]>(
-          { baseUrl, canCallApi, headers } as AdminApiContext,
-          '/api/v1/review-queue',
-          undefined,
-          { signal: controller.signal },
-        );
-        setState({ data: body.map(mapReviewRecord), loading: false, isMock: false });
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        setState({
+    await query.refetch();
+  };
+
+  const state: ReviewQueueState = !enabled
+    ? { data: fallbackRows, loading: false, isMock: true }
+    : query.isError
+      ? {
           data: fallbackRows,
           loading: false,
-          error: err instanceof Error ? err.message : 'Failed to fetch review queue',
+          error: query.error instanceof Error ? query.error.message : 'Failed to fetch review queue',
           isMock: true,
-        });
-      }
-    })();
-  };
+        }
+      : {
+          data: query.data ?? fallbackRows,
+          loading: query.isLoading,
+          isMock: false,
+        };
 
   return {
     ...state,

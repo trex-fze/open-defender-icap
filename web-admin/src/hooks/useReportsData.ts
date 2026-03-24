@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { adminGetJson, type AdminApiContext } from '../api/adminClient';
 import { reports } from '../data/mockData';
+import { queryKeys } from './queryKeys';
 import { useAdminApi } from './useAdminApi';
 
 export type ReportAggregate = {
@@ -43,55 +45,41 @@ const mapAggregate = (aggregate: ApiReportingAggregate): ReportAggregate => ({
 
 export const useReportsData = (dimension = 'category'): ReportsState => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
-  const [state, setState] = useState<ReportsState>({
-    data: fallbackReports,
-    loading: Boolean(canCallApi),
-    isMock: !canCallApi,
+  const enabled = Boolean(baseUrl && canCallApi);
+
+  const query = useQuery({
+    queryKey: queryKeys.reportingAggregates(baseUrl, dimension),
+    enabled,
+    queryFn: async () => {
+      const body = await adminGetJson<{ data?: ApiReportingAggregate[] } | ApiReportingAggregate[]>(
+        { baseUrl, canCallApi, headers } as AdminApiContext,
+        '/api/v1/reporting/aggregates',
+        {
+          dimension,
+          page_size: 6,
+        },
+      );
+      const rows = Array.isArray((body as { data?: ApiReportingAggregate[] }).data)
+        ? (body as { data: ApiReportingAggregate[] }).data
+        : (body as ApiReportingAggregate[]);
+      return rows.map(mapAggregate);
+    },
   });
 
-  useEffect(() => {
-    if (!baseUrl || !canCallApi) {
-      setState({ data: fallbackReports, loading: false, isMock: true });
-      return;
-    }
-
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const fetchReports = async () => {
-      setState((prev) => ({ ...prev, loading: true, error: undefined }));
-      try {
-        const url = new URL('/api/v1/reporting/aggregates', baseUrl);
-        url.searchParams.set('dimension', dimension);
-        url.searchParams.set('page_size', '6');
-        const resp = await fetch(url, { headers, signal: controller.signal });
-        if (!resp.ok) {
-          throw new Error(`Request failed (${resp.status})`);
-        }
-        const body = await resp.json();
-        const data = Array.isArray(body?.data) ? body.data : body;
-        if (!cancelled) {
-          setState({ data: data.map(mapAggregate), loading: false, isMock: false });
-        }
-      } catch (err) {
-        if (controller.signal.aborted || cancelled) {
-          return;
-        }
-        setState({
-          data: fallbackReports,
-          loading: false,
-          error: err instanceof Error ? err.message : 'Failed to fetch reporting aggregates',
-          isMock: true,
-        });
-      }
+  if (!enabled) {
+    return { data: fallbackReports, loading: false, isMock: true };
+  }
+  if (query.isError) {
+    return {
+      data: fallbackReports,
+      loading: false,
+      error: query.error instanceof Error ? query.error.message : 'Failed to fetch reporting aggregates',
+      isMock: true,
     };
-
-    fetchReports();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [baseUrl, canCallApi, dimension, headers]);
-
-  return state;
+  }
+  return {
+    data: query.data ?? fallbackReports,
+    loading: query.isLoading,
+    isMock: false,
+  };
 };

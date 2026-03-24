@@ -16,9 +16,11 @@ const renderWithAuth = (value: any, ui: ReactNode) =>
 
 const baseContextValue = {
   user: mockUser,
-  tokens: null,
+  tokens: { accessToken: 'demo-token', expiresAt: Date.now() + 60_000 },
+  authNotice: undefined,
   login: vi.fn(),
   logout: vi.fn(),
+  clearAuthNotice: vi.fn(),
   hasRole: vi.fn().mockReturnValue(true),
   hasAnyRole: vi.fn().mockReturnValue(true),
   setTokens: vi.fn()

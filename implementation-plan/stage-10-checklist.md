@@ -8,8 +8,8 @@ This checklist tracks implementation progress for Stage 10 and maps directly to 
 - [x] Add a dedicated execution checklist for Stage 10.
 - [x] Wire `/policies/new` route to remove dead navigation path from Policies page.
 - [x] Add a shared Admin API client helper for typed requests and consistent error handling.
-- [ ] Move existing hooks to React Query with normalized cache keys.
-- [ ] Harden auth session lifecycle (token expiry UX, refresh flow, forced re-auth handling).
+- [x] Move existing hooks to React Query with normalized cache keys.
+- [x] Harden auth session lifecycle (token expiry UX, refresh flow, forced re-auth handling).
 
 ## Phase B - Core Management CRUD Parity
 

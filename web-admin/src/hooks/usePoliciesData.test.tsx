@@ -1,4 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePoliciesData } from './usePoliciesData';
 
@@ -14,6 +16,18 @@ vi.mock('./useAdminApi', () => ({
 }));
 
 describe('usePoliciesData', () => {
+  const createWrapper = () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+
+    return ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+  };
+
   beforeEach(() => {
     mockFetch.mockReset();
     global.fetch = mockFetch as unknown as typeof fetch;
@@ -40,7 +54,7 @@ describe('usePoliciesData', () => {
       })
     });
 
-    const { result } = renderHook(() => usePoliciesData());
+    const { result } = renderHook(() => usePoliciesData(), { wrapper: createWrapper() });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.isMock).toBe(false);
@@ -50,7 +64,7 @@ describe('usePoliciesData', () => {
 
   it('falls back to mock data when fetch fails', async () => {
     mockFetch.mockRejectedValueOnce(new Error('network down'));
-    const { result } = renderHook(() => usePoliciesData());
+    const { result } = renderHook(() => usePoliciesData(), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.isMock).toBe(true);
     expect(result.current.error).toMatch(/network down/i);

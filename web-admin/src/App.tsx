@@ -61,8 +61,8 @@ type GuardProps = {
 };
 
 export const ProtectedRoute = ({ children, roles }: GuardProps) => {
-  const { user, hasAnyRole } = useAuth();
-  if (!user) {
+  const { user, tokens, hasAnyRole } = useAuth();
+  if (!user || !tokens?.accessToken) {
     return <Navigate to="/login" replace />;
   }
   if (roles && !hasAnyRole(roles as any)) {

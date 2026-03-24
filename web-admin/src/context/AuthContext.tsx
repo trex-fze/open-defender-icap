@@ -22,8 +22,10 @@ export type AuthTokens = {
 type AuthContextValue = {
   user: UserProfile | null;
   tokens: AuthTokens | null;
+  authNotice?: string;
   login: (profile?: Partial<UserProfile>, options?: { tokens?: AuthTokens }) => void;
   logout: () => void;
+  clearAuthNotice: () => void;
   hasRole: (role: Role) => boolean;
   hasAnyRole: (roles?: Role[]) => boolean;
   setTokens: (tokens: AuthTokens | null) => void;
@@ -39,6 +41,22 @@ const defaultUser: UserProfile = {
 
 const TOKEN_STORAGE_KEY = 'od.admin.tokens';
 const ENV_BOOTSTRAP_TOKEN = (import.meta.env.VITE_ADMIN_TOKEN ?? '').trim();
+const DEFAULT_TOKEN_TTL_MS = 60 * 60 * 1000;
+
+const isExpired = (token?: AuthTokens | null): boolean => {
+  if (!token?.expiresAt) return false;
+  return Date.now() >= token.expiresAt;
+};
+
+const normalizeToken = (token: AuthTokens): AuthTokens => {
+  if (token.expiresAt) {
+    return token;
+  }
+  return {
+    ...token,
+    expiresAt: Date.now() + DEFAULT_TOKEN_TTL_MS,
+  };
+};
 
 const readStoredTokens = (): AuthTokens | null => {
   if (typeof window !== 'undefined') {
@@ -47,19 +65,44 @@ const readStoredTokens = (): AuthTokens | null => {
       try {
         const parsed = JSON.parse(raw) as AuthTokens;
         if (parsed?.accessToken) {
-          return parsed;
+          const token = normalizeToken(parsed);
+          if (isExpired(token)) {
+            window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+            return null;
+          }
+          return token;
         }
       } catch (err) {
         console.warn('Failed to parse stored admin tokens', err);
       }
     }
   }
-  return ENV_BOOTSTRAP_TOKEN ? { accessToken: ENV_BOOTSTRAP_TOKEN } : null;
+  return ENV_BOOTSTRAP_TOKEN ? normalizeToken({ accessToken: ENV_BOOTSTRAP_TOKEN }) : null;
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<UserProfile | null>(defaultUser);
   const [tokens, setTokens] = useState<AuthTokens | null>(() => readStoredTokens());
+  const [authNotice, setAuthNotice] = useState<string | undefined>();
+
+  useEffect(() => {
+    if (!tokens?.accessToken || !tokens.expiresAt) return;
+    if (isExpired(tokens)) {
+      setUser(null);
+      setTokens(null);
+      setAuthNotice('Session expired. Please sign in again.');
+      return;
+    }
+
+    const timeoutMs = tokens.expiresAt - Date.now();
+    const timer = window.setTimeout(() => {
+      setUser(null);
+      setTokens(null);
+      setAuthNotice('Session expired. Please sign in again.');
+    }, timeoutMs);
+
+    return () => window.clearTimeout(timer);
+  }, [tokens]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -80,6 +123,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return {
       user,
       tokens,
+      authNotice,
       hasRole,
       hasAnyRole,
       login: (profile, options) => {
@@ -89,18 +133,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           roles: profile?.roles ?? defaultUser.roles,
         });
         if (options?.tokens) {
-          setTokens(options.tokens);
+          setTokens(normalizeToken(options.tokens));
+          setAuthNotice(undefined);
         } else if (!tokens) {
           setTokens(readStoredTokens());
+          setAuthNotice(undefined);
         }
       },
       logout: () => {
         setUser(null);
         setTokens(null);
+        setAuthNotice(undefined);
       },
+      clearAuthNotice: () => setAuthNotice(undefined),
       setTokens,
     };
-  }, [tokens, user]);
+  }, [tokens, user, authNotice]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

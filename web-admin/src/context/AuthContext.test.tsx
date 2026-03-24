@@ -3,12 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { AuthProvider, useAuth } from './AuthContext';
 
 const Harness = () => {
-  const { user, tokens, hasRole, login, logout } = useAuth();
+  const { user, tokens, hasRole, login, logout, authNotice, clearAuthNotice } = useAuth();
   return (
     <div>
       <p data-testid="user-name">{user?.name ?? 'anonymous'}</p>
       <p data-testid="has-admin">{hasRole('policy-admin') ? 'yes' : 'no'}</p>
       <p data-testid="token">{tokens?.accessToken ?? 'none'}</p>
+      <p data-testid="notice">{authNotice ?? 'none'}</p>
       <button
         type="button"
         onClick={() =>
@@ -19,6 +20,9 @@ const Harness = () => {
       </button>
       <button type="button" onClick={() => logout()}>
         logout
+      </button>
+      <button type="button" onClick={() => clearAuthNotice()}>
+        clear-notice
       </button>
     </div>
   );

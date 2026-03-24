@@ -1,4 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTrafficReportData } from './useTrafficReportData';
 
@@ -15,6 +17,16 @@ vi.mock('./useAdminApi', () => ({
 }));
 
 describe('useTrafficReportData', () => {
+  const createWrapper = () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    return ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+  };
+
   beforeEach(() => {
     mockFetch.mockReset();
     global.fetch = mockFetch as unknown as typeof fetch;
@@ -33,7 +45,7 @@ describe('useTrafficReportData', () => {
       }),
     });
 
-    const { result } = renderHook(() => useTrafficReportData('24h', 10));
+    const { result } = renderHook(() => useTrafficReportData('24h', 10), { wrapper: createWrapper() });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.isMock).toBe(false);
@@ -44,7 +56,7 @@ describe('useTrafficReportData', () => {
   it('falls back to mock mode when request fails', async () => {
     mockFetch.mockRejectedValueOnce(new Error('traffic api down'));
 
-    const { result } = renderHook(() => useTrafficReportData('6h', 5));
+    const { result } = renderHook(() => useTrafficReportData('6h', 5), { wrapper: createWrapper() });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.isMock).toBe(true);

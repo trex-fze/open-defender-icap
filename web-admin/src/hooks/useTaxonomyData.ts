@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { adminGetJson, type AdminApiContext } from '../api/adminClient';
 import { taxonomy } from '../data/mockData';
+import { queryKeys } from './queryKeys';
 import { useAdminApi } from './useAdminApi';
 
 export type TaxonomySubcategoryRow = {
@@ -76,60 +77,48 @@ const mapTaxonomy = (
 
 export const useTaxonomyData = () => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
-  const [state, setState] = useState<TaxonomyState>({
-    data: fallbackData,
-    loading: Boolean(canCallApi),
-    isMock: !canCallApi,
-  });
+  const enabled = Boolean(baseUrl && canCallApi);
 
-  const fetchTaxonomy = async (signal?: AbortSignal) => {
-    if (!baseUrl || !canCallApi) {
-      setState({ data: fallbackData, loading: false, isMock: true });
-      return;
-    }
-
-    setState((prev) => ({ ...prev, loading: true, error: undefined }));
-    try {
+  const query = useQuery({
+    queryKey: queryKeys.taxonomy(baseUrl),
+    enabled,
+    queryFn: async () => {
       const [categories, subcategories] = await Promise.all([
         adminGetJson<ApiCategory[]>(
           { baseUrl, canCallApi, headers } as AdminApiContext,
           '/api/v1/taxonomy/categories',
-          undefined,
-          { signal },
         ),
         adminGetJson<ApiSubcategory[]>(
           { baseUrl, canCallApi, headers } as AdminApiContext,
           '/api/v1/taxonomy/subcategories',
-          undefined,
-          { signal },
         ),
       ]);
+      return mapTaxonomy(categories, subcategories);
+    },
+  });
 
-      setState({
-        data: mapTaxonomy(categories, subcategories),
-        loading: false,
-        isMock: false,
-      });
-    } catch (err) {
-      if (signal?.aborted) return;
-      setState({
-        data: fallbackData,
-        loading: false,
-        error: err instanceof Error ? err.message : 'Failed to fetch taxonomy',
-        isMock: true,
-      });
-    }
+  const refresh = async () => {
+    await query.refetch();
   };
 
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchTaxonomy(controller.signal);
-    return () => controller.abort();
-  }, [baseUrl, canCallApi, headers]);
+  const state: TaxonomyState = !enabled
+    ? { data: fallbackData, loading: false, isMock: true }
+    : query.isError
+      ? {
+          data: fallbackData,
+          loading: false,
+          error: query.error instanceof Error ? query.error.message : 'Failed to fetch taxonomy',
+          isMock: true,
+        }
+      : {
+          data: query.data ?? fallbackData,
+          loading: query.isLoading,
+          isMock: false,
+        };
 
   return {
     ...state,
-    refresh: () => fetchTaxonomy(),
+    refresh,
     canCallApi,
   } as const;
 };
