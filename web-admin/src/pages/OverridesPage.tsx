@@ -1,7 +1,97 @@
+import { FormEvent, useMemo, useState } from 'react';
+import { useOverrideActions } from '../hooks/useOverrideActions';
 import { useOverridesData } from '../hooks/useOverridesData';
 
+const ACTION_OPTIONS = ['allow', 'block', 'warn', 'monitor', 'review', 'require-approval'];
+const STATUS_OPTIONS = ['active', 'inactive', 'expired', 'revoked'];
+const SCOPE_OPTIONS = ['domain', 'user', 'ip'];
+
 export const OverridesPage = () => {
-  const { data, loading, error, isMock } = useOverridesData();
+  const { data, loading, error, isMock, refresh, canCallApi } = useOverridesData();
+  const { createOverride, updateOverride, deleteOverride, busy, error: actionError } = useOverrideActions();
+
+  const [editingId, setEditingId] = useState<string | undefined>();
+  const [scopeType, setScopeType] = useState('domain');
+  const [scopeValue, setScopeValue] = useState('');
+  const [action, setAction] = useState('allow');
+  const [status, setStatus] = useState('active');
+  const [reason, setReason] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
+  const [message, setMessage] = useState<string | undefined>();
+
+  const editing = useMemo(() => data.find((row) => row.id === editingId), [data, editingId]);
+
+  const resetForm = () => {
+    setEditingId(undefined);
+    setScopeType('domain');
+    setScopeValue('');
+    setAction('allow');
+    setStatus('active');
+    setReason('');
+    setExpiresAt('');
+  };
+
+  const loadForEdit = (id: string) => {
+    const row = data.find((item) => item.id === id);
+    if (!row) return;
+    setEditingId(row.id);
+    setScopeType(row.scopeType);
+    setScopeValue(row.scopeValue);
+    setAction(row.action);
+    setStatus(row.status);
+    setReason(row.reason ?? '');
+    setExpiresAt(row.expiresAt ?? '');
+    setMessage(undefined);
+  };
+
+  const submitOverride = async (event: FormEvent) => {
+    event.preventDefault();
+    setMessage(undefined);
+
+    if (!scopeValue.trim()) {
+      setMessage('Scope value is required');
+      return;
+    }
+
+    try {
+      const payload = {
+        scopeType,
+        scopeValue,
+        action,
+        status,
+        reason,
+        expiresAt,
+      };
+
+      if (editingId) {
+        await updateOverride(editingId, payload);
+        setMessage('Override updated successfully');
+      } else {
+        await createOverride(payload);
+        setMessage('Override created successfully');
+      }
+
+      resetForm();
+      await refresh();
+    } catch {
+      setMessage(undefined);
+    }
+  };
+
+  const onDelete = async (id: string) => {
+    setMessage(undefined);
+    try {
+      await deleteOverride(id);
+      if (editingId === id) {
+        resetForm();
+      }
+      setMessage(`Override ${id} deleted`);
+      await refresh();
+    } catch {
+      setMessage(undefined);
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -9,7 +99,9 @@ export const OverridesPage = () => {
           <p className="section-title">Overrides</p>
           <h2 style={{ margin: 0 }}>Manual policy exceptions</h2>
         </div>
-        <button className="cta-button">Import CSV</button>
+        <button className="cta-button" onClick={refresh} disabled={loading}>
+          Refresh
+        </button>
       </div>
 
       {error ? (
@@ -18,11 +110,104 @@ export const OverridesPage = () => {
         </div>
       ) : null}
 
+      {actionError ? (
+        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+          <p style={{ margin: 0, color: '#ff9b9b' }}>Override change failed: {actionError}</p>
+        </div>
+      ) : null}
+
+      {message ? (
+        <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
+          <p style={{ margin: 0, color: '#9ef7eb' }}>{message}</p>
+        </div>
+      ) : null}
+
       {isMock ? (
         <p className="section-title" style={{ color: '#fdd744', marginTop: '0.5rem' }}>
           Mock stream (Admin API offline)
         </p>
       ) : null}
+
+      <form className="glass-panel" onSubmit={submitOverride}>
+        <p className="section-title">{editing ? `Edit Override ${editing.id}` : 'Create Override'}</p>
+        <div className="layout-grid">
+          <label>
+            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Scope type</span>
+            <select className="search-input" value={scopeType} onChange={(event) => setScopeType(event.target.value)}>
+              {SCOPE_OPTIONS.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Scope value</span>
+            <input
+              className="search-input"
+              value={scopeValue}
+              onChange={(event) => setScopeValue(event.target.value)}
+              placeholder="example.com or user@example.com"
+            />
+          </label>
+          <label>
+            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Action</span>
+            <select className="search-input" value={action} onChange={(event) => setAction(event.target.value)}>
+              {ACTION_OPTIONS.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Status</span>
+            <select className="search-input" value={status} onChange={(event) => setStatus(event.target.value)}>
+              {STATUS_OPTIONS.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Expires at (ISO-8601, optional)</span>
+            <input
+              className="search-input"
+              value={expiresAt}
+              onChange={(event) => setExpiresAt(event.target.value)}
+              placeholder="2026-12-31T23:59:59Z"
+            />
+          </label>
+          <label>
+            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Reason (optional)</span>
+            <input
+              className="search-input"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="Temporary partner exception"
+            />
+          </label>
+        </div>
+
+        <div style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+          <button
+            className="cta-button"
+            type="submit"
+            disabled={busy || !canCallApi || isMock || !scopeValue.trim()}
+          >
+            {busy ? 'Saving...' : editing ? 'Update Override' : 'Create Override'}
+          </button>
+          <button
+            className="cta-button"
+            type="button"
+            style={{ background: 'linear-gradient(120deg,#d6def6,#8ca0cb)', color: '#060b17' }}
+            onClick={resetForm}
+          >
+            Clear
+          </button>
+        </div>
+      </form>
 
       <div className="glass-panel">
         {loading ? (
@@ -40,6 +225,7 @@ export const OverridesPage = () => {
                   <th>Action</th>
                   <th>Expires</th>
                   <th>Status</th>
+                  <th>Operations</th>
                 </tr>
               </thead>
               <tbody>
@@ -52,6 +238,31 @@ export const OverridesPage = () => {
                       <span className={`chip chip--${item.status === 'active' ? 'green' : 'amber'}`}>
                         {item.status}
                       </span>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        <button
+                          className="cta-button"
+                          style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem' }}
+                          onClick={() => loadForEdit(item.id)}
+                          disabled={busy}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="cta-button"
+                          style={{
+                            padding: '0.4rem 0.8rem',
+                            fontSize: '0.75rem',
+                            background: 'linear-gradient(120deg,#ff9b9b,#fdd744)',
+                            color: '#060b17',
+                          }}
+                          onClick={() => onDelete(item.id)}
+                          disabled={busy || !canCallApi || isMock}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

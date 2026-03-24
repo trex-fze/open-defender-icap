@@ -94,3 +94,38 @@ export const adminPostJson = async <TResponse, TBody>(
   }
   return (await resp.json()) as TResponse;
 };
+
+export const adminPutJson = async <TResponse, TBody>(
+  ctx: AdminApiContext,
+  path: string,
+  body: TBody,
+  init?: RequestInit,
+): Promise<TResponse> => {
+  ensureCallable(ctx);
+  const resp = await fetch(buildUrl(ctx.baseUrl, path), {
+    ...init,
+    method: 'PUT',
+    headers: withHeaders(ctx.headers, init),
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    throw new AdminApiError(resp.status, await parseErrorBody(resp));
+  }
+  return (await resp.json()) as TResponse;
+};
+
+export const adminDelete = async (
+  ctx: AdminApiContext,
+  path: string,
+  init?: RequestInit,
+): Promise<void> => {
+  ensureCallable(ctx);
+  const resp = await fetch(buildUrl(ctx.baseUrl, path), {
+    ...init,
+    method: 'DELETE',
+    headers: withHeaders(ctx.headers, init),
+  });
+  if (!resp.ok) {
+    throw new AdminApiError(resp.status, await parseErrorBody(resp));
+  }
+};

@@ -16,8 +16,8 @@ This checklist tracks implementation progress for Stage 10 and maps directly to 
 - [x] Implement policy draft creation flow in UI (`/policies/new`).
 - [x] Implement policy publish action in policy detail page.
 - [x] Implement review resolve actions from Review Queue page.
-- [ ] Implement override create/edit/delete flows.
-- [ ] Implement taxonomy category/subcategory live CRUD.
+- [x] Implement override create/edit/delete flows.
+- [x] Implement taxonomy category/subcategory live CRUD.
 
 ## Phase C - Diagnostics and Investigations Parity
 
