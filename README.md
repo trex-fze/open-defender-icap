@@ -140,6 +140,7 @@ flowchart LR
 ## Reference Docs
 
 - [API Catalog](docs/api-catalog.md) – complete list of REST endpoints, auth requirements, and payload formats for every service.
+- [Fast Testing Deployment Guide](docs/fast-testing-deployment.md) - quick setup for end-to-end local testing, including client proxy config, env vars, startup/shutdown, and FAQ.
 
 ## Testing & Quality Pipelines
 
