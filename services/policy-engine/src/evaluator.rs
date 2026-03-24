@@ -79,7 +79,7 @@ impl PolicyEvaluator {
         Ok(())
     }
 
-    pub async fn create_policy(&self, req: PolicyCreateRequest) -> Result<()> {
+    pub async fn create_policy(&self, req: PolicyCreateRequest) -> Result<Uuid> {
         match &self.source {
             PolicySource::File { .. } => Err(anyhow!("database backend not configured")),
             PolicySource::Database { pool, .. } => {
@@ -87,9 +87,11 @@ impl PolicyEvaluator {
                     version: req.version.clone(),
                     rules: req.rules.clone(),
                 };
-                insert_policy_document(pool, &doc, &req.name, req.created_by.as_deref()).await?;
+                let policy_id =
+                    insert_policy_document(pool, &doc, &req.name, req.created_by.as_deref())
+                        .await?;
                 self.reload().await?;
-                Ok(())
+                Ok(policy_id)
             }
         }
     }

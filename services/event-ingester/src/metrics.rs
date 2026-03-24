@@ -31,6 +31,38 @@ static INGEST_DURATION: Lazy<Histogram> = Lazy::new(|| {
     prometheus::register_histogram!(opts).unwrap()
 });
 
+static PAGE_FETCH_ATTEMPTS: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_fetch_jobs_attempted_total",
+        "Number of page fetch jobs attempted"
+    )
+    .unwrap()
+});
+
+static PAGE_FETCH_ENQUEUED: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_fetch_jobs_enqueued_total",
+        "Number of page fetch jobs successfully enqueued"
+    )
+    .unwrap()
+});
+
+static PAGE_FETCH_FAILURES: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_fetch_jobs_failed_total",
+        "Number of page fetch jobs that failed to enqueue"
+    )
+    .unwrap()
+});
+
+static PAGE_FETCH_SKIPPED: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_fetch_jobs_skipped_total",
+        "Events that did not produce a valid page fetch job"
+    )
+    .unwrap()
+});
+
 pub fn record_batch(event_count: usize, duration_secs: f64) {
     INGEST_BATCHES.inc();
     INGEST_EVENTS.inc_by(event_count as u64);
@@ -39,6 +71,22 @@ pub fn record_batch(event_count: usize, duration_secs: f64) {
 
 pub fn record_failure() {
     INGEST_FAILURES.inc();
+}
+
+pub fn record_page_fetch_attempt() {
+    PAGE_FETCH_ATTEMPTS.inc();
+}
+
+pub fn record_page_fetch_enqueued() {
+    PAGE_FETCH_ENQUEUED.inc();
+}
+
+pub fn record_page_fetch_failure() {
+    PAGE_FETCH_FAILURES.inc();
+}
+
+pub fn record_page_fetch_skipped() {
+    PAGE_FETCH_SKIPPED.inc();
 }
 
 pub async fn metrics_endpoint() -> String {

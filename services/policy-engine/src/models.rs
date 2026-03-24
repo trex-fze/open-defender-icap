@@ -3,7 +3,7 @@ use policy_dsl::PolicyDocument;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DecisionRequest {
     pub normalized_key: String,
     pub entity_level: String,
@@ -70,7 +70,7 @@ impl PolicyListResponse {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct PolicyCreateRequest {
     pub name: String,
     pub version: String,
@@ -88,7 +88,7 @@ impl PolicyCreateRequest {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct PolicyUpdateRequest {
     pub version: Option<String>,
     pub status: Option<String>,

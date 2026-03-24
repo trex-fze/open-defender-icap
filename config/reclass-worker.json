@@ -7,5 +7,10 @@
   "dispatcher_batch_size": 200,
   "metrics_host": "0.0.0.0",
   "metrics_port": 19016,
-  "db_pool_size": 5
+  "db_pool_size": 5,
+  "page_fetch_queue": {
+    "redis_url": "redis://redis:6379",
+    "stream": "page-fetch-jobs",
+    "ttl_seconds": 21600
+  }
 }

@@ -4,7 +4,7 @@ COPY . .
 RUN cargo build --release
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates curl jq && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/target/release/icap-adaptor /usr/local/bin/icap-adaptor
 COPY --from=builder /app/target/release/policy-engine /usr/local/bin/policy-engine
@@ -15,5 +15,6 @@ COPY --from=builder /app/target/release/odctl /usr/local/bin/odctl
 COPY --from=builder /app/target/release/event-ingester /usr/local/bin/event-ingester
 COPY --from=builder /app/target/release/page-fetcher /usr/local/bin/page-fetcher
 COPY config /app/config
+COPY tests /app/tests
 ENTRYPOINT []
 CMD ["sleep", "infinity"]

@@ -17,6 +17,7 @@ common-types = { path = "../../crates/common-types" }
 clap = { version = "3.2.25", features = ["derive", "env"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 dirs = "5"
+urlencoding = "2.1"
 
 [dev-dependencies]
 assert_cmd = "2.0.12"

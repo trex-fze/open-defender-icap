@@ -38,6 +38,22 @@ static BACKLOG_GAUGE: Lazy<IntGauge> = Lazy::new(|| {
     .unwrap()
 });
 
+static PAGE_FETCH_DISPATCHED: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "reclassification_page_fetch_enqueued_total",
+        "Page fetch jobs enqueued by reclass worker"
+    )
+    .unwrap()
+});
+
+static PAGE_FETCH_FAILED: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "reclassification_page_fetch_failed_total",
+        "Page fetch jobs that failed to enqueue"
+    )
+    .unwrap()
+});
+
 pub fn record_jobs_planned(count: u64) {
     if count > 0 {
         JOBS_PLANNED.inc_by(count);
@@ -54,6 +70,14 @@ pub fn record_job_failure() {
 
 pub fn set_reclass_backlog(backlog: i64) {
     BACKLOG_GAUGE.set(backlog);
+}
+
+pub fn record_page_fetch_dispatched() {
+    PAGE_FETCH_DISPATCHED.inc();
+}
+
+pub fn record_page_fetch_failure() {
+    PAGE_FETCH_FAILED.inc();
 }
 
 async fn metrics_handler() -> String {

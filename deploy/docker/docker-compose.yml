@@ -171,6 +171,9 @@ services:
       OD_ELASTIC_USERNAME: ${OD_ELASTIC_USERNAME:-elastic}
       OD_ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-changeme-elastic}
       OD_FILEBEAT_SECRET: ${OD_FILEBEAT_SECRET:-changeme-ingest}
+      OD_PAGE_FETCH_REDIS_URL: ${OD_PAGE_FETCH_REDIS_URL:-redis://redis:6379}
+      OD_PAGE_FETCH_STREAM: ${OD_PAGE_FETCH_STREAM:-page-fetch-jobs}
+      OD_PAGE_FETCH_TTL_SECONDS: ${OD_PAGE_FETCH_TTL_SECONDS:-21600}
     ports:
       - "19100:19100"
     depends_on:

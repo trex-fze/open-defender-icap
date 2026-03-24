@@ -238,6 +238,7 @@ fn default_metrics_port() -> u16 {
 }
 
 const SYSTEM_PROMPT: &str = "You are an AI analyst classifying web traffic for a trust and safety team. Respond ONLY with JSON matching the schema and avoid prose.";
+const PROMPT_EXCERPT_LIMIT: usize = 1_200;
 const OPENAI_DEFAULT_MODEL: &str = "gpt-4o-mini";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
@@ -355,7 +356,8 @@ impl JobConsumer {
     }
 
     async fn handle_job(&self, payload: &str) -> Result<(), anyhow::Error> {
-        let job: ClassificationJobPayload = serde_json::from_str(payload)?;
+        let mut job: ClassificationJobPayload = serde_json::from_str(payload)?;
+        self.enrich_job_with_content(&mut job).await?;
         let (verdict, provider_name) = self.invoke_with_fallback(&job).await?;
         store_classification(&self.pool, &job, &verdict)
             .await
@@ -386,6 +388,62 @@ impl JobConsumer {
             }
         }
         Err(last_err.unwrap_or_else(|| anyhow!("no provider available")))
+    }
+
+    async fn enrich_job_with_content(&self, job: &mut ClassificationJobPayload) -> Result<()> {
+        if has_content(&job.content_excerpt)
+            && job.content_hash.is_some()
+            && job.content_version.is_some()
+        {
+            return Ok(());
+        }
+
+        if let Some(snippet) = self.load_page_content(&job.normalized_key).await? {
+            if !has_content(&job.content_excerpt) {
+                job.content_excerpt = snippet.content_excerpt;
+            }
+            if job.content_hash.is_none() {
+                job.content_hash = snippet.content_hash;
+            }
+            if job.content_version.is_none() {
+                job.content_version = snippet.content_version;
+            }
+            if job.content_language.is_none() {
+                job.content_language = snippet.content_language;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn load_page_content(&self, normalized_key: &str) -> Result<Option<PageContentSnippet>> {
+        let row = sqlx::query(
+            r#"
+            SELECT text_excerpt, content_hash, fetch_version
+            FROM page_contents
+            WHERE normalized_key = $1
+              AND expires_at > NOW()
+            ORDER BY fetch_version DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(normalized_key)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            let content_excerpt: Option<String> = row.try_get("text_excerpt")?;
+            let content_hash: Option<String> = row.try_get("content_hash")?;
+            let fetch_version: i64 = row.try_get("fetch_version")?;
+            Ok(Some(PageContentSnippet {
+                content_excerpt,
+                content_hash,
+                content_version: Some(fetch_version),
+                content_language: None,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -435,6 +493,29 @@ struct ClassificationJobPayload {
     hostname: String,
     full_url: String,
     trace_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content_excerpt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content_version: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content_language: Option<String>,
+}
+
+#[derive(Debug)]
+struct PageContentSnippet {
+    content_excerpt: Option<String>,
+    content_hash: Option<String>,
+    content_version: Option<i64>,
+    content_language: Option<String>,
+}
+
+fn has_content(value: &Option<String>) -> bool {
+    value
+        .as_ref()
+        .map(|text| !text.trim().is_empty())
+        .unwrap_or(false)
 }
 
 async fn store_classification(
@@ -569,6 +650,9 @@ async fn invoke_custom_json(
         full_url: &job.full_url,
         entity_level: &job.entity_level,
         trace_id: &job.trace_id,
+        content_excerpt: job_excerpt(job),
+        content_hash: job.content_hash.as_deref(),
+        content_version: job.content_version,
     };
     let mut request = client.post(&provider.endpoint);
     if !provider.api_key.is_empty() {
@@ -736,10 +820,61 @@ async fn invoke_ollama(
 }
 
 fn build_prompt(job: &ClassificationJobPayload) -> String {
-    format!(
+    let mut sections = vec![format!(
         "Classify the following web request. Return JSON with fields: primary_category, subcategory, risk_level, confidence (0-1), recommended_action (Allow|Block|Warn|Monitor|Review|RequireApproval).\\nNormalized Key: {}\\nHostname: {}\\nURL: {}\\nEntity Level: {}\\nTrace ID: {}",
         job.normalized_key, job.hostname, job.full_url, job.entity_level, job.trace_id
-    )
+    )];
+
+    if let Some(excerpt) = job_excerpt(job) {
+        let (formatted_excerpt, truncated) = format_excerpt(excerpt);
+        sections.push(format!(
+            "Page Excerpt (first {} chars{}):\\n\"{}\"",
+            formatted_excerpt.chars().count(),
+            if truncated { ", truncated" } else { "" },
+            formatted_excerpt
+        ));
+    } else {
+        sections
+            .push("Page Excerpt: unavailable (content fetch pending, failed, or disabled).".into());
+    }
+
+    if let Some(hash) = job.content_hash.as_deref() {
+        sections.push(format!("Content Hash: {hash}"));
+    }
+    if let Some(version) = job.content_version {
+        sections.push(format!("Content Version: {version}"));
+    }
+    if let Some(language) = job.content_language.as_deref() {
+        sections.push(format!("Content Language: {language}"));
+    }
+
+    sections.join("\\n")
+}
+
+fn format_excerpt(excerpt: &str) -> (String, bool) {
+    let cleaned = excerpt
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut buffer = String::new();
+    for ch in cleaned.chars().take(PROMPT_EXCERPT_LIMIT) {
+        buffer.push(ch);
+    }
+    let total_chars = cleaned.chars().count();
+    let truncated = total_chars > buffer.chars().count();
+    if truncated {
+        buffer.push('…');
+    }
+    (buffer, truncated)
+}
+
+fn job_excerpt(job: &ClassificationJobPayload) -> Option<&str> {
+    job.content_excerpt
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
 }
 
 fn parse_llm_json_text(text: &str) -> Result<LlmResponse> {
@@ -847,6 +982,7 @@ mod tests {
     use portpicker::pick_unused_port;
     use serde_json::json;
     use std::{
+        env,
         process::{Command, Stdio},
         sync::Arc,
     };
@@ -856,15 +992,52 @@ mod tests {
         time::{sleep, timeout, Duration, Instant},
     };
 
+    #[test]
+    fn build_prompt_includes_excerpt() {
+        let job = ClassificationJobPayload {
+            normalized_key: "url:https://example.com/".into(),
+            entity_level: "url".into(),
+            hostname: "example.com".into(),
+            full_url: "https://example.com/".into(),
+            trace_id: "trace-test".into(),
+            content_excerpt: Some("This is a captured page excerpt.".into()),
+            content_hash: Some("abc123".into()),
+            content_version: Some(2),
+            content_language: Some("en".into()),
+        };
+        let prompt = build_prompt(&job);
+        assert!(prompt.contains("captured page excerpt"));
+        assert!(prompt.contains("Content Hash: abc123"));
+        assert!(prompt.contains("Content Version: 2"));
+    }
+
+    #[test]
+    fn build_prompt_handles_missing_excerpt() {
+        let job = ClassificationJobPayload {
+            normalized_key: "url:https://empty.example".into(),
+            entity_level: "url".into(),
+            hostname: "empty.example".into(),
+            full_url: "https://empty.example".into(),
+            trace_id: "trace-empty".into(),
+            content_excerpt: None,
+            content_hash: None,
+            content_version: None,
+            content_language: None,
+        };
+        let prompt = build_prompt(&job);
+        assert!(prompt.contains("Page Excerpt: unavailable"));
+    }
+
     #[tokio::test]
     async fn processes_queue_job_and_persists_classification() -> Result<()> {
         let (redis_guard, redis_port) = start_redis_container()?;
-        let redis_url = format!("redis://127.0.0.1:{}/", redis_port);
+        let redis_url = format!("redis://{}:{}/", test_host(), redis_port);
         wait_for_redis(&redis_url).await?;
 
         let (postgres_guard, pg_port) = start_postgres_container()?;
         let database_url = format!(
-            "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+            "postgres://postgres:postgres@{}:{}/postgres",
+            test_host(),
             pg_port
         );
         let pool = connect_postgres(&database_url).await?;
@@ -896,6 +1069,10 @@ mod tests {
             hostname: "integration.test".into(),
             full_url: "https://integration.test/".into(),
             trace_id: "trace-123".into(),
+            content_excerpt: None,
+            content_hash: None,
+            content_version: None,
+            content_language: None,
         };
 
         sleep(Duration::from_millis(500)).await;
@@ -925,12 +1102,13 @@ mod tests {
     #[tokio::test]
     async fn fails_on_invalid_llm_response() -> Result<()> {
         let (redis_guard, redis_port) = start_redis_container()?;
-        let redis_url = format!("redis://127.0.0.1:{}/", redis_port);
+        let redis_url = format!("redis://{}:{}/", test_host(), redis_port);
         wait_for_redis(&redis_url).await?;
 
         let (postgres_guard, pg_port) = start_postgres_container()?;
         let database_url = format!(
-            "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+            "postgres://postgres:postgres@{}:{}/postgres",
+            test_host(),
             pg_port
         );
         let pool = connect_postgres(&database_url).await?;
@@ -969,6 +1147,10 @@ mod tests {
             hostname: "invalid-llm.test".into(),
             full_url: "https://invalid-llm.test/".into(),
             trace_id: "trace-invalid".into(),
+            content_excerpt: None,
+            content_hash: None,
+            content_version: None,
+            content_language: None,
         };
 
         sleep(Duration::from_millis(500)).await;
@@ -1050,11 +1232,25 @@ mod tests {
     }
 
     async fn apply_migrations(pool: &PgPool) {
-        for ddl in [
+        let migrations = [
             include_str!("../../../services/admin-api/migrations/0003_classifications.sql"),
             include_str!("../../../services/admin-api/migrations/0004_spec20_artifacts.sql"),
-        ] {
-            apply_sql_batch(pool, ddl).await.expect("apply migration");
+            include_str!("../../../services/admin-api/migrations/0005_page_contents.sql"),
+        ];
+
+        for ddl in migrations {
+            match apply_sql_batch(pool, ddl).await {
+                Ok(_) => continue,
+                Err(err)
+                    if ddl.contains("page_contents")
+                        && err
+                            .to_string()
+                            .contains("generation expression is not immutable") =>
+                {
+                    apply_page_contents_fallback(pool).await;
+                }
+                Err(err) => panic!("apply migration: {err}"),
+            }
         }
     }
 
@@ -1068,6 +1264,62 @@ mod tests {
         }
         Ok(())
     }
+
+    async fn apply_page_contents_fallback(pool: &PgPool) {
+        for statement in PAGE_CONTENTS_TEST_DDL {
+            sqlx::query(statement)
+                .execute(pool)
+                .await
+                .expect("apply fallback migration statement");
+        }
+    }
+
+    const PAGE_CONTENTS_TEST_DDL: &[&str] = &[
+        r#"
+CREATE TABLE IF NOT EXISTS page_contents (
+    id UUID PRIMARY KEY,
+    normalized_key TEXT NOT NULL,
+    fetch_version INTEGER NOT NULL DEFAULT 1,
+    content_type TEXT,
+    content_hash TEXT,
+    raw_bytes BYTEA,
+    text_excerpt TEXT,
+    char_count INTEGER,
+    byte_count INTEGER,
+    fetch_status TEXT NOT NULL,
+    fetch_reason TEXT,
+    ttl_seconds INTEGER NOT NULL DEFAULT 21600,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+"#,
+        r#"
+CREATE OR REPLACE FUNCTION page_contents_set_expiry()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.expires_at := COALESCE(
+        NEW.fetched_at,
+        NOW()
+    ) + (NEW.ttl_seconds * INTERVAL '1 second');
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+"#,
+        "DROP TRIGGER IF EXISTS trg_page_contents_set_expiry ON page_contents;",
+        r#"
+CREATE TRIGGER trg_page_contents_set_expiry
+BEFORE INSERT ON page_contents
+FOR EACH ROW EXECUTE FUNCTION page_contents_set_expiry();
+"#,
+        r#"
+CREATE UNIQUE INDEX IF NOT EXISTS page_contents_norm_key_version_idx
+    ON page_contents (normalized_key, fetch_version DESC);
+"#,
+        r#"
+CREATE INDEX IF NOT EXISTS page_contents_expires_idx
+    ON page_contents (expires_at);
+"#,
+    ];
 
     async fn connect_postgres(database_url: &str) -> Result<PgPool> {
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -1166,7 +1418,7 @@ mod tests {
     fn start_postgres_container() -> Result<(DockerContainer, u16)> {
         let port = pick_unused_port().context("no free port for postgres")?;
         let container = DockerContainer::run(
-            "postgres:15-alpine",
+            "postgres:16-alpine",
             vec![
                 "-p".into(),
                 format!("{}:5432", port),
@@ -1177,5 +1429,9 @@ mod tests {
             ],
         )?;
         Ok((container, port))
+    }
+
+    fn test_host() -> String {
+        env::var("TEST_DOCKER_HOST").unwrap_or_else(|_| "127.0.0.1".into())
     }
 }

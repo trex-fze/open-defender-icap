@@ -382,9 +382,11 @@ name = "common-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "idna",
  "serde",
  "serde_json",
  "thiserror",
+ "url",
 ]
 
 [[package]]
@@ -609,8 +611,10 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "common-types",
  "once_cell",
  "prometheus",
+ "redis",
  "reqwest",
  "serde",
  "serde_json",
@@ -618,6 +622,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -1511,6 +1516,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "urlencoding",
  "uuid",
  "wiremock",
 ]
@@ -1584,6 +1590,7 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "common-types",
  "config-core",
  "once_cell",
  "prometheus",
@@ -1920,6 +1927,7 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "common-types",
  "config-core",
  "once_cell",
  "portpicker",

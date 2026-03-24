@@ -1,6 +1,6 @@
 # Stage 8 Implementation Plan – AI Hybrid Model Support
 
-**Status**: In Progress
+**Status**: Complete
 
 ## Objectives
 - Support multiple LLM providers (offline + online) with policy-based routing and fallback.
@@ -17,12 +17,12 @@
 | S8-T5 | Provider-level metrics & alerts | SRE | S8-T1–T3 | ✅ | Per-provider counters/latency histograms + Prometheus rules (`stage8-llm-alerts`) |
 | S8-T6 | Document external LM Studio/Ollama integration | DevOps | S8-T2 | ✅ | README/integration plan describe connecting to remote LM Studio (192.168.1.170) or standalone Ollama nodes |
 | S8-T7 | Security/perf validation (prompt injection, fallback load) | Security/Perf Eng | S8-T2–T4 | ✅ | `tests/security/llm-prompt-smoke.sh` + `tests/perf/llm-failover.sh` cover injection + failover |
-| S8-T8 | Evidence & runbooks (Stage 8) | TPM | S8-T1–S8-T7 | 🔄 | `docs/evidence/stage08-hybrid-ai.md` created; populate after tests |
+| S8-T8 | Evidence & runbooks (Stage 8) | TPM | S8-T1–S8-T7 | ✅ | Evidence set + runbook steps linked from `docs/evidence/stage08-hybrid-ai.md` |
 
 ## Milestones
 1. **M1 – Hybrid Config & Offline Providers** (S8-T1/T2) ✅
-2. **M2 – Online Providers & Routing** (S8-T3/T4/T5) 🔄 (metrics/alerts pending)
-3. **M3 – Ops/Security Evidence** (S8-T6–T8) ⬜
+2. **M2 – Online Providers & Routing** (S8-T3/T4/T5) ✅
+3. **M3 – Ops/Security Evidence** (S8-T6–T8) ✅
 
 ## Risks & Mitigations
 | Risk | Mitigation |

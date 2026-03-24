@@ -15,6 +15,9 @@ pub struct IngestConfig {
     pub log_level: String,
     pub ingest_retry_attempts: usize,
     pub apply_templates: bool,
+    pub page_fetch_redis_url: Option<String>,
+    pub page_fetch_stream: String,
+    pub page_fetch_ttl_seconds: i32,
 }
 
 impl IngestConfig {
@@ -43,6 +46,13 @@ impl IngestConfig {
             apply_templates: env_or("OD_ELASTIC_APPLY_TEMPLATES", "true")
                 .parse()
                 .unwrap_or(true),
+            page_fetch_redis_url: env::var("OD_PAGE_FETCH_REDIS_URL")
+                .ok()
+                .filter(|v| !v.is_empty()),
+            page_fetch_stream: env_or("OD_PAGE_FETCH_STREAM", "page-fetch-jobs"),
+            page_fetch_ttl_seconds: env_or("OD_PAGE_FETCH_TTL_SECONDS", "21600")
+                .parse()
+                .unwrap_or(21_600),
         })
     }
 }

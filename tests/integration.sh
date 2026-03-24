@@ -19,7 +19,10 @@ docker compose run --rm odctl-runner odctl smoke --profile compose || {
 }
 
 echo "[integration] Executing Stage 6 ingest smoke test"
-docker compose run --rm odctl-runner bash -lc "tests/stage06_ingest.sh"
+docker compose run --rm odctl-runner bash -lc "INGEST_URL=http://event-ingester:19100 ELASTIC_URL=http://elasticsearch:9200 ADMIN_URL=http://admin-api:19000 tests/stage06_ingest.sh"
+
+echo "[integration] Verifying page fetch flow"
+docker compose run --rm odctl-runner bash -lc "INGEST_URL=http://event-ingester:19100 ADMIN_URL=http://admin-api:19000 PAGE_FETCH_TARGET=http://admin-api:19000/health/ready PAGE_FETCH_NORMALIZED_KEY=domain:admin-api tests/page-fetch-flow.sh"
 
 echo "[integration] Collecting health endpoints"
 curl -sf http://localhost:19000/health/ready >/dev/null

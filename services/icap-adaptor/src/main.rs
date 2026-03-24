@@ -3,7 +3,6 @@ mod config;
 mod icap;
 mod jobs;
 mod metrics;
-mod normalizer;
 mod policy_client;
 
 use anyhow::Result;
@@ -13,8 +12,10 @@ use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info, instrument, Level};
 
 use cache::CacheClient;
-use common_types::{EntityLevel, PolicyAction, PolicyDecisionRequest};
-use jobs::{ClassificationJob, JobPublisher, PageFetchJob, PageFetchPublisher};
+use common_types::{
+    normalizer::normalize_target, EntityLevel, PageFetchJob, PolicyAction, PolicyDecisionRequest,
+};
+use jobs::{ClassificationJob, JobPublisher, PageFetchPublisher};
 use policy_client::PolicyClient;
 
 #[tokio::main]
@@ -44,7 +45,9 @@ async fn main() -> Result<()> {
     let page_fetch_publisher = cfg
         .page_fetch_queue
         .as_ref()
-        .map(|queue| PageFetchPublisher::new(&queue.redis_url, queue.stream.clone()))
+        .map(|queue| {
+            PageFetchPublisher::new(&queue.redis_url, queue.stream.clone(), queue.ttl_seconds)
+        })
         .transpose()?;
 
     let metrics_host = cfg.metrics_host.clone();
@@ -94,7 +97,7 @@ async fn handle_connection(
     let n = socket.read(&mut buf).await?;
     let raw = String::from_utf8_lossy(&buf[..n]);
     let icap_req = icap::IcapRequest::parse(&raw)?;
-    let normalized = normalizer::normalize_target(
+    let normalized = normalize_target(
         icap_req.http_host.as_str(),
         &icap_req.http_path,
         icap_req.http_scheme.as_deref(),
@@ -143,6 +146,10 @@ async fn handle_connection(
                     hostname: &normalized.hostname,
                     full_url: &normalized.full_url,
                     trace_id: icap_req.trace_id.as_deref().unwrap_or(""),
+                    content_excerpt: None,
+                    content_hash: None,
+                    content_version: None,
+                    content_language: None,
                 })
                 .await
             {
@@ -153,16 +160,14 @@ async fn handle_connection(
 
     if let Some(publisher) = &page_fetch_publisher {
         if should_fetch_page(&normalized.full_url) {
-            if let Err(err) = publisher
-                .publish(&PageFetchJob {
-                    normalized_key: &normalized.normalized_key,
-                    url: &normalized.full_url,
-                    hostname: &normalized.hostname,
-                    trace_id: icap_req.trace_id.as_deref().unwrap_or(""),
-                    ttl_seconds: 21_600,
-                })
-                .await
-            {
+            let job = PageFetchJob {
+                normalized_key: normalized.normalized_key.clone(),
+                url: normalized.full_url.clone(),
+                hostname: normalized.hostname.clone(),
+                trace_id: icap_req.trace_id.clone(),
+                ttl_seconds: None,
+            };
+            if let Err(err) = publisher.publish(job).await {
                 error!(target = "svc-icap", %err, "failed to publish page fetch job");
             }
         }

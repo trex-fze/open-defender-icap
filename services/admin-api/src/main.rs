@@ -4,6 +4,7 @@ mod cache;
 mod cache_entries_api;
 mod cli_logs;
 mod metrics;
+mod page_contents;
 mod pagination;
 mod policies;
 mod reporting;
@@ -388,6 +389,14 @@ async fn main() -> Result<()> {
             get(cache_entries_api::get_entry).delete(cache_entries_api::delete_entry),
         )
         .route("/api/v1/cli-logs", get(cli_logs::list_cli_logs))
+        .route(
+            "/api/v1/page-contents/:normalized_key",
+            get(page_contents::get_page_content),
+        )
+        .route(
+            "/api/v1/page-contents/:normalized_key/history",
+            get(page_contents::list_page_content_history),
+        )
         .with_state(state.clone())
         .layer(auth_layer);
 

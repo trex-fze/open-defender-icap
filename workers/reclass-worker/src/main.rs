@@ -2,6 +2,7 @@ mod metrics;
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{Duration as ChronoDuration, Utc};
+use common_types::PageFetchJob;
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use tokio::{signal, time::Duration};
@@ -26,6 +27,8 @@ struct ReclassConfig {
     pub metrics_port: u16,
     #[serde(default = "default_db_pool_size")]
     pub db_pool_size: u32,
+    #[serde(default)]
+    pub page_fetch_queue: Option<PageFetchQueueConfig>,
 }
 
 fn default_planner_interval_secs() -> u64 {
@@ -82,13 +85,23 @@ async fn main() -> Result<()> {
         .await?;
 
     let publisher = JobPublisher::new(&cfg.redis_url, &cfg.job_stream)?;
+    let page_fetch_publisher = cfg
+        .page_fetch_queue
+        .as_ref()
+        .map(|queue| PageFetchPublisher::new(&queue.redis_url, &queue.stream, queue.ttl_seconds))
+        .transpose()?;
 
     let planner = Planner::new(
         pool.clone(),
         cfg.planner_batch_size,
         Duration::from_secs(cfg.planner_interval_seconds.max(5)),
     );
-    let dispatcher = Dispatcher::new(pool.clone(), publisher.clone(), cfg.dispatcher_batch_size);
+    let dispatcher = Dispatcher::new(
+        pool.clone(),
+        publisher.clone(),
+        page_fetch_publisher.clone(),
+        cfg.dispatcher_batch_size,
+    );
 
     tokio::spawn(planner.run());
     tokio::spawn(dispatcher.run());
@@ -126,6 +139,33 @@ impl JobPublisher {
     }
 }
 
+impl PageFetchPublisher {
+    fn new(redis_url: &str, stream: &str, default_ttl: i32) -> Result<Self> {
+        let client = redis::Client::open(redis_url)?;
+        Ok(Self {
+            client,
+            stream: stream.to_string(),
+            default_ttl: default_ttl.max(60),
+        })
+    }
+
+    async fn publish(&self, mut job: PageFetchJob) -> Result<()> {
+        if job.ttl_seconds.unwrap_or(0) <= 0 {
+            job.ttl_seconds = Some(self.default_ttl);
+        }
+        let mut conn = self.client.get_async_connection().await?;
+        let payload = serde_json::to_string(&job)?;
+        redis::cmd("XADD")
+            .arg(&self.stream)
+            .arg("*")
+            .arg("payload")
+            .arg(payload)
+            .query_async::<_, ()>(&mut conn)
+            .await?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct ClassificationJobMessage {
     normalized_key: String,
@@ -133,6 +173,46 @@ struct ClassificationJobMessage {
     hostname: String,
     full_url: String,
     trace_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_excerpt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_language: Option<String>,
+}
+
+#[derive(Clone)]
+struct PageFetchPublisher {
+    client: redis::Client,
+    stream: String,
+    default_ttl: i32,
+}
+
+#[derive(Debug, Clone)]
+struct PageContentSnippet {
+    content_excerpt: Option<String>,
+    content_hash: Option<String>,
+    content_version: Option<i64>,
+    content_language: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PageFetchQueueConfig {
+    pub redis_url: String,
+    #[serde(default = "default_page_fetch_stream")]
+    pub stream: String,
+    #[serde(default = "default_page_fetch_ttl")]
+    pub ttl_seconds: i32,
+}
+
+fn default_page_fetch_stream() -> String {
+    "page-fetch-jobs".into()
+}
+
+const fn default_page_fetch_ttl() -> i32 {
+    21_600
 }
 
 struct Planner {
@@ -253,14 +333,21 @@ impl Planner {
 struct Dispatcher {
     pool: PgPool,
     publisher: JobPublisher,
+    page_fetch_publisher: Option<PageFetchPublisher>,
     batch_size: i64,
 }
 
 impl Dispatcher {
-    fn new(pool: PgPool, publisher: JobPublisher, batch_size: i64) -> Self {
+    fn new(
+        pool: PgPool,
+        publisher: JobPublisher,
+        page_fetch_publisher: Option<PageFetchPublisher>,
+        batch_size: i64,
+    ) -> Self {
         Self {
             pool,
             publisher,
+            page_fetch_publisher,
             batch_size,
         }
     }
@@ -321,12 +408,25 @@ impl Dispatcher {
 
             match build_target(&normalized_key) {
                 Ok(target) => {
+                    let page_content = self.load_page_content(&normalized_key).await?;
                     let message = ClassificationJobMessage {
                         normalized_key: normalized_key.clone(),
-                        entity_level: target.entity_level,
-                        hostname: target.hostname,
-                        full_url: target.full_url,
+                        entity_level: target.entity_level.clone(),
+                        hostname: target.hostname.clone(),
+                        full_url: target.full_url.clone(),
                         trace_id: trace_id.clone(),
+                        content_excerpt: page_content
+                            .as_ref()
+                            .and_then(|content| content.content_excerpt.clone()),
+                        content_hash: page_content
+                            .as_ref()
+                            .and_then(|content| content.content_hash.clone()),
+                        content_version: page_content
+                            .as_ref()
+                            .and_then(|content| content.content_version),
+                        content_language: page_content
+                            .as_ref()
+                            .and_then(|content| content.content_language.clone()),
                     };
 
                     match self.publisher.publish(&message).await {
@@ -336,6 +436,27 @@ impl Dispatcher {
                                 .execute(&self.pool)
                                 .await?;
                             metrics::record_job_dispatched();
+                            if let Some(fetcher) = &self.page_fetch_publisher {
+                                let fetch_job = PageFetchJob {
+                                    normalized_key: normalized_key.clone(),
+                                    url: target.full_url.clone(),
+                                    hostname: target.hostname.clone(),
+                                    trace_id: Some(trace_id.clone()),
+                                    ttl_seconds: None,
+                                };
+                                match fetcher.publish(fetch_job).await {
+                                    Ok(_) => metrics::record_page_fetch_dispatched(),
+                                    Err(err) => {
+                                        metrics::record_page_fetch_failure();
+                                        warn!(
+                                            target = "svc-reclass",
+                                            %err,
+                                            key = %normalized_key,
+                                            "failed to enqueue page fetch job"
+                                        );
+                                    }
+                                }
+                            }
                             info!(
                                 target = "svc-reclass",
                                 key = %normalized_key,
@@ -381,6 +502,36 @@ impl Dispatcher {
 
         metrics::set_reclass_backlog(self.fetch_backlog().await?);
         Ok(processed)
+    }
+
+    async fn load_page_content(&self, normalized_key: &str) -> Result<Option<PageContentSnippet>> {
+        let row = sqlx::query(
+            r#"
+            SELECT text_excerpt, content_hash, fetch_version
+            FROM page_contents
+            WHERE normalized_key = $1
+              AND expires_at > NOW()
+            ORDER BY fetch_version DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(normalized_key)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            let content_excerpt: Option<String> = row.try_get("text_excerpt")?;
+            let content_hash: Option<String> = row.try_get("content_hash")?;
+            let fetch_version: i64 = row.try_get("fetch_version")?;
+            Ok(Some(PageContentSnippet {
+                content_excerpt,
+                content_hash,
+                content_version: Some(fetch_version),
+                content_language: None,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn fetch_backlog(&self) -> Result<i64> {
@@ -440,6 +591,7 @@ mod tests {
     use super::*;
     use portpicker::pick_unused_port;
     use serde_json::json;
+    use std::env;
     use std::process::{Command, Stdio};
     use tokio::time::{sleep, Duration, Instant};
 
@@ -447,7 +599,8 @@ mod tests {
     async fn planner_schedules_due_classifications() -> Result<()> {
         let (pg_guard, pg_port) = start_postgres_container()?;
         let database_url = format!(
-            "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+            "postgres://postgres:postgres@{}:{}/postgres",
+            test_host(),
             pg_port
         );
         let pool = connect_postgres(&database_url).await?;
@@ -481,7 +634,8 @@ mod tests {
     async fn dispatcher_publishes_jobs_to_stream() -> Result<()> {
         let (pg_guard, pg_port) = start_postgres_container()?;
         let database_url = format!(
-            "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+            "postgres://postgres:postgres@{}:{}/postgres",
+            test_host(),
             pg_port
         );
         let pool = connect_postgres(&database_url).await?;
@@ -506,11 +660,11 @@ mod tests {
         .await?;
 
         let (redis_guard, redis_port) = start_redis_container()?;
-        let redis_url = format!("redis://127.0.0.1:{}/", redis_port);
+        let redis_url = format!("redis://{}:{}/", test_host(), redis_port);
         wait_for_redis(&redis_url).await?;
 
         let publisher = JobPublisher::new(&redis_url, "classification-jobs")?;
-        let dispatcher = Dispatcher::new(pool.clone(), publisher, 10);
+        let dispatcher = Dispatcher::new(pool.clone(), publisher, None, 10);
         let processed = dispatcher.dispatch_batch().await?;
         assert_eq!(processed, 1);
 
@@ -597,11 +751,25 @@ mod tests {
     }
 
     async fn apply_migrations(pool: &PgPool) {
-        for ddl in [
+        let migrations = [
             include_str!("../../../services/admin-api/migrations/0003_classifications.sql"),
             include_str!("../../../services/admin-api/migrations/0004_spec20_artifacts.sql"),
-        ] {
-            apply_sql_batch(pool, ddl).await.expect("apply migration");
+            include_str!("../../../services/admin-api/migrations/0005_page_contents.sql"),
+        ];
+
+        for ddl in migrations {
+            match apply_sql_batch(pool, ddl).await {
+                Ok(_) => continue,
+                Err(err)
+                    if ddl.contains("page_contents")
+                        && err
+                            .to_string()
+                            .contains("generation expression is not immutable") =>
+                {
+                    apply_page_contents_fallback(pool).await;
+                }
+                Err(err) => panic!("apply migration: {err}"),
+            }
         }
     }
 
@@ -615,6 +783,62 @@ mod tests {
         }
         Ok(())
     }
+
+    async fn apply_page_contents_fallback(pool: &PgPool) {
+        for statement in PAGE_CONTENTS_TEST_DDL {
+            sqlx::query(statement)
+                .execute(pool)
+                .await
+                .expect("apply fallback migration statement");
+        }
+    }
+
+    const PAGE_CONTENTS_TEST_DDL: &[&str] = &[
+        r#"
+CREATE TABLE IF NOT EXISTS page_contents (
+    id UUID PRIMARY KEY,
+    normalized_key TEXT NOT NULL,
+    fetch_version INTEGER NOT NULL DEFAULT 1,
+    content_type TEXT,
+    content_hash TEXT,
+    raw_bytes BYTEA,
+    text_excerpt TEXT,
+    char_count INTEGER,
+    byte_count INTEGER,
+    fetch_status TEXT NOT NULL,
+    fetch_reason TEXT,
+    ttl_seconds INTEGER NOT NULL DEFAULT 21600,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+"#,
+        r#"
+CREATE OR REPLACE FUNCTION page_contents_set_expiry()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.expires_at := COALESCE(
+        NEW.fetched_at,
+        NOW()
+    ) + (NEW.ttl_seconds * INTERVAL '1 second');
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+"#,
+        "DROP TRIGGER IF EXISTS trg_page_contents_set_expiry ON page_contents;",
+        r#"
+CREATE TRIGGER trg_page_contents_set_expiry
+BEFORE INSERT ON page_contents
+FOR EACH ROW EXECUTE FUNCTION page_contents_set_expiry();
+"#,
+        r#"
+CREATE UNIQUE INDEX IF NOT EXISTS page_contents_norm_key_version_idx
+    ON page_contents (normalized_key, fetch_version DESC);
+"#,
+        r#"
+CREATE INDEX IF NOT EXISTS page_contents_expires_idx
+    ON page_contents (expires_at);
+"#,
+    ];
 
     struct DockerContainer {
         id: String,
@@ -660,7 +884,7 @@ mod tests {
     fn start_postgres_container() -> Result<(DockerContainer, u16)> {
         let port = pick_unused_port().context("no free port for postgres")?;
         let container = DockerContainer::run(
-            "postgres:15-alpine",
+            "postgres:16-alpine",
             vec![
                 "-p".into(),
                 format!("{}:5432", port),
@@ -680,5 +904,9 @@ mod tests {
             vec!["-p".into(), format!("{}:6379", port)],
         )?;
         Ok((container, port))
+    }
+
+    fn test_host() -> String {
+        env::var("TEST_DOCKER_HOST").unwrap_or_else(|_| "127.0.0.1".into())
     }
 }

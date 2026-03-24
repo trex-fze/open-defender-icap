@@ -1,3 +1,4 @@
+mod audit;
 mod auth;
 mod config;
 mod evaluator;
@@ -5,6 +6,7 @@ mod models;
 mod store;
 
 use anyhow::Result;
+use audit::{PolicyAuditEvent, PolicyAuditLogger};
 use auth::{
     enforce_admin, require_roles, AdminAuth, AuthSettings, UserContext, ROLE_POLICY_EDITOR_ROLES,
     ROLE_POLICY_VIEWER_ROLES,
@@ -26,12 +28,27 @@ use sqlx::postgres::PgPoolOptions;
 use std::{env, net::SocketAddr, sync::Arc};
 use store::PolicyStore;
 use tokio::net::TcpListener;
-use tracing::{info, Level};
+use tracing::{error, info, Level};
 use uuid::Uuid;
 
 #[derive(Clone)]
 struct AppState {
     evaluator: Arc<PolicyEvaluator>,
+    audit_logger: Option<PolicyAuditLogger>,
+}
+
+impl AppState {
+    fn audit_logger(&self) -> Option<&PolicyAuditLogger> {
+        self.audit_logger.as_ref()
+    }
+
+    async fn log_event(&self, event: PolicyAuditEvent) {
+        if let Some(logger) = self.audit_logger() {
+            if let Err(err) = logger.log(event).await {
+                error!(target = "svc-policy", %err, "failed to persist policy audit event");
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -53,6 +70,8 @@ async fn main() -> Result<()> {
         .clone()
         .or_else(|| env::var("OD_POLICY_ADMIN_TOKEN").ok());
 
+    let mut audit_logger = None;
+
     let evaluator = if let Some(db_url) = db_url {
         let pool = PgPoolOptions::new()
             .max_connections(5)
@@ -69,6 +88,7 @@ async fn main() -> Result<()> {
                     .expect("seeded policy must exist")
             }
         };
+        audit_logger = Some(PolicyAuditLogger::new(pool.clone()));
         PolicyEvaluator::from_database(store, pool, Some(cfg.policy_file.clone()))
     } else {
         let store = PolicyStore::load_from_file(&cfg.policy_file)?;
@@ -78,6 +98,7 @@ async fn main() -> Result<()> {
     let admin_auth = Arc::new(AdminAuth::from_config(admin_token.clone(), auth_settings).await?);
     let state = AppState {
         evaluator: Arc::new(evaluator),
+        audit_logger,
     };
 
     let auth_layer = {
@@ -158,6 +179,17 @@ async fn reload_policies(
     let rules = state.evaluator.rules();
     let version = state.evaluator.version();
     let policy_id = state.evaluator.policy_id();
+    state
+        .log_event(PolicyAuditEvent {
+            action: "policy.reload".into(),
+            actor: Some(user.actor.clone()),
+            policy_id,
+            version: Some(version.clone()),
+            status: None,
+            notes: Some("manual reload".into()),
+            diff: None,
+        })
+        .await;
     Ok(Json(PolicyListResponse::from_store(
         version, policy_id, rules,
     )))
@@ -173,7 +205,10 @@ async fn create_policy(
     if payload.created_by.is_none() {
         payload.created_by = Some(user.actor.clone());
     }
-    state
+    let audit_diff = serde_json::to_value(&payload).ok();
+    let created_by = payload.created_by.clone();
+    let version = payload.version.clone();
+    let policy_id = state
         .evaluator
         .create_policy(payload)
         .await
@@ -191,6 +226,17 @@ async fn create_policy(
                 }),
             )
         })?;
+    state
+        .log_event(PolicyAuditEvent {
+            action: "policy.create".into(),
+            actor: created_by,
+            policy_id: Some(policy_id),
+            version: Some(version),
+            status: Some("active".into()),
+            notes: None,
+            diff: audit_diff,
+        })
+        .await;
     let rules = state.evaluator.rules();
     let version = state.evaluator.version();
     let policy_id = state.evaluator.policy_id();
@@ -253,6 +299,11 @@ async fn update_policy(
         })?
     };
 
+    let audit_diff = serde_json::to_value(&payload).ok();
+    let status_override = payload.status.clone();
+    let notes = payload.notes.clone();
+    let version_override = payload.version.clone();
+
     state
         .evaluator
         .update_policy(target_id, payload, &user.actor)
@@ -268,10 +319,24 @@ async fn update_policy(
         })?;
 
     let rules = state.evaluator.rules();
-    let version = state.evaluator.version();
+    let current_version = state.evaluator.version();
+    let logged_version = version_override.unwrap_or(current_version.clone());
     let policy_id = state.evaluator.policy_id();
+    state
+        .log_event(PolicyAuditEvent {
+            action: "policy.update".into(),
+            actor: Some(user.actor.clone()),
+            policy_id: Some(target_id),
+            version: Some(logged_version),
+            status: status_override,
+            notes,
+            diff: audit_diff,
+        })
+        .await;
     Ok(Json(PolicyListResponse::from_store(
-        version, policy_id, rules,
+        current_version,
+        policy_id,
+        rules,
     )))
 }
 
@@ -297,6 +362,7 @@ mod tests {
         let evaluator = PolicyEvaluator::from_file(store, tmp.to_string_lossy().into());
         let state = AppState {
             evaluator: Arc::new(evaluator),
+            audit_logger: None,
         };
         Router::new()
             .route("/api/v1/decision", post(handle_decision))

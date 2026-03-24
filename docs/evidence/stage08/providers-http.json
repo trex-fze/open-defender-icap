@@ -1,0 +1,14 @@
+[
+  {
+    "name": "lmstudio-edge",
+    "provider_type": "lmstudio",
+    "endpoint": "http://192.168.1.170:1234/v1/chat/completions",
+    "role": "primary"
+  },
+  {
+    "name": "openai-fallback",
+    "provider_type": "openai",
+    "endpoint": "https://api.openai.com/v1/chat/completions",
+    "role": "fallback"
+  }
+]

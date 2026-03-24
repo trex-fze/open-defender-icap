@@ -17,7 +17,7 @@ pub struct IcapConfig {
     #[serde(default)]
     pub job_queue: Option<JobQueueConfig>,
     #[serde(default)]
-    pub page_fetch_queue: Option<JobQueueConfig>,
+    pub page_fetch_queue: Option<PageFetchQueueConfig>,
 }
 
 pub fn load() -> anyhow::Result<IcapConfig> {
@@ -50,4 +50,21 @@ pub struct JobQueueConfig {
 
 fn default_job_stream() -> String {
     "classification-jobs".to_string()
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct PageFetchQueueConfig {
+    pub redis_url: String,
+    #[serde(default = "default_page_fetch_stream")]
+    pub stream: String,
+    #[serde(default = "default_page_fetch_ttl")]
+    pub ttl_seconds: i32,
+}
+
+fn default_page_fetch_stream() -> String {
+    "page-fetch-jobs".to_string()
+}
+
+const fn default_page_fetch_ttl() -> i32 {
+    21_600
 }

@@ -1,6 +1,7 @@
 mod metrics;
 
 use anyhow::{anyhow, Context, Result};
+use common_types::PageFetchJob;
 use config_core::load_config;
 use metrics::MetricsServer;
 use redis::streams::{StreamReadOptions, StreamReadReply};
@@ -74,15 +75,6 @@ const fn default_fetch_timeout() -> u64 {
 
 const fn default_pool_size() -> u32 {
     5
-}
-
-#[derive(Debug, Deserialize)]
-struct PageFetchJob {
-    normalized_key: String,
-    url: String,
-    hostname: Option<String>,
-    trace_id: Option<String>,
-    ttl_seconds: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -300,7 +292,7 @@ impl PageFetcher {
         .bind(text_excerpt)
         .bind(text_excerpt.chars().count() as i32)
         .bind(raw_bytes.len() as i32)
-        .bind(job.hostname.clone().unwrap_or_else(|| "unknown".into()))
+        .bind(&job.hostname)
         .bind(ttl_seconds)
         .execute(&self.pool)
         .await?;

@@ -1,22 +1,24 @@
 use std::{
-    fs,
+    env, fs,
     path::PathBuf,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use common_types::PolicyAction;
 use dirs::config_dir;
 use policy_dsl::{Conditions as RuleConditions, PolicyDocument, PolicyRule as DslPolicyRule};
 use reqwest::Client;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use sqlx::{migrate::Migrator, postgres::PgPoolOptions};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     time::sleep,
 };
 use tracing::info;
+use urlencoding::encode;
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -59,6 +61,10 @@ enum Commands {
     Review(ReviewCmd),
     #[clap(subcommand)]
     Cache(CacheCmd),
+    #[clap(subcommand)]
+    Migrate(MigrateCmd),
+    #[clap(subcommand)]
+    Page(PageCmd),
     #[clap(subcommand)]
     Report(ReportCmd),
     #[clap(subcommand)]
@@ -172,6 +178,41 @@ enum CacheCmd {
 }
 
 #[derive(Subcommand, Debug)]
+enum MigrateCmd {
+    Run {
+        #[clap(value_enum, default_value = "all")]
+        target: MigrateTarget,
+        #[clap(long)]
+        admin_url: Option<String>,
+        #[clap(long)]
+        policy_url: Option<String>,
+    },
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum MigrateTarget {
+    Admin,
+    Policy,
+    All,
+}
+
+#[derive(Subcommand, Debug)]
+enum PageCmd {
+    Show {
+        key: String,
+        #[clap(long)]
+        version: Option<i64>,
+        #[clap(long, default_value_t = 1_200)]
+        excerpt: usize,
+    },
+    History {
+        key: String,
+        #[clap(long, default_value_t = 5)]
+        limit: u32,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum ReportCmd {
     Summary {
         #[clap(long, default_value = "category")]
@@ -209,6 +250,9 @@ const DEFAULT_OIDC_SCOPE: &str = "openid profile email offline_access";
 const DEFAULT_DEVICE_URL: &str = "https://login.example.com/oauth/device/code";
 const DEFAULT_TOKEN_URL: &str = "https://login.example.com/oauth/token";
 const DEFAULT_CLIENT_ID: &str = "odctl-dev";
+
+static ADMIN_MIGRATOR: Migrator = sqlx::migrate!("../../services/admin-api/migrations");
+static POLICY_MIGRATOR: Migrator = sqlx::migrate!("../../services/policy-engine/migrations");
 
 #[derive(Debug, Clone)]
 struct DeviceFlowConfig {
@@ -408,6 +452,10 @@ async fn main() -> Result<()> {
         handle_auth(cmd).await?;
         return Ok(());
     }
+    if let Commands::Migrate(cmd) = &cli.command {
+        handle_migrate(cmd).await?;
+        return Ok(());
+    }
 
     let token = resolve_token(cli.token.clone()).await?;
     let client = ApiClient::new(&cli.base_url, token)?;
@@ -418,6 +466,8 @@ async fn main() -> Result<()> {
         Commands::Override(cmd) => handle_override(cmd, &client, cli.json).await?,
         Commands::Review(cmd) => handle_review(cmd, &client, cli.json).await?,
         Commands::Cache(cmd) => handle_cache(cmd, &client, cli.json).await?,
+        Commands::Migrate(_) => unreachable!(),
+        Commands::Page(cmd) => handle_page(cmd, &client, cli.json).await?,
         Commands::Report(cmd) => handle_report(cmd, &client, cli.json).await?,
         Commands::Logs(cmd) => handle_logs(cmd, &client, cli.json).await?,
         Commands::Llm(cmd) => handle_llm(cmd, cli.json).await?,
@@ -835,6 +885,116 @@ async fn handle_cache(cmd: &CacheCmd, client: &ApiClient, json: bool) -> Result<
     Ok(())
 }
 
+async fn handle_migrate(cmd: &MigrateCmd) -> Result<()> {
+    match cmd {
+        MigrateCmd::Run {
+            target,
+            admin_url,
+            policy_url,
+        } => match target {
+            MigrateTarget::Admin => {
+                let url = resolve_db_url(admin_url, "OD_ADMIN_DATABASE_URL", "--admin-url")?;
+                run_migrations("admin-api", &url, &ADMIN_MIGRATOR).await?;
+            }
+            MigrateTarget::Policy => {
+                let url = resolve_db_url(policy_url, "OD_POLICY_DATABASE_URL", "--policy-url")?;
+                run_migrations("policy-engine", &url, &POLICY_MIGRATOR).await?;
+            }
+            MigrateTarget::All => {
+                let admin = resolve_db_url(admin_url, "OD_ADMIN_DATABASE_URL", "--admin-url")?;
+                let policy = resolve_db_url(policy_url, "OD_POLICY_DATABASE_URL", "--policy-url")?;
+                run_migrations("admin-api", &admin, &ADMIN_MIGRATOR).await?;
+                run_migrations("policy-engine", &policy, &POLICY_MIGRATOR).await?;
+            }
+        },
+    }
+    Ok(())
+}
+
+fn resolve_db_url(source: &Option<String>, env_key: &str, flag: &str) -> Result<String> {
+    if let Some(url) = source {
+        if url.trim().is_empty() {
+            anyhow::bail!("{} cannot be empty", flag);
+        }
+        return Ok(url.clone());
+    }
+    env::var(env_key).with_context(|| format!("set {} or pass {}", env_key, flag))
+}
+
+async fn run_migrations(name: &str, url: &str, migrator: &Migrator) -> Result<()> {
+    println!("Running {name} migrations...");
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(url)
+        .await
+        .with_context(|| format!("failed to connect to {name} database"))?;
+    migrator
+        .run(&pool)
+        .await
+        .with_context(|| format!("failed to execute {name} migrations"))?;
+    println!("Completed {name} migrations.");
+    Ok(())
+}
+
+async fn handle_page(cmd: &PageCmd, client: &ApiClient, json: bool) -> Result<()> {
+    match cmd {
+        PageCmd::Show {
+            key,
+            version,
+            excerpt,
+        } => {
+            let encoded = encode(key);
+            let mut params = vec![("max_excerpt".to_string(), excerpt.to_string())];
+            if let Some(v) = version {
+                params.push(("version".to_string(), v.to_string()));
+            }
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let record: PageContentRecord = client
+                .get(&format!("/api/v1/page-contents/{encoded}"), &refs)
+                .await?;
+            if json {
+                print_json(&record)?;
+            } else {
+                render_page_content(&record);
+            }
+        }
+        PageCmd::History { key, limit } => {
+            let encoded = encode(key);
+            let params = vec![("limit".to_string(), limit.to_string())];
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let history: Vec<PageContentSummary> = client
+                .get(&format!("/api/v1/page-contents/{encoded}/history"), &refs)
+                .await?;
+            if json {
+                print_json(&history)?;
+            } else if history.is_empty() {
+                println!("No page content found for {key}");
+            } else {
+                let rows: Vec<Vec<String>> = history
+                    .iter()
+                    .map(|entry| {
+                        vec![
+                            entry.fetch_version.to_string(),
+                            entry.fetch_status.clone(),
+                            entry.fetch_reason.clone().unwrap_or_else(|| "-".into()),
+                            entry.fetched_at.clone(),
+                            entry.expires_at.clone(),
+                        ]
+                    })
+                    .collect();
+                print_table(&["Version", "Status", "Reason", "Fetched", "Expires"], rows);
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn handle_report(cmd: &ReportCmd, client: &ApiClient, json: bool) -> Result<()> {
     match cmd {
         ReportCmd::Summary { dimension } => {
@@ -1110,6 +1270,46 @@ fn print_table(headers: &[&str], rows: Vec<Vec<String>>) {
     }
 }
 
+fn render_page_content(record: &PageContentRecord) {
+    println!("Normalized Key : {}", record.normalized_key);
+    println!("Fetch Version  : {}", record.fetch_version);
+    println!("Status         : {}", record.fetch_status);
+    println!(
+        "Reason         : {}",
+        record.fetch_reason.as_deref().unwrap_or("-")
+    );
+    println!("Fetched At     : {}", record.fetched_at);
+    println!("Expires At     : {}", record.expires_at);
+    println!("TTL (seconds)  : {}", record.ttl_seconds);
+    println!(
+        "Content Type   : {}",
+        record.content_type.as_deref().unwrap_or("-")
+    );
+    println!(
+        "Content Hash   : {}",
+        record.content_hash.as_deref().unwrap_or("-")
+    );
+    let char_text = record
+        .char_count
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "-".into());
+    let byte_text = record
+        .byte_count
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "-".into());
+    println!("Chars / Bytes  : {char_text} / {byte_text}");
+    match &record.excerpt {
+        Some(text) => {
+            if record.excerpt_truncated {
+                println!("Excerpt (truncated):\n{}\n", text);
+            } else {
+                println!("Excerpt:\n{}\n", text);
+            }
+        }
+        None => println!("Excerpt        : (none cached)"),
+    }
+}
+
 async fn run_smoke(profile: &str) -> Result<()> {
     info!(profile = profile, "running smoke profile");
     let target = match profile {
@@ -1323,6 +1523,36 @@ struct CacheEntryRecord {
     value: serde_json::Value,
     expires_at: String,
     source: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PageContentRecord {
+    normalized_key: String,
+    fetch_version: i64,
+    content_type: Option<String>,
+    content_hash: Option<String>,
+    char_count: Option<i32>,
+    byte_count: Option<i32>,
+    fetch_status: String,
+    fetch_reason: Option<String>,
+    ttl_seconds: i32,
+    fetched_at: String,
+    expires_at: String,
+    excerpt: Option<String>,
+    excerpt_truncated: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PageContentSummary {
+    fetch_version: i64,
+    fetch_status: String,
+    fetch_reason: Option<String>,
+    ttl_seconds: i32,
+    fetched_at: String,
+    expires_at: String,
+    char_count: Option<i32>,
+    byte_count: Option<i32>,
+    content_hash: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

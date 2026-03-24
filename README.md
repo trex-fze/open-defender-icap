@@ -108,6 +108,10 @@ flowchart LR
 
 > See `config/admin-api.json`, `services/event-ingester/src/config.rs`, and `deploy/docker/.env.example` for the full list.
 
+## Reference Docs
+
+- [API Catalog](docs/api-catalog.md) – complete list of REST endpoints, auth requirements, and payload formats for every service.
+
 ## Testing & Quality Pipelines
 
 | Suite | Command | Notes |

@@ -17,7 +17,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 1. **Clone repo** and review `docs/engine-adaptor-spec.md` + `docs/architecture.md` for context.
 2. **Install prerequisites**: Rust stable (>=1.80), Node LTS, Docker, docker-compose.
 3. **Bootstrap workspace**: `cargo check`, `npm install` inside `web-admin`, `docker compose -f deploy/docker/docker-compose.yml up --build`.
-4. **Run migrations** (future stage): `odctl migrate run` (once implemented) to set up Postgres schema.
+4. **Run migrations**: `odctl migrate run all` (or `--target admin|policy`) to apply Postgres schema updates before starting services.
 5. **Seed taxonomy**: `odctl taxonomy seed` to populate initial categories (Stage 3+).
 
 ## 3. Operating the ICAP Adaptor
@@ -56,7 +56,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl policy update <id|current> <file>` | Update policy metadata/rules with JSON payload | Sends `PUT /api/v1/policies/{id}`; `id` can be `current` to target the active policy. |
 | `odctl policy import/export` | Manage policy packages (future) | Depends on Stage 2 completion. |
 | `odctl cache lookup/invalidate` | Inspect redis entries (future) | Tied to Stage 3 cache enhancements. |
-| `odctl migrate run [admin|policy|all]` | Apply Postgres migrations for admin/policy services | Reads `OD_ADMIN_DATABASE_URL` / `OD_POLICY_DATABASE_URL`; runs both when target omitted. |
+| `odctl migrate run [admin|policy|all]` | Apply Postgres migrations for admin/policy services | Reads `OD_ADMIN_DATABASE_URL` / `OD_POLICY_DATABASE_URL` unless `--admin-url/--policy-url` provided; runs both when target omitted. |
 | `odctl seed policies [file] [name] [created_by]` | Load policy DSL file via Policy API | Defaults to `config/policies.json`, `name=default`; requires admin token. |
 | `odctl override update <id> <file>` | PUT override definition | JSON matches Admin API payload; invalidates caches instantly. |
 | `odctl review list` | List pending review queue items | Displays status, normalized key, submitter/assignee. |

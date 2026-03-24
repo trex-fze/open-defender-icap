@@ -1,9 +1,10 @@
 use anyhow::{anyhow, Context, Result};
-use common_types::{EntityLevel, NormalizedTarget};
 use idna::domain_to_ascii;
 use url::Url;
 
-/// Normalize host/path data coming from Squid/ICAP metadata.
+use crate::{EntityLevel, NormalizedTarget};
+
+/// Normalize host/path data to produce a consistent `NormalizedTarget`.
 pub fn normalize_target(host: &str, path: &str, scheme: Option<&str>) -> Result<NormalizedTarget> {
     let scheme = scheme.unwrap_or("http");
     if host.trim().is_empty() {

@@ -13,6 +13,7 @@
   },
   "page_fetch_queue": {
     "redis_url": "redis://redis:6379",
-    "stream": "page-fetch-jobs"
+    "stream": "page-fetch-jobs",
+    "ttl_seconds": 21600
   }
 }

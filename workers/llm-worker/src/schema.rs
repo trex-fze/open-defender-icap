@@ -8,6 +8,12 @@ pub struct PromptPayload<'a> {
     pub full_url: &'a str,
     pub entity_level: &'a str,
     pub trace_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_excerpt: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_version: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]

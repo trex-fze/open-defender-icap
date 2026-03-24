@@ -16,3 +16,6 @@ tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 once_cell = { workspace = true }
 prometheus = { workspace = true }
+redis = { workspace = true }
+common-types = { path = "../../crates/common-types" }
+url = { workspace = true }
