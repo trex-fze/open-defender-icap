@@ -5,6 +5,8 @@ Use this sheet as a quick regression checklist whenever we change IAM or route g
 * `VIEWER_TOKEN` → user with `policy-viewer` + `iam:view`
 * `ADMIN_TOKEN` → service account with `policy-admin`
 
+> Tip: the `Admin Token` column assumes the `default-admin` service-account token created during bootstrap (see `docs/iam.md`). Export it to `DEFAULT_ADMIN_TOKEN` in your shell for repeatability.
+
 | Endpoint | Unauthenticated | Viewer Token | Admin Token |
 | --- | --- | --- | --- |
 | `GET /api/v1/overrides` | `401` (missing header) | `200` list returned | `200` |

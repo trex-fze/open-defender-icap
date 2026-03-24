@@ -8,6 +8,18 @@ This runbook covers the steps we follow to deploy or roll back the Stage 11 IAM 
 2. Take a database snapshot or verify that the automated backups completed within the last hour.
 3. Export the current `audit_events` table for safekeeping: `psql $DATABASE_URL -c "COPY audit_events TO STDOUT WITH CSV" > audit_events_pre_iam.csv`.
 4. Ensure `ADMIN_TEST_DATABASE_URL` is set locally so we can run SQLx-backed tests before touching prod: `export ADMIN_TEST_DATABASE_URL=postgres://...`.
+5. Bootstrap the `default-admin` service account if one does not already exist:
+
+   ```bash
+   odctl --base-url https://admin.your-env \
+         --token "$LEGACY_ADMIN_TOKEN" \
+         iam service-accounts create \
+         --name default-admin \
+         --description "Bootstrap admin" \
+         --role policy-admin
+   ```
+
+   Store the emitted token securely (1Password/Vault) as `DEFAULT_ADMIN_TOKEN`; it will be referenced by the authz smoke matrix.
 
 ## Migration Steps
 
@@ -20,7 +32,7 @@ This runbook covers the steps we follow to deploy or roll back the Stage 11 IAM 
 
 2. Seed initial IAM records (service accounts, operators) via `odctl iam ...` or the `/settings/iam` UI.
 3. Deploy the Admin API and policy engine images. Both services are now configured to call `/api/v1/iam/whoami`.
-4. Verify the resolver behavior with the smoke matrix in `docs/authz-smoke-matrix.md`.
+4. Verify the resolver behavior with the smoke matrix in `docs/authz-smoke-matrix.md` using the stored `DEFAULT_ADMIN_TOKEN`.
 5. Run the compose integration suite to exercise the full stack (Admin API, policy engine, ICAP adaptor, workers):
 
    ```bash

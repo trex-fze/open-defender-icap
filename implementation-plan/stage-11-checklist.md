@@ -73,4 +73,5 @@
 - [x] Add IAM audit integrity checks.
 - [x] Add migration and rollback runbook for IAM rollout.
 - [x] Run full integration suite in compose mode.
+- [x] Document default bootstrap admin creation/token handling.
 - [x] Final acceptance signoff.

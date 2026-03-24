@@ -56,3 +56,39 @@ For a complete endpoint reference, see `docs/api-catalog.md` (Identity & Access 
 | `auditor` | Retrieve audit logs and reporting dashboards. | `audit:view`, `reporting:view`. |
 
 Service accounts inherit whichever roles you assign at creation/rotation time.
+
+## Default Admin Bootstrap
+
+Fresh environments still need one operator who can finish wiring real identities. Rather than shipping a plaintext username/password, we bootstrap a `default-admin` service account and hand the generated token to the on-call engineer.
+
+### Create the Bootstrap Account
+
+```bash
+# Requires policy-admin on the caller (static token or JWT)
+      --token "$ADMIN_TOKEN" \
+      iam service-accounts create \
+      --name default-admin \
+      --description "Bootstrap admin" \
+      --role policy-admin
+```
+
+The command prints JSON similar to:
+
+```json
+{
+  "account": { "name": "default-admin", ... },
+  "token": "svc.token.value",
+  "roles": ["policy-admin"]
+}
+```
+
+Copy the `token` immediately into your secrets manager (for example `DEFAULT_ADMIN_TOKEN`). It is **not** stored in plaintext anywhere else; you must rotate the service account if the token is lost.
+
+### Using the Default Admin Token
+
+* CLI/API: supply `--token "$DEFAULT_ADMIN_TOKEN"` (odctl) or `X-Admin-Token: $DEFAULT_ADMIN_TOKEN` for curl.
+* Frontend: if you rely on OIDC, also create an IAM user with the same email/subject and assign `policy-admin` so that your own identity can log in. The default service account is meant for break-glass automation, not daily browsing.
+
+### Clean-up
+
+Once real administrators exist, rotate or delete the `default-admin` service account (`odctl iam service-accounts disable <id>`). Document the new source of truth for administrator access in your runbooks.
