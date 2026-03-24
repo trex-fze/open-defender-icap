@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { adminGetJson, type AdminApiContext } from '../api/adminClient';
+import { AdminApiError, adminGetJson, type AdminApiContext } from '../api/adminClient';
 import { useAdminApi } from './useAdminApi';
 
 export type PageContentRecord = {
@@ -59,7 +59,11 @@ export const usePageContentInspector = () => {
       setRecord(latest);
       setHistory(versions);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch page content');
+      if (err instanceof AdminApiError && err.status === 404) {
+        setError('No fetched page content exists yet for this key. Trigger traffic first and retry.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to fetch page content');
+      }
     } finally {
       setLoading(false);
     }

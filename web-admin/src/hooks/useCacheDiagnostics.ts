@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  AdminApiError,
   adminDelete,
   adminGetJson,
   type AdminApiContext,
@@ -34,7 +35,11 @@ export const useCacheDiagnostics = () => {
       setEntry(row);
     } catch (err) {
       setEntry(undefined);
-      setError(err instanceof Error ? err.message : 'Failed to fetch cache entry');
+      if (err instanceof AdminApiError && err.status === 404) {
+        setError('Cache entry not found for this key.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to fetch cache entry');
+      }
     } finally {
       setLoading(false);
     }
