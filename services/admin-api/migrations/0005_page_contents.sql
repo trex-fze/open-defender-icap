@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS page_contents (
     fetch_reason TEXT,
     ttl_seconds INTEGER NOT NULL DEFAULT 21600,
     fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMPTZ GENERATED ALWAYS AS (fetched_at + (ttl_seconds || ' seconds')::INTERVAL) STORED
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS page_contents_norm_key_version_idx
@@ -20,3 +20,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS page_contents_norm_key_version_idx
 
 CREATE INDEX IF NOT EXISTS page_contents_expires_idx
     ON page_contents (expires_at);
+
+CREATE OR REPLACE FUNCTION page_contents_set_expiry()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.expires_at := COALESCE(NEW.fetched_at, NOW()) + make_interval(secs => NEW.ttl_seconds);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_page_contents_set_expiry ON page_contents;
+
+CREATE TRIGGER trg_page_contents_set_expiry
+BEFORE INSERT OR UPDATE ON page_contents
+FOR EACH ROW EXECUTE FUNCTION page_contents_set_expiry();

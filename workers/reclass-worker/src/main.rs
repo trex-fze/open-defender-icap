@@ -537,11 +537,11 @@ impl Dispatcher {
         if let Some(row) = row {
             let content_excerpt: Option<String> = row.try_get("text_excerpt")?;
             let content_hash: Option<String> = row.try_get("content_hash")?;
-            let fetch_version: i64 = row.try_get("fetch_version")?;
+            let fetch_version: i32 = row.try_get("fetch_version")?;
             Ok(Some(PageContentSnippet {
                 content_excerpt,
                 content_hash,
-                content_version: Some(fetch_version),
+                content_version: Some(i64::from(fetch_version)),
                 content_language: None,
             }))
         } else {
@@ -790,13 +790,7 @@ mod tests {
     }
 
     async fn apply_sql_batch(pool: &PgPool, sql: &str) -> Result<()> {
-        for statement in sql.split(';') {
-            let trimmed = statement.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            sqlx::query(trimmed).execute(pool).await?;
-        }
+        sqlx::raw_sql(sql).execute(pool).await?;
         Ok(())
     }
 

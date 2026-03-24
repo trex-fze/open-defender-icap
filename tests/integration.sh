@@ -24,6 +24,9 @@ docker compose run --rm odctl-runner bash -lc "INGEST_URL=http://event-ingester:
 echo "[integration] Verifying page fetch flow"
 docker compose run --rm odctl-runner bash -lc "INGEST_URL=http://event-ingester:19100 ADMIN_URL=http://admin-api:19000 PAGE_FETCH_TARGET=http://admin-api:19000/health/ready PAGE_FETCH_NORMALIZED_KEY=domain:admin-api tests/page-fetch-flow.sh"
 
+echo "[integration] Running content-first blocking smoke test"
+KEEP_STACK=1 "$ROOT/tests/content-pending-smoke.sh"
+
 echo "[integration] Collecting health endpoints"
 curl -sf http://localhost:19000/health/ready >/dev/null
 curl -sf http://localhost:19010/health/ready >/dev/null

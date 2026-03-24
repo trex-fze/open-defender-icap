@@ -8,7 +8,7 @@ use redis::streams::{StreamReadOptions, StreamReadReply};
 use redis::AsyncCommands;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use tokio::signal;
 use tokio::time::Instant;
@@ -249,17 +249,91 @@ impl PageFetcher {
             .context("crawl service request failed")?;
 
         if !response.status().is_success() {
+            let status = response.status();
             let body = response.text().await.unwrap_or_else(|_| "<empty>".into());
+            if let Ok(fallback) = self.fetch_via_http(job, url).await {
+                info!(
+                    target = "svc-page-fetcher",
+                    key = job.normalized_key,
+                    status = ?status,
+                    "crawl service error ({body}); switching to HTTP fallback"
+                );
+                return Ok(fallback);
+            }
             self.metrics.record_crawl_failure();
             return Err(anyhow!("crawl service error: {}", body));
         }
 
         let parsed: CrawlApiResponse = response.json().await.context("invalid crawl payload")?;
         if parsed.status != "ok" {
+            if let Ok(fallback) = self.fetch_via_http(job, url).await {
+                info!(
+                    target = "svc-page-fetcher",
+                    key = job.normalized_key,
+                    status = %parsed.status,
+                    "crawl status not ok; using HTTP fallback"
+                );
+                return Ok(fallback);
+            }
             self.metrics.record_crawl_failure();
             return Err(anyhow!("crawl service returned status {}", parsed.status));
         }
         Ok(parsed)
+    }
+
+    async fn fetch_via_http(&self, _job: &PageFetchJob, url: &Url) -> Result<CrawlApiResponse> {
+        let response = self
+            .client
+            .get(url.as_ref())
+            .header("User-Agent", "OpenDefenderFallback/1.0")
+            .send()
+            .await
+            .context("fallback request failed")?;
+
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("text/html")
+            .to_string();
+
+        if !status.is_success() {
+            return Err(anyhow!(
+                "fallback request failed with status {}",
+                status
+            ));
+        }
+
+        let mut raw_html = response.text().await.unwrap_or_default();
+        let mut cleaned_text = raw_html.trim().to_string();
+        if cleaned_text.chars().count() > self.cfg.max_excerpt_chars {
+            cleaned_text = cleaned_text
+                .chars()
+                .take(self.cfg.max_excerpt_chars)
+                .collect();
+        }
+
+        let mut raw_bytes = raw_html.into_bytes();
+        if raw_bytes.len() > self.cfg.max_html_bytes {
+            raw_bytes.truncate(self.cfg.max_html_bytes);
+        }
+        raw_html = String::from_utf8(raw_bytes).unwrap_or_default();
+
+        let metadata = json!({
+            "fallback": "reqwest",
+            "status_code": status.as_u16(),
+        });
+
+        Ok(CrawlApiResponse {
+            status: "ok".into(),
+            cleaned_text,
+            raw_html,
+            content_type,
+            language: None,
+            title: None,
+            metadata: Some(metadata),
+        })
     }
 
     async fn store_content(
@@ -300,11 +374,11 @@ impl PageFetcher {
     }
 
     async fn next_version(&self, normalized_key: &str) -> Result<i64> {
-        let current: Option<i64> = sqlx::query_scalar(
+        let current: Option<i64> = sqlx::query_scalar::<_, Option<i64>>(
             "SELECT MAX(fetch_version) FROM page_contents WHERE normalized_key = $1",
         )
         .bind(normalized_key)
-        .fetch_optional(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
         Ok(current.unwrap_or(0) + 1)
     }

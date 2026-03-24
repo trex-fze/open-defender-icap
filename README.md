@@ -85,7 +85,8 @@ flowchart LR
    ```bash
    make compose-up                 # equivalent to docker compose up --build
    ```
-   - Update `config/llm-worker.json` to point at your LM Studio host (default example uses `http://192.168.1.170:1234`). Run LM Studio/Ollama separately on your network; they are **not** part of the compose stack.
+   - Docker compose defaults `llm-worker` to the bundled `mock-openai` service so smoke tests are deterministic and run offline.
+   - To use LM Studio/Ollama/OpenAI instead, edit `config/llm-worker.json` providers/routing and restart `llm-worker`.
 4. **Run health & smoke checks**:
    ```bash
    tests/unit.sh                   # workspace + React unit tests
@@ -141,49 +142,52 @@ flowchart LR
 | --- | --- | --- |
 | Unit & CLI integration | `tests/unit.sh` | Runs `cargo test --workspace`, Vitest, and CLI integration tests. |
 | Compose smoke | `tests/integration.sh` | Builds stack, executes `odctl smoke`, runs Stage 6 ingest smoke, and checks health endpoints. |
+| Content-first blocking smoke | `tests/content-pending-smoke.sh` | Starts the docker stack, issues a Squid→ICAP request for a new host, and verifies Crawl4AI, pending queue, Admin API/CLI, and cache updates end-to-end. |
 | Ingestion smoke (standalone) | `tests/stage06_ingest.sh` | Validates Filebeat → event-ingester → Elasticsearch → reporting API. |
 | Performance | `k6 run tests/perf/k6-traffic.js` | Load test for `/api/v1/reporting/traffic` & `/api/v1/policies`. |
 | Security authZ smoke | `tests/security/authz-smoke.sh` | Confirms 401 for unauthenticated requests and payload validation. |
 | Security prompt-injection | `tests/security/llm-prompt-smoke.sh` | Enqueues malicious payload and verifies llm-worker ignores injection instructions. |
 | Hybrid failover smoke | `tests/perf/llm-failover.sh` | Stops LM Studio container to ensure fallback provider handles jobs. |
 
+### Content-first Blocking Smoke
+
+Run `tests/content-pending-smoke.sh` from the repo root to exercise the entire Crawl4AI → pending queue → LLM gating loop. The script:
+
+1. Starts/stabilizes the docker-compose stack (or reuse by passing `--keep-stack`).
+2. Sends a real ICAP REQMOD via Squid for `http://smoke-origin/`.
+3. Verifies Redis streams, `classification_requests`, Admin API `/pending`, and the React/CLI views show the blocked key.
+4. Waits for Crawl4AI + llm-worker to persist the content-backed classification, ensures caches update, and collects artifacts under `tests/artifacts/content-pending/`.
+
+Use this smoke before releases to prove the security-first posture works end-to-end.
+
 ## LLM Provider Configuration
 
-`config/llm-worker.json` now supports multiple providers with routing/failover:
+`config/llm-worker.json` supports multiple providers with routing/failover. Docker compose defaults to a local mock provider:
 
 ```jsonc
 {
   "providers": [
     {
-      "name": "lmstudio-edge",
-      "type": "lmstudio",
-      "endpoint": "http://192.168.1.170:1234/v1/chat/completions",
-      "model": "gpt-oss-120b",
-      "timeout_ms": 30000
-    },
-    {
-      "name": "openai-fallback",
+      "name": "mock-openai",
       "type": "openai",
-      "endpoint": "https://api.openai.com/v1/chat/completions",
-      "model": "gpt-4o-mini",
-      "api_key_env": "OPENAI_API_KEY"
+      "endpoint": "http://mock-openai:8080/v1/chat/completions",
+      "model": "mock-gpt",
+      "timeout_ms": 10000
     }
   ],
   "routing": {
-    "default": "lmstudio-edge",
-    "fallback": "openai-fallback",
+    "default": "mock-openai",
+    "fallback": "mock-openai",
     "policy": "failover"
   }
 }
 ```
 
-- Supported `type` values: `ollama`, `lmstudio`, `vllm`, `openai`, `openai_compatible`, `anthropic`, `custom_json` (legacy HTTP).
-- Offline providers (LM Studio at `http://192.168.1.170:1234`, Ollama on `http://localhost:11434`, etc.) run on your LAN or standalone docker instances; online providers require `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
+- Supported `type` values: `ollama`, `lm_studio`, `vllm`, `openai`, `openai_compatible`, `anthropic`, `custom_json` (legacy HTTP).
+- For non-mock deployments, point providers at LM Studio/Ollama/vLLM/OpenAI/Anthropic endpoints and set required API key env vars.
 - The worker automatically records provider names in logs/metrics; fallback triggers if the primary fails.
 - Query configured providers anytime: `curl http://localhost:19015/providers | jq`.
 - CLI inspection: `odctl llm providers --url http://localhost:19015/providers`.
-- Run LM Studio separately (local install or remote host like `192.168.1.170:1234`).
-- Run Ollama separately (`ollama serve` or your own docker command) and update provider endpoints.
 
 ## FAQ
 

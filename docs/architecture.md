@@ -133,12 +133,23 @@ flowchart LR
 5. Adaptor caches verdict, returns ICAP response to Squid.
 6. Squid enforces action (allow, block redirect page, warn, etc.).
 
-### 3.2 Content-First Flow
-1. Cache miss on an allow/monitor action causes the adaptor to return `PolicyAction::ContentPending`, serving a branded holding page and writing a `classification_requests` row.
-2. The adaptor enqueues both a base-URL Crawl4AI job and a `requires_content` classification job.
-3. Page fetcher crawls the site, stores `page_contents`, and updates status to `ok` (or `failed`).
-4. LLM worker sees the `requires_content` flag, waits until `page_contents` is ready, then builds a prompt with the captured text, persists the classification, invalidates cache, and deletes the `classification_requests` row.
-5. Subsequent requests hit Redis/Postgres and are immediately allowed or blocked with a content-backed verdict.
+### 3.2 Content-First Classification Flow
+The workflow for an unclassified site emphasizes “content-first” verification before allowing traffic (this is the path highlighted in the diagram above):
+
+1. **ICAP Adaptor** – Squid sends an ICAP REQMOD with an uncached URL. The adaptor normalizes the key, calls the policy engine, and (because the action is `allow`/`monitor`) issues `PolicyAction::ContentPending`. It serves the “Site under classification” HTML page, caches a short-lived placeholder, and emits two Redis jobs:
+   - `PageFetchJob` targeting the *base URL* (`https://host/`).
+   - `ClassificationJob` with `requires_content=true`, `base_url`, and `trace_id` metadata.
+   The adaptor also inserts/updates a row in `classification_requests` to mark the site as pending (via the LLM worker when it first touches the job).
+
+2. **Page Fetcher + Crawl4AI** – The page-fetcher worker consumes the `PageFetchJob`, invokes `services/crawl4ai-service` headless Chromium instance, and writes the cleaned HTML/text + metadata into `page_contents`. Failures/retries update `fetch_status` so operators can see if Crawl4AI is struggling.
+
+3. **LLM Worker Gating** – When the LLM worker reads the `requires_content` job, it logs/updates `classification_requests` (`status = waiting_content`) and polls Postgres until fresh `page_contents` exist for that normalized key. If no content is ready, the worker requeues the job (or sleeps) instead of generating a metadata-only verdict.
+
+4. **Content-Backed Verdict** – Once content is available, the worker builds the prompt with the excerpt/hash/language, calls the configured LLM provider(s), validates the JSON response, and persists the verdict to `classifications` + `classification_versions`. It writes the final decision into Redis (cache + invalidation channel) and deletes the pending row.
+
+5. **Operator Touchpoints** – Admin API exposes these pending rows (`GET /api/v1/classifications/pending`) so analysts can monitor which sites are blocked. If Crawl4AI keeps failing, analysts can issue a manual unblock (`POST /api/v1/classifications/:key/unblock`) via UI/CLI, which stores a manual verdict and invalidates caches.
+
+6. **Subsequent Requests** – After the LLM verdict lands (or an analyst overrides it), ICAP adaptor cache hits serve the real action immediately. The site stays blocked indefinitely until content is verified (security-first posture).
 
 ### 3.3 Override Flow (Future)
 1. Admin defines override via API/UI/CLI (scope: user/IP/domain).

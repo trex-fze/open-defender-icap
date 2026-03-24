@@ -225,6 +225,14 @@ services:
       MOCK_LLM_ACTION: ${MOCK_LLM_ACTION:-Review}
       MOCK_LLM_CONFIDENCE: ${MOCK_LLM_CONFIDENCE:-0.85}
 
+  smoke-origin:
+    image: nginx:1.25-alpine
+    restart: unless-stopped
+    ports:
+      - "18080:80"
+    volumes:
+      - ./smoke-origin:/usr/share/nginx/html:ro
+
   logstash:
     image: docker.elastic.co/logstash/logstash:8.12.1
     restart: unless-stopped
