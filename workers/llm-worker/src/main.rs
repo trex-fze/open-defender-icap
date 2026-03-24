@@ -2,6 +2,7 @@ mod metrics;
 mod schema;
 
 use anyhow::{anyhow, Context, Result};
+use common_types::{ClassificationVerdict, PolicyAction, PolicyDecision};
 use redis::streams::{StreamReadOptions, StreamReadReply};
 use redis::AsyncCommands;
 use reqwest::{Client, RequestBuilder};
@@ -9,10 +10,10 @@ use schema::{LlmResponse, PromptPayload};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use std::{collections::HashMap, env, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, fmt, sync::Arc, time::Duration};
 use tokio::{signal, time::Instant};
 use tokio_stream::StreamExt;
-use tracing::{error, info, Level};
+use tracing::{error, info, warn, Level};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -241,6 +242,9 @@ const SYSTEM_PROMPT: &str = "You are an AI analyst classifying web traffic for a
 const PROMPT_EXCERPT_LIMIT: usize = 1_200;
 const OPENAI_DEFAULT_MODEL: &str = "gpt-4o-mini";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+const CONTENT_WAIT_ATTEMPTS: usize = 40;
+const CONTENT_WAIT_DELAY_SECS: u64 = 3;
+const CACHE_TTL_SECONDS: u64 = 3600;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -299,20 +303,61 @@ struct CacheListener {
     channel: String,
 }
 
+struct DecisionCachePublisher {
+    client: redis::Client,
+    channel: String,
+}
+
+impl DecisionCachePublisher {
+    async fn new(redis_url: &str, channel: &str) -> Result<Self> {
+        let client = redis::Client::open(redis_url.to_string())?;
+        Ok(Self {
+            client,
+            channel: channel.to_string(),
+        })
+    }
+
+    async fn publish(&self, key: &str, decision: &PolicyDecision, ttl_secs: u64) -> Result<()> {
+        let mut conn = self.client.get_async_connection().await?;
+        let payload = serde_json::to_string(decision)?;
+        redis::cmd("SETEX")
+            .arg(key)
+            .arg(ttl_secs)
+            .arg(&payload)
+            .query_async::<_, ()>(&mut conn)
+            .await?;
+        let invalidate = serde_json::json!({
+            "kind": "review",
+            "normalized_key": key,
+        })
+        .to_string();
+        redis::cmd("PUBLISH")
+            .arg(&self.channel)
+            .arg(invalidate)
+            .query_async::<_, ()>(&mut conn)
+            .await?;
+        Ok(())
+    }
+}
+
 struct JobConsumer {
     redis_url: String,
     stream: String,
     pool: PgPool,
     router: ProviderRouter,
+    cache_publisher: DecisionCachePublisher,
 }
 
 impl JobConsumer {
     async fn new(cfg: &WorkerConfig, router: ProviderRouter, pool: PgPool) -> Result<Self> {
+        let cache_publisher =
+            DecisionCachePublisher::new(&cfg.redis_url, &cfg.cache_channel).await?;
         Ok(Self {
             redis_url: cfg.redis_url.clone(),
             stream: cfg.stream.clone(),
             pool,
             router,
+            cache_publisher,
         })
     }
 
@@ -348,27 +393,121 @@ impl JobConsumer {
     async fn process_job(&self, payload: &str) -> Result<(), anyhow::Error> {
         metrics::record_job_started();
         let result = self.handle_job(payload).await;
-        match result {
+        match &result {
             Ok(_) => metrics::record_job_completed(),
-            Err(_) => metrics::record_job_failed(),
+            Err(err) => {
+                if err.downcast_ref::<ContentNotReady>().is_some() {
+                    warn!(
+                        target = "svc-llm-worker",
+                        "page content not ready; requeuing"
+                    );
+                    if let Err(requeue_err) = self.requeue(payload).await {
+                        error!(
+                            target = "svc-llm-worker",
+                            %requeue_err,
+                            "failed to requeue pending job"
+                        );
+                    }
+                } else {
+                    metrics::record_job_failed();
+                }
+            }
         }
         result
     }
 
+    async fn requeue(&self, payload: &str) -> Result<(), redis::RedisError> {
+        let client = redis::Client::open(self.redis_url.clone())?;
+        let mut conn = client.get_async_connection().await?;
+        redis::cmd("XADD")
+            .arg(&self.stream)
+            .arg("*")
+            .arg("payload")
+            .arg(payload)
+            .query_async::<_, ()>(&mut conn)
+            .await
+    }
+
     async fn handle_job(&self, payload: &str) -> Result<(), anyhow::Error> {
         let mut job: ClassificationJobPayload = serde_json::from_str(payload)?;
+        if job.requires_content {
+            self.mark_pending(&job, "waiting_content", None).await?;
+        }
         self.enrich_job_with_content(&mut job).await?;
         let (verdict, provider_name) = self.invoke_with_fallback(&job).await?;
-        store_classification(&self.pool, &job, &verdict)
+        let action = store_classification(&self.pool, &job, &verdict)
             .await
             .context("failed to persist classification")?;
+        self.publish_cache_entry(&job, &verdict, action.clone())
+            .await
+            .context("failed to publish cache entry")?;
+        self.clear_pending(&job.normalized_key).await?;
         info!(
             target = "svc-llm-worker",
             key = job.normalized_key,
-            action = ?verdict.recommended_action,
+            action = ?action,
             provider = provider_name,
             "classification stored"
         );
+        Ok(())
+    }
+
+    async fn publish_cache_entry(
+        &self,
+        job: &ClassificationJobPayload,
+        verdict: &LlmResponse,
+        action: PolicyAction,
+    ) -> Result<()> {
+        let cache_entry = PolicyDecision {
+            action: action.clone(),
+            cache_hit: true,
+            verdict: Some(ClassificationVerdict {
+                primary_category: verdict.primary_category.clone(),
+                subcategory: verdict.subcategory.clone(),
+                risk_level: verdict.risk_level.clone(),
+                confidence: verdict.confidence,
+                recommended_action: action,
+            }),
+        };
+        self.cache_publisher
+            .publish(&job.normalized_key, &cache_entry, CACHE_TTL_SECONDS)
+            .await?;
+        Ok(())
+    }
+
+    async fn mark_pending(
+        &self,
+        job: &ClassificationJobPayload,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let base_url = job.base_url.clone().or_else(|| Some(job.full_url.clone()));
+        sqlx::query(
+            r#"
+            INSERT INTO classification_requests (normalized_key, status, base_url, last_error)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (normalized_key)
+            DO UPDATE SET
+                status = EXCLUDED.status,
+                base_url = COALESCE(EXCLUDED.base_url, classification_requests.base_url),
+                last_error = EXCLUDED.last_error,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&job.normalized_key)
+        .bind(status)
+        .bind(base_url)
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn clear_pending(&self, normalized_key: &str) -> Result<()> {
+        sqlx::query("DELETE FROM classification_requests WHERE normalized_key = $1")
+            .bind(normalized_key)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -391,6 +530,17 @@ impl JobConsumer {
     }
 
     async fn enrich_job_with_content(&self, job: &mut ClassificationJobPayload) -> Result<()> {
+        if job.requires_content {
+            let snippet = self.await_page_content(&job.normalized_key).await?;
+            if let Some(snippet) = snippet {
+                job.content_excerpt = snippet.content_excerpt;
+                job.content_hash = snippet.content_hash;
+                job.content_version = snippet.content_version;
+                job.content_language = snippet.content_language;
+            }
+            return Ok(());
+        }
+
         if has_content(&job.content_excerpt)
             && job.content_hash.is_some()
             && job.content_version.is_some()
@@ -445,6 +595,16 @@ impl JobConsumer {
             Ok(None)
         }
     }
+
+    async fn await_page_content(&self, normalized_key: &str) -> Result<Option<PageContentSnippet>> {
+        for _ in 0..CONTENT_WAIT_ATTEMPTS {
+            if let Some(snippet) = self.load_page_content(normalized_key).await? {
+                return Ok(Some(snippet));
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(CONTENT_WAIT_DELAY_SECS)).await;
+        }
+        Err(ContentNotReady.into())
+    }
 }
 
 impl CacheListener {
@@ -493,6 +653,10 @@ struct ClassificationJobPayload {
     hostname: String,
     full_url: String,
     trace_id: String,
+    #[serde(default)]
+    requires_content: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     content_excerpt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -518,21 +682,24 @@ fn has_content(value: &Option<String>) -> bool {
         .unwrap_or(false)
 }
 
+fn parse_policy_action(value: &str) -> Result<PolicyAction> {
+    match value {
+        "Allow" => Ok(PolicyAction::Allow),
+        "Block" => Ok(PolicyAction::Block),
+        "Warn" => Ok(PolicyAction::Warn),
+        "Monitor" => Ok(PolicyAction::Monitor),
+        "Review" => Ok(PolicyAction::Review),
+        "RequireApproval" => Ok(PolicyAction::RequireApproval),
+        other => Err(anyhow!("invalid action {other}")),
+    }
+}
+
 async fn store_classification(
     pool: &PgPool,
     job: &ClassificationJobPayload,
     verdict: &schema::LlmResponse,
-) -> Result<()> {
-    use common_types::PolicyAction;
-    let action = match verdict.recommended_action.as_str() {
-        "Allow" => PolicyAction::Allow,
-        "Block" => PolicyAction::Block,
-        "Warn" => PolicyAction::Warn,
-        "Monitor" => PolicyAction::Monitor,
-        "Review" => PolicyAction::Review,
-        "RequireApproval" => PolicyAction::RequireApproval,
-        other => return Err(anyhow::anyhow!("invalid action {other}")),
-    };
+) -> Result<PolicyAction> {
+    let action = parse_policy_action(&verdict.recommended_action)?;
     let new_id = Uuid::new_v4();
     let ttl_seconds = 3600;
     let sfw = matches!(action, PolicyAction::Allow);
@@ -594,9 +761,9 @@ async fn store_classification(
         "action": action,
     }))
     .execute(pool)
-    .await?;
+        .await?;
 
-    Ok(())
+    Ok(action)
 }
 
 async fn invoke_llm(
@@ -877,6 +1044,17 @@ fn job_excerpt(job: &ClassificationJobPayload) -> Option<&str> {
         .filter(|s| !s.is_empty())
 }
 
+#[derive(Debug)]
+struct ContentNotReady;
+
+impl fmt::Display for ContentNotReady {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "page content not ready")
+    }
+}
+
+impl std::error::Error for ContentNotReady {}
+
 fn parse_llm_json_text(text: &str) -> Result<LlmResponse> {
     let mut cleaned = text.trim();
     if let Some(stripped) = cleaned.strip_prefix("```json") {
@@ -1000,6 +1178,8 @@ mod tests {
             hostname: "example.com".into(),
             full_url: "https://example.com/".into(),
             trace_id: "trace-test".into(),
+            requires_content: false,
+            base_url: None,
             content_excerpt: Some("This is a captured page excerpt.".into()),
             content_hash: Some("abc123".into()),
             content_version: Some(2),
@@ -1019,6 +1199,8 @@ mod tests {
             hostname: "empty.example".into(),
             full_url: "https://empty.example".into(),
             trace_id: "trace-empty".into(),
+            requires_content: false,
+            base_url: None,
             content_excerpt: None,
             content_hash: None,
             content_version: None,
@@ -1069,6 +1251,8 @@ mod tests {
             hostname: "integration.test".into(),
             full_url: "https://integration.test/".into(),
             trace_id: "trace-123".into(),
+            requires_content: false,
+            base_url: None,
             content_excerpt: None,
             content_hash: None,
             content_version: None,
@@ -1147,6 +1331,8 @@ mod tests {
             hostname: "invalid-llm.test".into(),
             full_url: "https://invalid-llm.test/".into(),
             trace_id: "trace-invalid".into(),
+            requires_content: false,
+            base_url: None,
             content_excerpt: None,
             content_hash: None,
             content_version: None,
@@ -1236,6 +1422,7 @@ mod tests {
             include_str!("../../../services/admin-api/migrations/0003_classifications.sql"),
             include_str!("../../../services/admin-api/migrations/0004_spec20_artifacts.sql"),
             include_str!("../../../services/admin-api/migrations/0005_page_contents.sql"),
+            include_str!("../../../services/admin-api/migrations/0006_classification_requests.sql"),
         ];
 
         for ddl in migrations {

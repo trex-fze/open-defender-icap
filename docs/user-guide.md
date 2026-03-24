@@ -61,12 +61,15 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl override update <id> <file>` | PUT override definition | JSON matches Admin API payload; invalidates caches instantly. |
 | `odctl review list` | List pending review queue items | Displays status, normalized key, submitter/assignee. |
 | `odctl review resolve <id> <file>` | Resolve review item via JSON payload | Wraps `/api/v1/review-queue/{id}/resolve`; triggers cache invalidation. |
+| `odctl page show --key <normalized>` | Inspect Crawl4AI excerpts and metadata | Useful when debugging LLM prompts; add `--json` for raw output. |
+| `odctl classification pending` | List sites blocked pending Crawl4AI + LLM verdict | Mirrors `/api/v1/classifications/pending`; shows latest status, base URL, timestamps. |
+| `odctl classification unblock --key <normalized> --action Allow ...` | Manually set a verdict to unblock/deny traffic | Sends `POST /api/v1/classifications/:key/unblock`; requires `policy-editor` role and records reason in audit log. |
 
 Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 OD_ADMIN_TOKEN=secret odctl policy reload`, `OD_ADMIN_TOKEN=secret odctl policy simulate request.json`.
 
 ## 7. React Admin UI (Future)
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
-- Planned routes: Dashboard, IP/User/Device investigations, Policy mgmt, Overrides, Review queue, Reports, Audit, Health, Cache, Reclassification.
+- Routes: Dashboard, Investigations, Policies, Review queue, **Pending Sites** (lists `ContentPending` keys with a one-click manual-unblock action), Overrides, Taxonomy, Reports, Settings.
 - Authentication: OIDC login; RBAC controlling navigation.
 - Build: `npm run build`; deploy static assets behind reverse proxy.
 

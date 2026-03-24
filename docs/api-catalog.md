@@ -77,6 +77,8 @@ All routes require `X-Admin-Token` or a JWT with the listed roles. Pagination pa
 | `GET` | `/api/v1/cli-logs` | Retrieve CLI audit log entries. | Query: `operator_id`, `limit` (default 50). |
 | `GET` | `/api/v1/page-contents/:normalized_key` | Fetch latest crawled page excerpt. | Query: `version`, `max_excerpt`. Response includes metadata (hash, ttl, language). |
 | `GET` | `/api/v1/page-contents/:normalized_key/history` | List prior crawl versions. | Query: `limit` (default 5). |
+| `GET` | `/api/v1/classifications/pending` | List sites blocked pending content-aware classification. | `policy-viewer` role; query: `status`, `limit`. | Array of pending records (key, base_url, updated timestamps). |
+| `POST` | `/api/v1/classifications/:normalized_key/unblock` | Manually approve or reclassify a blocked site. | `policy-editor` role; body `{ action, primary_category, subcategory, risk_level, confidence?, reason? }`. | Returns the persisted classification row; also invalidates caches. |
 | `GET` | `/health/ready`, `/health/live` | Health probes. | — |
 | `GET` | `/metrics` | Prometheus metrics (review SLA, cache invalidations). | Requires DB access to sync gauges. |
 

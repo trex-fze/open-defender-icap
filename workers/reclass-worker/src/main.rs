@@ -55,6 +55,15 @@ fn default_db_pool_size() -> u32 {
     5
 }
 
+fn derive_base_url(full_url: &str, hostname: &str) -> String {
+    if let Ok(parsed) = Url::parse(full_url) {
+        if let Some(host) = parsed.host_str() {
+            return format!("{}://{host}/", parsed.scheme());
+        }
+    }
+    format!("https://{hostname}/")
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::FmtSubscriber::builder()
@@ -173,6 +182,9 @@ struct ClassificationJobMessage {
     hostname: String,
     full_url: String,
     trace_id: String,
+    requires_content: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     content_excerpt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -409,12 +421,15 @@ impl Dispatcher {
             match build_target(&normalized_key) {
                 Ok(target) => {
                     let page_content = self.load_page_content(&normalized_key).await?;
+                    let base_url = derive_base_url(&target.full_url, &target.hostname);
                     let message = ClassificationJobMessage {
                         normalized_key: normalized_key.clone(),
                         entity_level: target.entity_level.clone(),
                         hostname: target.hostname.clone(),
                         full_url: target.full_url.clone(),
                         trace_id: trace_id.clone(),
+                        requires_content: true,
+                        base_url: Some(base_url.clone()),
                         content_excerpt: page_content
                             .as_ref()
                             .and_then(|content| content.content_excerpt.clone()),
@@ -439,7 +454,7 @@ impl Dispatcher {
                             if let Some(fetcher) = &self.page_fetch_publisher {
                                 let fetch_job = PageFetchJob {
                                     normalized_key: normalized_key.clone(),
-                                    url: target.full_url.clone(),
+                                    url: base_url.clone(),
                                     hostname: target.hostname.clone(),
                                     trace_id: Some(trace_id.clone()),
                                     ttl_seconds: None,
@@ -755,6 +770,7 @@ mod tests {
             include_str!("../../../services/admin-api/migrations/0003_classifications.sql"),
             include_str!("../../../services/admin-api/migrations/0004_spec20_artifacts.sql"),
             include_str!("../../../services/admin-api/migrations/0005_page_contents.sql"),
+            include_str!("../../../services/admin-api/migrations/0006_classification_requests.sql"),
         ];
 
         for ddl in migrations {

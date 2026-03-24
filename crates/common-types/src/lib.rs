@@ -19,6 +19,7 @@ pub enum PolicyAction {
     Monitor,
     Review,
     RequireApproval,
+    ContentPending,
 }
 
 impl fmt::Display for PolicyAction {
@@ -30,6 +31,7 @@ impl fmt::Display for PolicyAction {
             PolicyAction::Monitor => "Monitor",
             PolicyAction::Review => "Review",
             PolicyAction::RequireApproval => "RequireApproval",
+            PolicyAction::ContentPending => "ContentPending",
         };
         write!(f, "{}", s)
     }

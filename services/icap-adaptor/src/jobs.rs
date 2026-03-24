@@ -16,6 +16,10 @@ pub struct ClassificationJob<'a> {
     pub hostname: &'a str,
     pub full_url: &'a str,
     pub trace_id: &'a str,
+    #[serde(default)]
+    pub requires_content: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_excerpt: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -49,7 +53,7 @@ impl JobPublisher {
             .arg(payload)
             .query_async(&mut conn)
             .await?;
-        info!(target = "svc-icap", stream = %self.stream, key = job.normalized_key, "published classification job");
+        info!(target = "svc-icap", stream = %self.stream, key = job.normalized_key, requires_content = job.requires_content, "published classification job");
         Ok(())
     }
 }

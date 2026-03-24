@@ -24,6 +24,7 @@ flowchart LR
         PF["Page Fetcher"]
         CRAWL[Crawl4AI Service]
         PAGE[(Postgres<br/>page_contents)]
+        PEND[(Postgres<br/>classification_requests)]
     end
 
     subgraph Ops & Observability
@@ -45,11 +46,13 @@ flowchart LR
     ICAP -->|Enqueue job| STREAM
     STREAM --> LLW
     STREAM --> RCW
+    LLW -->|Pending record| PEND
     LLW -->|Verdicts| CLASS
     LLW -->|Cache update| Cache
     RCW -->|Refresh jobs| STREAM
     RCW -->|Overrides/TTL| CLASS
     CLASS --> AA
+    PEND --> AA
     FB -->|Logs| EI --> ES --> KB
     EI -->|Page fetch job| PF
     PF -->|HTTP crawl| CRAWL --> PF
@@ -68,6 +71,7 @@ flowchart LR
 - **Automated reclassification** – `reclass-worker` uses AI outputs and telemetry to queue overrides or second-pass scans.
 - **AI-assisted reporting** – the Elasticsearch/Kibana layer surfaces trending threats with context derived from LLM annotations and metadata enrichment.
 - **Hybrid AI routing** – configure offline engines (Ollama/LM Studio/vLLM) or online SaaS (OpenAI/Claude) with automatic failover per policy.
+- **Content-first blocking** – new `ContentPending` action serves a holding page until Crawl4AI captures the base URL and the LLM worker produces a content-verified verdict. Operators can monitor or unblock via the pending-sites UI/CLI.
 
 ## Quick Start (Docker Compose)
 

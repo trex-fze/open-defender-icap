@@ -14,6 +14,10 @@ pub struct IcapConfig {
     pub metrics_port: u16,
     #[serde(default = "default_cache_channel")]
     pub cache_channel: String,
+    #[serde(default = "default_require_content")]
+    pub require_content: bool,
+    #[serde(default = "default_pending_cache_ttl")]
+    pub pending_cache_ttl_seconds: u64,
     #[serde(default)]
     pub job_queue: Option<JobQueueConfig>,
     #[serde(default)]
@@ -39,6 +43,14 @@ const fn default_metrics_port() -> u16 {
 
 fn default_cache_channel() -> String {
     "od:cache:invalidate".to_string()
+}
+
+const fn default_require_content() -> bool {
+    true
+}
+
+const fn default_pending_cache_ttl() -> u64 {
+    60
 }
 
 #[derive(Debug, Deserialize, Clone)]

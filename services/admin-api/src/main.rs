@@ -2,6 +2,7 @@ mod audit;
 mod auth;
 mod cache;
 mod cache_entries_api;
+mod classification_requests;
 mod cli_logs;
 mod metrics;
 mod page_contents;
@@ -389,6 +390,14 @@ async fn main() -> Result<()> {
             get(cache_entries_api::get_entry).delete(cache_entries_api::delete_entry),
         )
         .route("/api/v1/cli-logs", get(cli_logs::list_cli_logs))
+        .route(
+            "/api/v1/classifications/pending",
+            get(classification_requests::list_pending),
+        )
+        .route(
+            "/api/v1/classifications/:normalized_key/unblock",
+            post(classification_requests::manual_unblock),
+        )
         .route(
             "/api/v1/page-contents/:normalized_key",
             get(page_contents::get_page_content),

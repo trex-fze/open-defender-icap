@@ -201,6 +201,7 @@ fn db_row_to_rule(
         "Monitor" => PolicyAction::Monitor,
         "Review" => PolicyAction::Review,
         "RequireApproval" => PolicyAction::RequireApproval,
+        "ContentPending" => PolicyAction::ContentPending,
         other => return Err(anyhow!("unknown action {other}")),
     };
 

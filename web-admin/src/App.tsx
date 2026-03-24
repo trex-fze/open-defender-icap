@@ -12,6 +12,7 @@ import { TaxonomyPage } from './pages/TaxonomyPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { SettingsRbacPage } from './pages/SettingsRbacPage';
 import { LoginPage } from './pages/LoginPage';
+import { PendingClassificationsPage } from './pages/PendingClassificationsPage';
 
 const guard = {
   viewer: ['policy-viewer'] as Role[],
@@ -36,6 +37,7 @@ const App = () => {
             <Route path="/policies/:policyId" element={<ProtectedRoute roles={guard.viewEdit}><PolicyDetailPage /></ProtectedRoute>} />
             <Route path="/review-queue" element={<ProtectedRoute roles={guard.review}><ReviewQueuePage /></ProtectedRoute>} />
             <Route path="/overrides" element={<ProtectedRoute roles={guard.editOnly}><OverridesPage /></ProtectedRoute>} />
+            <Route path="/classifications/pending" element={<ProtectedRoute roles={guard.viewEdit}><PendingClassificationsPage /></ProtectedRoute>} />
             <Route path="/taxonomy" element={<ProtectedRoute roles={guard.editOnly}><TaxonomyPage /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute roles={guard.reports}><ReportsPage /></ProtectedRoute>} />
             <Route path="/settings/rbac" element={<ProtectedRoute roles={guard.admin}><SettingsRbacPage /></ProtectedRoute>} />

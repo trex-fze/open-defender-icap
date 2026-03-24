@@ -66,6 +66,8 @@ enum Commands {
     #[clap(subcommand)]
     Page(PageCmd),
     #[clap(subcommand)]
+    Classification(ClassificationCmd),
+    #[clap(subcommand)]
     Report(ReportCmd),
     #[clap(subcommand)]
     Logs(LogsCmd),
@@ -209,6 +211,31 @@ enum PageCmd {
         key: String,
         #[clap(long, default_value_t = 5)]
         limit: u32,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ClassificationCmd {
+    Pending {
+        #[clap(long, default_value_t = 50)]
+        limit: u32,
+        #[clap(long)]
+        status: Option<String>,
+    },
+    Unblock {
+        key: String,
+        #[clap(long)]
+        action: String,
+        #[clap(long, help = "Primary category label")]
+        category: String,
+        #[clap(long, help = "Subcategory label")]
+        subcategory: String,
+        #[clap(long, help = "Risk level (low/medium/high/critical)")]
+        risk: String,
+        #[clap(long, default_value_t = 0.9)]
+        confidence: f32,
+        #[clap(long)]
+        reason: Option<String>,
     },
 }
 
@@ -468,6 +495,7 @@ async fn main() -> Result<()> {
         Commands::Cache(cmd) => handle_cache(cmd, &client, cli.json).await?,
         Commands::Migrate(_) => unreachable!(),
         Commands::Page(cmd) => handle_page(cmd, &client, cli.json).await?,
+        Commands::Classification(cmd) => handle_classification(cmd, &client, cli.json).await?,
         Commands::Report(cmd) => handle_report(cmd, &client, cli.json).await?,
         Commands::Logs(cmd) => handle_logs(cmd, &client, cli.json).await?,
         Commands::Llm(cmd) => handle_llm(cmd, cli.json).await?,
@@ -989,6 +1017,83 @@ async fn handle_page(cmd: &PageCmd, client: &ApiClient, json: bool) -> Result<()
                     })
                     .collect();
                 print_table(&["Version", "Status", "Reason", "Fetched", "Expires"], rows);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_classification(
+    cmd: &ClassificationCmd,
+    client: &ApiClient,
+    json: bool,
+) -> Result<()> {
+    match cmd {
+        ClassificationCmd::Pending { limit, status } => {
+            let mut params = vec![("limit".to_string(), limit.to_string())];
+            if let Some(s) = status {
+                params.push(("status".to_string(), s.clone()));
+            }
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let records: Vec<PendingClassificationRecord> =
+                client.get("/api/v1/classifications/pending", &refs).await?;
+            if json {
+                print_json(&records)?;
+            } else if records.is_empty() {
+                println!("No pending classifications");
+            } else {
+                let rows: Vec<Vec<String>> = records
+                    .iter()
+                    .map(|row| {
+                        vec![
+                            row.normalized_key.clone(),
+                            row.status.clone(),
+                            row.base_url.clone().unwrap_or_else(|| "-".into()),
+                            row.updated_at.clone(),
+                        ]
+                    })
+                    .collect();
+                print_table(&["Key", "Status", "Base URL", "Updated"], rows);
+            }
+        }
+        ClassificationCmd::Unblock {
+            key,
+            action,
+            category,
+            subcategory,
+            risk,
+            confidence,
+            reason,
+        } => {
+            let body = serde_json::json!({
+                "action": action,
+                "primary_category": category,
+                "subcategory": subcategory,
+                "risk_level": risk,
+                "confidence": confidence,
+                "reason": reason,
+            });
+            let record: ManualClassificationResponse = client
+                .post(
+                    &format!("/api/v1/classifications/{}/unblock", encode(key)),
+                    &body,
+                )
+                .await?;
+            if json {
+                print_json(&record)?;
+            } else {
+                println!("Updated classification for {}", record.normalized_key);
+                println!("Action     : {}", record.recommended_action);
+                println!(
+                    "Category   : {} / {}",
+                    record.primary_category, record.subcategory
+                );
+                println!("Risk       : {}", record.risk_level);
+                println!("Confidence : {:.2}", record.confidence);
+                println!("Updated At : {}", record.updated_at);
             }
         }
     }
@@ -1553,6 +1658,27 @@ struct PageContentSummary {
     char_count: Option<i32>,
     byte_count: Option<i32>,
     content_hash: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PendingClassificationRecord {
+    normalized_key: String,
+    status: String,
+    base_url: Option<String>,
+    last_error: Option<String>,
+    requested_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ManualClassificationResponse {
+    normalized_key: String,
+    primary_category: String,
+    subcategory: String,
+    risk_level: String,
+    recommended_action: PolicyAction,
+    confidence: f32,
+    updated_at: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

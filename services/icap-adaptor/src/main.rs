@@ -6,6 +6,7 @@ mod metrics;
 mod policy_client;
 
 use anyhow::Result;
+use once_cell::sync::Lazy;
 use std::{sync::Arc, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -17,6 +18,7 @@ use common_types::{
 };
 use jobs::{ClassificationJob, JobPublisher, PageFetchPublisher};
 use policy_client::PolicyClient;
+use url::Url;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -107,38 +109,89 @@ async fn handle_connection(
         tracing::Span::current().record("trace_id", &tracing::field::display(trace_id));
     }
 
-    let decision = if let Some(decision) = cache.get(&normalized.normalized_key).await? {
+    if let Some(decision) = cache.get(&normalized.normalized_key).await? {
         metrics::record_cache_hit();
-        info!(target = "svc-icap", normalized_key = %normalized.normalized_key, action = ?decision.action, "cache decision");
-        decision
-    } else {
-        metrics::record_cache_miss();
-        let request = PolicyDecisionRequest {
-            normalized_key: normalized.normalized_key.clone(),
-            entity_level: normalized.entity_level.clone(),
-            source_ip: icap_req.http_host.clone(),
-            user_id: None,
-        };
-        let start = tokio::time::Instant::now();
-        let decision = policy_client.evaluate(&request).await.map_err(|err| {
-            metrics::record_error();
-            err
-        })?;
-        let latency = start.elapsed().as_secs_f64();
-        metrics::observe_policy_latency(latency);
-        info!(target = "svc-icap", normalized_key = %normalized.normalized_key, action = ?decision.action, "policy decision placeholder");
+        info!(
+            target = "svc-icap",
+            normalized_key = %normalized.normalized_key,
+            action = ?decision.action,
+            "cache decision"
+        );
+        let response = icap_response(&decision.action);
+        socket.write_all(response.as_bytes()).await?;
+        socket.shutdown().await?;
+        metrics::observe_squid_roundtrip(roundtrip_start.elapsed().as_secs_f64());
+        return Ok(());
+    }
+
+    metrics::record_cache_miss();
+    let request = PolicyDecisionRequest {
+        normalized_key: normalized.normalized_key.clone(),
+        entity_level: normalized.entity_level.clone(),
+        source_ip: icap_req.http_host.clone(),
+        user_id: None,
+    };
+    let start = tokio::time::Instant::now();
+    let decision = policy_client.evaluate(&request).await.map_err(|err| {
+        metrics::record_error();
+        err
+    })?;
+    let latency = start.elapsed().as_secs_f64();
+    metrics::observe_policy_latency(latency);
+    info!(
+        target = "svc-icap",
+        normalized_key = %normalized.normalized_key,
+        action = ?decision.action,
+        "policy decision"
+    );
+
+    let classification_required = cfg.require_content
+        && matches!(decision.action, PolicyAction::Allow | PolicyAction::Monitor);
+    let base_url = derive_base_url(&normalized.full_url)
+        .or_else(|| Some(fallback_base_url(&normalized.hostname)));
+
+    let mut response_decision = decision.clone();
+    if classification_required {
+        response_decision.action = PolicyAction::ContentPending;
+        response_decision.verdict = None;
         cache
             .set(
                 normalized.normalized_key.clone(),
-                decision.clone(),
+                response_decision.clone(),
+                Duration::from_secs(cfg.pending_cache_ttl_seconds.max(30)),
+            )
+            .await?;
+    } else {
+        cache
+            .set(
+                normalized.normalized_key.clone(),
+                response_decision.clone(),
                 Duration::from_secs(300),
             )
             .await?;
-        decision
-    };
+    }
+
+    if classification_required {
+        if let Some(publisher) = &page_fetch_publisher {
+            let job = PageFetchJob {
+                normalized_key: normalized.normalized_key.clone(),
+                url: base_url
+                    .clone()
+                    .unwrap_or_else(|| normalized.full_url.clone()),
+                hostname: normalized.hostname.clone(),
+                trace_id: icap_req.trace_id.clone(),
+                ttl_seconds: None,
+            };
+            if let Err(err) = publisher.publish(job).await {
+                error!(target = "svc-icap", %err, "failed to publish page fetch job");
+            }
+        }
+    }
 
     if let Some(publisher) = &job_publisher {
-        if should_enqueue(&decision.action, decision.verdict.is_none()) {
+        let enqueue = classification_required
+            || action_requires_follow_up(&decision.action, decision.verdict.is_none());
+        if enqueue {
             if let Err(err) = publisher
                 .publish(&ClassificationJob {
                     normalized_key: &normalized.normalized_key,
@@ -146,6 +199,8 @@ async fn handle_connection(
                     hostname: &normalized.hostname,
                     full_url: &normalized.full_url,
                     trace_id: icap_req.trace_id.as_deref().unwrap_or(""),
+                    requires_content: classification_required,
+                    base_url: base_url.as_deref(),
                     content_excerpt: None,
                     content_hash: None,
                     content_version: None,
@@ -158,38 +213,19 @@ async fn handle_connection(
         }
     }
 
-    if let Some(publisher) = &page_fetch_publisher {
-        if should_fetch_page(&normalized.full_url) {
-            let job = PageFetchJob {
-                normalized_key: normalized.normalized_key.clone(),
-                url: normalized.full_url.clone(),
-                hostname: normalized.hostname.clone(),
-                trace_id: icap_req.trace_id.clone(),
-                ttl_seconds: None,
-            };
-            if let Err(err) = publisher.publish(job).await {
-                error!(target = "svc-icap", %err, "failed to publish page fetch job");
-            }
-        }
-    }
-
-    let response = icap_response(&decision.action);
+    let response = icap_response(&response_decision.action);
     socket.write_all(response.as_bytes()).await?;
     socket.shutdown().await?;
     metrics::observe_squid_roundtrip(roundtrip_start.elapsed().as_secs_f64());
     Ok(())
 }
 
-fn should_enqueue(action: &PolicyAction, missing_verdict: bool) -> bool {
+fn action_requires_follow_up(action: &PolicyAction, missing_verdict: bool) -> bool {
     missing_verdict
         || matches!(
             action,
             PolicyAction::Review | PolicyAction::RequireApproval | PolicyAction::Warn
         )
-}
-
-fn should_fetch_page(url: &str) -> bool {
-    url.starts_with("http://") || url.starts_with("https://")
 }
 
 fn entity_level_str(level: &EntityLevel) -> &'static str {
@@ -205,6 +241,7 @@ fn icap_response(action: &PolicyAction) -> String {
     use PolicyAction::*;
     match action {
         Allow | Monitor => "ICAP/1.0 204 No Content\r\n\r\n".to_string(),
+        ContentPending => build_block_response(PENDING_HTML.as_bytes()),
         _ => {
             let body = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 18\r\n\r\nRequest blocked.";
             format!(
@@ -214,3 +251,33 @@ fn icap_response(action: &PolicyAction) -> String {
         }
     }
 }
+
+fn derive_base_url(full_url: &str) -> Option<String> {
+    let parsed = Url::parse(full_url).ok()?;
+    let host = parsed.host_str()?;
+    let scheme = parsed.scheme();
+    Some(format!("{scheme}://{host}/"))
+}
+
+fn fallback_base_url(hostname: &str) -> String {
+    format!("https://{hostname}/")
+}
+
+fn build_block_response(body: &[u8]) -> String {
+    let header = format!(
+        "HTTP/1.1 403 Forbidden\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    );
+    format!(
+        "ICAP/1.0 200 OK\r\nEncapsulated: res-body=0\r\n\r\n{}{}",
+        header,
+        String::from_utf8_lossy(body)
+    )
+}
+
+static PENDING_HTML: Lazy<String> = Lazy::new(|| {
+    let template = r#"<html><head><meta charset="utf-8" /><title>Site Under Classification</title>
+<style>body{font-family:sans-serif;background:#0b1221;color:#f4f7ff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;} .card{background:#141d33;border:1px solid #1f2a48;border-radius:12px;padding:32px;max-width:460px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.4);} h1{font-size:1.5rem;margin-bottom:12px;} p{line-height:1.5;color:#c6d4f5;} .hint{margin-top:20px;font-size:0.9rem;color:#8ea0ce;}</style>
+</head><body><div class="card"><h1>Site Under Classification</h1><p>Security is verifying this destination with full page content. Access will be restored automatically once the scan completes.</p><p class="hint">Please retry in a moment or contact Security if this persists.</p></div></body></html>"#;
+    template.to_string()
+});

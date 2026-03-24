@@ -42,6 +42,7 @@ flowchart LR
         PF[Page Fetcher]
         CRAWL[Crawl4AI]
         PAGE[(Postgres<br/>page_contents)]
+        PEND[(Postgres<br/>classification_requests)]
     end
     subgraph Management Plane
         I[Admin API]
@@ -60,6 +61,7 @@ flowchart LR
     C -->|Cache lookup| E
     D -->|Persist verdict| F
     C -->|Enqueue job| STREAM --> G & H
+    G -->|Pending record| PEND
     G -->|Verdict update| F
     G -->|Cache update| E
     H -->|TTL refresh| STREAM
@@ -70,6 +72,7 @@ flowchart LR
     EI -->|Page fetch job| PF -->|HTTP crawl| CRAWL --> PF
     PF -->|Store excerpt| PAGE --> I
     F --> I
+    PEND --> I
     I --> J
     I --> K
     I --> D
@@ -106,16 +109,15 @@ flowchart LR
 - Future: keyspace notifications to invalidate adaptor caches on updates.
 
 ### 2.4 Classification & Reclassification Workers
-- **LLM Worker**: Consumes Redis Streams, builds prompts, calls LLM, validates JSON, persists classification, updates caches, emits audit events.
-- **Reclass Worker**: Scheduled jobs for TTL expiry, taxonomy/model version upgrades, manual reclass triggers.
+- **LLM Worker**: Consumes Redis Streams, builds prompts, calls LLM, validates JSON, persists classification, updates caches, emits audit events. When `requires_content` is set, the worker waits until `page_contents` has a fresh excerpt and records interim state in `classification_requests` so operators can see what is blocked.
+- **Reclass Worker**: Scheduled jobs for TTL expiry, taxonomy/model version upgrades, manual reclass triggers. Every refresh job now republishes both the classification and base-URL crawl job so repeated validations are still content-aware.
 
 ### 2.5 Management Plane
-- **Admin API**: Aggregates policy, overrides, review queue, reporting endpoints with OIDC auth.
-- **React UI**: Dashboards, investigations, policy mgmt, review queue, health, cache inspection.
-- **CLI (`odctl`)**: Commands for env validation, policy/override import/export, cache inspection/invalidation, reclass triggers, smoke tests, migrations, taxonomy seeding.
+- **Admin API**: Aggregates policy, overrides, review queue, reporting endpoints with OIDC auth. New endpoints expose pending classifications (`GET /api/v1/classifications/pending`) and allow manual unblock/reclassify actions that immediately update caches.
+- **React UI**: Dashboards, investigations, policy mgmt, review queue, health, cache inspection, and a “Pending Sites” view that surfaces everything stuck in `ContentPending` so analysts can approve or escalate.
+- **CLI (`odctl`)**: Commands for env validation, policy/override import/export, cache inspection/invalidation, reclass triggers, smoke tests, migrations, taxonomy seeding, **plus** `odctl classification pending|unblock` for security teams who prefer terminal workflows.
 
-### 2.6 Data Stores
-- **Postgres**: Authoritative store for policies, classifications, overrides, review queue, audits, taxonomy.
+- **Postgres**: Authoritative store for policies, classifications, overrides, review queue, audits, taxonomy, `page_contents` (Stage 9 Crawl4AI excerpts), and the new `classification_requests` table that tracks blocked keys awaiting content-aware verdicts.
 - **Redis**: Distributed cache + queue coordination (Streams) + ephemeral job metadata.
 - **Elasticsearch**: Structured event/audit storage; Kibana dashboards.
 
@@ -131,10 +133,12 @@ flowchart LR
 5. Adaptor caches verdict, returns ICAP response to Squid.
 6. Squid enforces action (allow, block redirect page, warn, etc.).
 
-### 3.2 First-Seen Flow (Future)
-1. Cache miss with unknown classification triggers placeholder decision (monitor/warn) + queue job.
-2. LLM worker classifies asynchronously, writes to DB + Redis, publishes event.
-3. Subsequent requests hit cache with final verdict.
+### 3.2 Content-First Flow
+1. Cache miss on an allow/monitor action causes the adaptor to return `PolicyAction::ContentPending`, serving a branded holding page and writing a `classification_requests` row.
+2. The adaptor enqueues both a base-URL Crawl4AI job and a `requires_content` classification job.
+3. Page fetcher crawls the site, stores `page_contents`, and updates status to `ok` (or `failed`).
+4. LLM worker sees the `requires_content` flag, waits until `page_contents` is ready, then builds a prompt with the captured text, persists the classification, invalidates cache, and deletes the `classification_requests` row.
+5. Subsequent requests hit Redis/Postgres and are immediately allowed or blocked with a content-backed verdict.
 
 ### 3.3 Override Flow (Future)
 1. Admin defines override via API/UI/CLI (scope: user/IP/domain).
@@ -145,6 +149,7 @@ flowchart LR
 - `classifications` (normalized_key, taxonomy_version, verdict fields, TTL).
 - `policies` / `policy_rules` (compiled DSL, priorities, outcomes).
 - `overrides`, `review_queue`, `audit_events`, `reporting_aggregates` (per Spec §20).
+- `page_contents` + `classification_requests` (Stage 9 content-aware pipeline storing Crawl4AI excerpts and pending keys).
 
 ## 5. Deployment Architecture
 - **Local Dev**: `deploy/docker/docker-compose.yml` orchestrates Squid, adaptor, policy engine, Redis, Postgres, Elasticsearch, Kibana, Prometheus, workers, UI, and an odctl runner; `docker-compose.test.yml` / `docker-compose.smoke.yml` provide trimmed stacks for CI and quick validation.

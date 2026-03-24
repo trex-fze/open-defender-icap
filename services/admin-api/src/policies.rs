@@ -435,6 +435,7 @@ fn parse_action(value: &str) -> Result<PolicyAction, (StatusCode, Json<ApiError>
         "RequireApproval" | "requireapproval" | "require-approval" => {
             Ok(PolicyAction::RequireApproval)
         }
+        "ContentPending" | "contentpending" | "content-pending" => Ok(PolicyAction::ContentPending),
         _ => Err(crate::validation_error("unsupported action value")),
     }
 }
