@@ -20,8 +20,9 @@ use auth::{
 };
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{header, HeaderValue, Method, Request, StatusCode},
     middleware,
+    response::Response,
     routing::{delete, get, post, put},
     Extension, Json, Router,
 };
@@ -337,6 +338,16 @@ async fn main() -> Result<()> {
         })
     };
 
+    let cors_allow_origin = env::var("OD_ADMIN_CORS_ALLOW_ORIGIN")
+        .unwrap_or_else(|_| "http://localhost:19001".to_string());
+    let cors_layer = {
+        let allow_origin = cors_allow_origin.clone();
+        middleware::from_fn(move |req, next| {
+            let allow_origin = allow_origin.clone();
+            async move { cors_middleware(req, next, &allow_origin).await }
+        })
+    };
+
     let admin_routes = Router::new()
         .route(
             "/api/v1/overrides",
@@ -414,13 +425,65 @@ async fn main() -> Result<()> {
         .route("/health/live", get(health))
         .route("/metrics", get(metrics_endpoint))
         .with_state(state)
-        .merge(admin_routes);
+        .merge(admin_routes)
+        .layer(cors_layer);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     let listener = TcpListener::bind(&addr).await?;
     info!(target = "svc-admin", %addr, "admin api listening");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+async fn cors_middleware(
+    req: Request<axum::body::Body>,
+    next: middleware::Next,
+    allow_origin: &str,
+) -> Response {
+    let origin = req.headers().get(header::ORIGIN).cloned();
+
+    if req.method() == Method::OPTIONS {
+        let mut response = Response::new(axum::body::Body::empty());
+        *response.status_mut() = StatusCode::NO_CONTENT;
+        apply_cors_headers(response, origin.as_ref(), allow_origin)
+    } else {
+        let response = next.run(req).await;
+        apply_cors_headers(response, origin.as_ref(), allow_origin)
+    }
+}
+
+fn apply_cors_headers(
+    mut response: Response,
+    request_origin: Option<&HeaderValue>,
+    allow_origin: &str,
+) -> Response {
+    let allow_origin_header = if allow_origin == "*" {
+        Some(HeaderValue::from_static("*"))
+    } else {
+        request_origin.and_then(|origin| {
+            if origin == allow_origin {
+                Some(origin.clone())
+            } else {
+                None
+            }
+        })
+    };
+
+    if let Some(value) = allow_origin_header {
+        response
+            .headers_mut()
+            .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
+        response.headers_mut().insert(
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            HeaderValue::from_static("GET,POST,PUT,DELETE,OPTIONS"),
+        );
+        response.headers_mut().insert(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static("Authorization,Content-Type,X-Admin-Token"),
+        );
+    }
+
+    response
 }
 
 async fn health() -> &'static str {

@@ -1,6 +1,13 @@
 import { useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 
+const TOKEN_MODE = (import.meta.env.VITE_ADMIN_TOKEN_MODE ?? 'auto').trim().toLowerCase();
+
+const isLikelyJwt = (token: string): boolean => {
+  const parts = token.split('.');
+  return parts.length === 3 && parts.every((part) => part.length > 0);
+};
+
 const resolveBaseUrl = () => {
   const runtimeOverride =
     typeof window !== 'undefined'
@@ -20,7 +27,13 @@ export const useAdminApi = () => {
       Accept: 'application/json',
     };
     if (accessToken) {
-      base.Authorization = `Bearer ${accessToken}`;
+      const useBearer =
+        TOKEN_MODE === 'bearer' || (TOKEN_MODE === 'auto' && isLikelyJwt(accessToken));
+      if (useBearer) {
+        base.Authorization = `Bearer ${accessToken}`;
+      } else {
+        base['X-Admin-Token'] = accessToken;
+      }
     }
     return base;
   }, [accessToken]);

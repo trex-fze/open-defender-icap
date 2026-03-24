@@ -59,6 +59,10 @@ const normalizeToken = (token: AuthTokens): AuthTokens => {
 };
 
 const readStoredTokens = (): AuthTokens | null => {
+  if (ENV_BOOTSTRAP_TOKEN) {
+    return normalizeToken({ accessToken: ENV_BOOTSTRAP_TOKEN });
+  }
+
   if (typeof window !== 'undefined') {
     const raw = window.localStorage.getItem(TOKEN_STORAGE_KEY);
     if (raw) {
@@ -77,7 +81,7 @@ const readStoredTokens = (): AuthTokens | null => {
       }
     }
   }
-  return ENV_BOOTSTRAP_TOKEN ? normalizeToken({ accessToken: ENV_BOOTSTRAP_TOKEN }) : null;
+  return null;
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
