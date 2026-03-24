@@ -67,11 +67,12 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 
 Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 OD_ADMIN_TOKEN=secret odctl policy reload`, `OD_ADMIN_TOKEN=secret odctl policy simulate request.json`.
 
-## 7. React Admin UI (Future)
+## 7. React Admin UI
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
 - Routes: Dashboard, Investigations, Policies, Review queue, **Pending Sites** (lists `ContentPending` keys with a one-click manual-unblock action), Overrides, Taxonomy, Reports, Settings.
 - Authentication: OIDC login; RBAC controlling navigation.
 - Build: `npm run build`; deploy static assets behind reverse proxy.
+- Frontend expansion roadmap: see `rfc/stage-10-frontend-management-parity.md` and `implementation-plan/stage-10-frontend-management-parity.md` for full management-feature parity scope.
 
 ## 8. Docker & Compose Workflows
 - **Prep**: Copy `.env.example` → `.env`, edit tokens/passwords, then run `make gen-certs` (generates Squid CA/server certs under `deploy/docker/squid/certs/`; import `ca.pem` into any client trust store that should trust the proxy).

@@ -12,6 +12,7 @@ This roadmap mirrors the RFC tracker and captures actionable work items, owners,
 | 5. Admin UI/CLI (⬜) | React dashboards, CLI commands, AuthN/Z, report builder | Frontend + DevTools | Stage 3 | UI e2e tests, CLI smoke logs, accessibility report |
 | 6. Reporting/Observability (⬜) | ES ingestion, Kibana dashboards, Prometheus metrics, alerts | SRE + SOC | Stages 1–5 | Dashboard screenshots, alert configs, log samples |
 | 7. Testing & Ops (⬜) | Full test suites, docker-compose QA env, deployment runbooks, evidence package | QA + DevOps + PMO | All prior stages | Test reports, runbook PDFs, signoff forms |
+| 10. Frontend Management Parity (⬜) | Management UI parity for policy/override/review/taxonomy/reporting/diagnostics and RBAC UX hardening | Frontend + Platform | Stages 5, 6, 7, 9 | Stage 10 RFC/plan, web-admin e2e evidence, operator workflow docs |
 
 ## Stage 1 Task Breakdown (Current)
 1. **Redis cache resilience** – add retry/backoff, health metrics, and configuration validation.
