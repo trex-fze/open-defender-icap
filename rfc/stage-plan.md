@@ -13,5 +13,6 @@ This tracker maps implementation stages to the authoritative specification in `d
 | 6. Reporting & Observability | ES ingestion, dashboards, metrics, alerts | Spec §§17, 18, 33 | ⬜ Planned | Implement event sinks, dashboards, alert rules, evidence capture. |
 | 7. Testing & Ops | Full test suites, Docker/K8s deployment, evidence | Spec §§8, 24–31, 34–35 | ⬜ Planned | Execute smoke/integration/perf/security suites, runbooks, signoffs. |
 | 10. Frontend Management Parity | Full UI coverage for all existing management APIs and operational diagnostics | Spec §§13, 14, 18, 19, 23, 33 | ⬜ Planned | Stage 10 RFC + implementation plan define route parity, RBAC UX, and quality gates. |
+| 11. RBAC and User/Group Management | Persistent IAM model, effective-role resolution, user/group/service-account lifecycle across API/UI/CLI | Spec §§8, 10, 13, 14, 23, 27 | ⬜ Planned | Stage 11 RFC and plan cover IAM schema, auth refactor, operational rollout, and security matrix testing. |
 
 Each stage will gain a dedicated RFC addendum document under `rfc/` as we elaborate details beyond the master spec. Stage 1 addendum will be added when Redis integration + Squid response handling complete.|
