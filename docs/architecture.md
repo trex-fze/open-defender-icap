@@ -17,7 +17,7 @@ This document expands on `docs/engine-adaptor-spec.md` with implementation-ready
 2. **Squid → ICAP adaptor**: ICAP message includes metadata headers (`X-Client-IP`, `X-User`, etc.).
 3. **Adaptor**: Parses ICAP, normalizes requests, checks multi-tier cache, queries policy engine when needed, returns ICAP verdict.
 4. **Policy Engine**: Evaluates policies (user/IP/category/time/location) and returns `PolicyDecision` with action + metadata.
-5. **Async Pipeline**: On cache miss without classification, adaptor enqueues job for LLM worker (future stage). Worker classifies, writes to Postgres, updates Redis, triggers reclassification if needed.
+5. **Async Pipeline**: On cache miss without classification, adaptor enqueues both `classification-jobs` and `page-fetch-jobs` so verdicting is content-aware. LLM/page-fetch/reclass workers persist state in Postgres, update Redis, and schedule follow-up refreshes.
 6. **Management Layer**: Admin API exposes overrides, review queue, reporting. UI/CLI consume these APIs. CLI also drives migrations, smoke tests, cache inspection.
 7. **Observability**: Structured logs/events shipped to Elasticsearch; metrics exported via Prometheus; Kibana dashboards provide SOC/ops visibility.
 
@@ -36,7 +36,8 @@ flowchart LR
         F[(Postgres<br/>classifications/&nbsp;overrides)]
     end
     subgraph Classification & Fetch
-        STREAM[Redis Streams<br/>classification-jobs]
+        CSTREAM[Redis Streams<br/>classification-jobs]
+        PSTREAM[Redis Streams<br/>page-fetch-jobs]
         G[LLM Worker]
         H[Reclass Worker]
         PF[Page Fetcher]
@@ -60,16 +61,20 @@ flowchart LR
     D -->|PolicyDecision| C
     C -->|Cache lookup| E
     D -->|Persist verdict| F
-    C -->|Enqueue job| STREAM --> G & H
+    C -->|Enqueue classification| CSTREAM
+    C -->|Enqueue page fetch| PSTREAM
+    CSTREAM --> G & H
     G -->|Pending record| PEND
     G -->|Verdict update| F
     G -->|Cache update| E
-    H -->|TTL refresh| STREAM
+    H -->|TTL refresh| CSTREAM
+    H -->|TTL refresh| PSTREAM
     H -->|Override writes| F
     FB --> EI -->|Telemetry| L
     C -->|Events| L
     D -->|Events| L
-    EI -->|Page fetch job| PF -->|HTTP crawl| CRAWL --> PF
+    EI -->|Page fetch job| PSTREAM
+    PSTREAM --> PF -->|HTTP crawl| CRAWL --> PF
     PF -->|Store excerpt| PAGE --> I
     F --> I
     PEND --> I

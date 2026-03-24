@@ -18,7 +18,8 @@ flowchart LR
     end
 
     subgraph Async Classification & Fetch
-        STREAM[Redis Streams<br/>classification-jobs]
+        CSTREAM[Redis Streams<br/>classification-jobs]
+        PSTREAM[Redis Streams<br/>page-fetch-jobs]
         LLW["LLM Worker\n(AI verdicts)"]
         RCW["Reclass Worker\n(refresh queue)"]
         PF["Page Fetcher"]
@@ -43,20 +44,24 @@ flowchart LR
     ICAP -->|Cache lookup| Cache
     PE -->|Verdict| ICAP
     PE -->|Persist| CLASS
-    ICAP -->|Enqueue job| STREAM
-    STREAM --> LLW
-    STREAM --> RCW
+    ICAP -->|Enqueue classification| CSTREAM
+    ICAP -->|Enqueue page fetch| PSTREAM
+    CSTREAM --> LLW
+    CSTREAM --> RCW
+    RCW -->|Refresh jobs| CSTREAM
+    RCW -->|Refresh crawl| PSTREAM
     LLW -->|Pending record| PEND
     LLW -->|Verdicts| CLASS
     LLW -->|Cache update| Cache
-    RCW -->|Refresh jobs| STREAM
     RCW -->|Overrides/TTL| CLASS
+    EI -->|Page fetch job| PSTREAM
+    PSTREAM --> PF
+    PF -->|HTTP crawl| CRAWL --> PF
+    PF -->|Store excerpt| PAGE
     CLASS --> AA
+    PAGE --> AA
     PEND --> AA
     FB -->|Logs| EI --> ES --> KB
-    EI -->|Page fetch job| PF
-    PF -->|HTTP crawl| CRAWL --> PF
-    PF -->|Store excerpt| PAGE --> AA
     AA --> UI
     AA --> CLI
     AA --> PR
@@ -159,6 +164,28 @@ Run `tests/content-pending-smoke.sh` from the repo root to exercise the entire C
 4. Waits for Crawl4AI + llm-worker to persist the content-backed classification, ensures caches update, and collects artifacts under `tests/artifacts/content-pending/`.
 
 Use this smoke before releases to prove the security-first posture works end-to-end.
+
+### Integration script controls
+
+`tests/integration.sh` supports environment flags for deterministic CI and local retries:
+
+- `INTEGRATION_BUILD=1` (default) runs a full `docker compose build` before tests.
+- `INTEGRATION_BUILD=0` skips rebuild and reuses existing images (`docker compose up -d`) for fast local verification.
+- `INTEGRATION_BUILD_RETRIES=3` controls build retry attempts when Docker metadata pulls fail intermittently.
+- `INTEGRATION_PRUNE_ON_RETRY=1` prunes BuildKit cache between retries (`docker builder prune -f`).
+- `INTEGRATION_RETRY_DELAY_SECONDS=5` pauses between retries.
+
+Example (fast recheck against already-built images):
+
+```bash
+INTEGRATION_BUILD=0 tests/integration.sh
+```
+
+Example (full rebuild with retry hardening):
+
+```bash
+INTEGRATION_BUILD=1 INTEGRATION_BUILD_RETRIES=3 tests/integration.sh
+```
 
 ## LLM Provider Configuration
 

@@ -3,11 +3,46 @@ set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 STACK_DIR="$ROOT/deploy/docker"
+INTEGRATION_BUILD=${INTEGRATION_BUILD:-1}
+INTEGRATION_BUILD_RETRIES=${INTEGRATION_BUILD_RETRIES:-3}
+INTEGRATION_RETRY_DELAY_SECONDS=${INTEGRATION_RETRY_DELAY_SECONDS:-5}
+INTEGRATION_PRUNE_ON_RETRY=${INTEGRATION_PRUNE_ON_RETRY:-1}
+
+build_stack() {
+  local attempt=1
+  local max_attempts=$INTEGRATION_BUILD_RETRIES
+
+  while (( attempt <= max_attempts )); do
+    echo "[integration] Build attempt ${attempt}/${max_attempts}"
+    if docker compose build; then
+      docker compose up -d
+      return 0
+    fi
+
+    if (( attempt == max_attempts )); then
+      echo "[integration] Build failed after ${max_attempts} attempts" >&2
+      return 1
+    fi
+
+    if [[ "$INTEGRATION_PRUNE_ON_RETRY" == "1" ]]; then
+      echo "[integration] Build failed; pruning builder cache before retry"
+      docker builder prune -f >/dev/null || true
+    fi
+
+    echo "[integration] Retrying build in ${INTEGRATION_RETRY_DELAY_SECONDS}s"
+    sleep "$INTEGRATION_RETRY_DELAY_SECONDS"
+    attempt=$((attempt + 1))
+  done
+}
 
 echo "[integration] Building and starting docker-compose stack"
 pushd "$STACK_DIR" >/dev/null
 
-docker compose up -d --build
+if [[ "$INTEGRATION_BUILD" == "1" ]]; then
+  build_stack
+else
+  docker compose up -d
+fi
 echo "[integration] Waiting for services to become healthy"
 docker compose run --rm odctl-runner bash -lc "sleep 5"
 

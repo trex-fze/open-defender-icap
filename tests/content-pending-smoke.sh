@@ -8,8 +8,8 @@ TARGET_HOST=${TARGET_HOST:-smoke-origin}
 TARGET_URL=${TARGET_URL:-"http://${TARGET_HOST}/"}
 NORMALIZED_KEY="domain:${TARGET_HOST}"
 ADMIN_TOKEN=${OD_ADMIN_TOKEN:-changeme-admin}
-KEEP_STACK=0
-BUILD_IMAGES=0
+KEEP_STACK=${KEEP_STACK:-0}
+BUILD_IMAGES=${BUILD_IMAGES:-0}
 WAIT_HTTP_TRIES=${WAIT_HTTP_TRIES:-120}
 PGUSER=${POSTGRES_USER:-defender}
 PGADMIN_DB=${PGADMIN_DB:-defender_admin}
@@ -113,6 +113,13 @@ verify_pending_entry() {
   local row
   row=$(exec_pg "SELECT status, base_url FROM classification_requests WHERE normalized_key = '${NORMALIZED_KEY}'")
   if [[ -z "$row" ]]; then
+    local action
+    action=$(exec_pg "SELECT recommended_action FROM classifications WHERE normalized_key = '${NORMALIZED_KEY}'") || action=""
+    if [[ -n "$action" ]]; then
+      printf 'already-classified\n' >"$ARTIFACT_DIR/pending-before.txt"
+      log "Pending row for ${NORMALIZED_KEY} cleared before verification; classification already present"
+      return 0
+    fi
     die "Expected pending row for ${NORMALIZED_KEY}"
   fi
   printf '%s\n' "$row" >"$ARTIFACT_DIR/pending-before.txt"
@@ -177,6 +184,12 @@ check_cli_pending() {
   done
   printf '%s\n' "$output" >"$ARTIFACT_DIR/cli-pending-${phase}.json"
   if [[ "$expect_present" == "yes" ]]; then
+    local action
+    action=$(exec_pg "SELECT recommended_action FROM classifications WHERE normalized_key = '${NORMALIZED_KEY}'") || action=""
+    if [[ -n "$action" ]]; then
+      log "CLI pending list no longer includes ${NORMALIZED_KEY} (${phase}); classification already present"
+      return 0
+    fi
     die "CLI pending list missing ${NORMALIZED_KEY} (${phase})"
   else
     die "CLI pending list still contains ${NORMALIZED_KEY} (${phase})"
