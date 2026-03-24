@@ -271,7 +271,9 @@ async fn main() -> Result<()> {
     let metrics_port = cfg.metrics_port;
     let catalog_for_metrics = provider_catalog.clone();
     tokio::spawn(async move {
-        if let Err(err) = metrics::serve_metrics(&metrics_host, metrics_port, catalog_for_metrics).await {
+        if let Err(err) =
+            metrics::serve_metrics(&metrics_host, metrics_port, catalog_for_metrics).await
+        {
             error!(target = "svc-llm-worker", %err, "metrics server exited");
         }
     });
@@ -526,9 +528,9 @@ async fn invoke_llm(
     let result = match provider.kind {
         ProviderKind::Ollama => invoke_ollama(provider, job).await,
         ProviderKind::LmStudio => invoke_lmstudio_chat(provider, job).await,
-        ProviderKind::Openai
-        | ProviderKind::Vllm
-        | ProviderKind::OpenaiCompatible => invoke_openai_chat(provider, job).await,
+        ProviderKind::Openai | ProviderKind::Vllm | ProviderKind::OpenaiCompatible => {
+            invoke_openai_chat(provider, job).await
+        }
         ProviderKind::Anthropic => invoke_anthropic(provider, job).await,
         ProviderKind::CustomJson => invoke_custom_json(provider, job).await,
     };

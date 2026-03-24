@@ -16,6 +16,8 @@ pub struct IcapConfig {
     pub cache_channel: String,
     #[serde(default)]
     pub job_queue: Option<JobQueueConfig>,
+    #[serde(default)]
+    pub page_fetch_queue: Option<JobQueueConfig>,
 }
 
 pub fn load() -> anyhow::Result<IcapConfig> {

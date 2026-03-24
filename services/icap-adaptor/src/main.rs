@@ -14,7 +14,7 @@ use tracing::{error, info, instrument, Level};
 
 use cache::CacheClient;
 use common_types::{EntityLevel, PolicyAction, PolicyDecisionRequest};
-use jobs::{ClassificationJob, JobPublisher};
+use jobs::{ClassificationJob, JobPublisher, PageFetchJob, PageFetchPublisher};
 use policy_client::PolicyClient;
 
 #[tokio::main]
@@ -41,6 +41,12 @@ async fn main() -> Result<()> {
         .map(|queue| JobPublisher::new(&queue.redis_url, queue.stream.clone()))
         .transpose()?;
 
+    let page_fetch_publisher = cfg
+        .page_fetch_queue
+        .as_ref()
+        .map(|queue| PageFetchPublisher::new(&queue.redis_url, queue.stream.clone()))
+        .transpose()?;
+
     let metrics_host = cfg.metrics_host.clone();
     let metrics_port = cfg.metrics_port;
     tokio::spawn(async move {
@@ -55,10 +61,18 @@ async fn main() -> Result<()> {
         let cache = Arc::clone(&cache);
         let policy_client = Arc::clone(&policy_client);
         let job_publisher = job_publisher.clone();
+        let page_fetch_publisher = page_fetch_publisher.clone();
         info!(target = "svc-icap", ?peer, "accepted connection");
         tokio::spawn(async move {
-            if let Err(err) =
-                handle_connection(socket, cfg, cache, policy_client, job_publisher).await
+            if let Err(err) = handle_connection(
+                socket,
+                cfg,
+                cache,
+                policy_client,
+                job_publisher,
+                page_fetch_publisher,
+            )
+            .await
             {
                 error!(target = "svc-icap", error = %err, "connection handler failed");
             }
@@ -73,6 +87,7 @@ async fn handle_connection(
     cache: Arc<CacheClient>,
     policy_client: Arc<PolicyClient>,
     job_publisher: Option<JobPublisher>,
+    page_fetch_publisher: Option<PageFetchPublisher>,
 ) -> Result<()> {
     let roundtrip_start = tokio::time::Instant::now();
     let mut buf = vec![0u8; cfg.preview_size.max(1024)];
@@ -136,6 +151,23 @@ async fn handle_connection(
         }
     }
 
+    if let Some(publisher) = &page_fetch_publisher {
+        if should_fetch_page(&normalized.full_url) {
+            if let Err(err) = publisher
+                .publish(&PageFetchJob {
+                    normalized_key: &normalized.normalized_key,
+                    url: &normalized.full_url,
+                    hostname: &normalized.hostname,
+                    trace_id: icap_req.trace_id.as_deref().unwrap_or(""),
+                    ttl_seconds: 21_600,
+                })
+                .await
+            {
+                error!(target = "svc-icap", %err, "failed to publish page fetch job");
+            }
+        }
+    }
+
     let response = icap_response(&decision.action);
     socket.write_all(response.as_bytes()).await?;
     socket.shutdown().await?;
@@ -149,6 +181,10 @@ fn should_enqueue(action: &PolicyAction, missing_verdict: bool) -> bool {
             action,
             PolicyAction::Review | PolicyAction::RequireApproval | PolicyAction::Warn
         )
+}
+
+fn should_fetch_page(url: &str) -> bool {
+    url.starts_with("http://") || url.starts_with("https://")
 }
 
 fn entity_level_str(level: &EntityLevel) -> &'static str {

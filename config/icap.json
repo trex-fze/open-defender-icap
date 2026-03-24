@@ -10,5 +10,9 @@
   "job_queue": {
     "redis_url": "redis://redis:6379",
     "stream": "classification-jobs"
+  },
+  "page_fetch_queue": {
+    "redis_url": "redis://redis:6379",
+    "stream": "page-fetch-jobs"
   }
 }

@@ -1,0 +1,14 @@
+{
+  "queue_name": "page-fetcher",
+  "stream": "page-fetch-jobs",
+  "redis_url": "redis://redis:6379",
+  "crawl_service_url": "http://crawl4ai:8085",
+  "database_url": "postgres://defender:defender@postgres:5432/defender_admin",
+  "metrics_host": "0.0.0.0",
+  "metrics_port": 19025,
+  "max_excerpt_chars": 4000,
+  "max_html_bytes": 524288,
+  "ttl_seconds": 21600,
+  "fetch_timeout_seconds": 60,
+  "database_pool_size": 5
+}

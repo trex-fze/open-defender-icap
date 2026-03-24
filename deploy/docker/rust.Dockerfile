@@ -13,6 +13,7 @@ COPY --from=builder /app/target/release/reclass-worker /usr/local/bin/reclass-wo
 COPY --from=builder /app/target/release/admin-api /usr/local/bin/admin-api
 COPY --from=builder /app/target/release/odctl /usr/local/bin/odctl
 COPY --from=builder /app/target/release/event-ingester /usr/local/bin/event-ingester
+COPY --from=builder /app/target/release/page-fetcher /usr/local/bin/page-fetcher
 COPY config /app/config
 ENTRYPOINT []
 CMD ["sleep", "infinity"]

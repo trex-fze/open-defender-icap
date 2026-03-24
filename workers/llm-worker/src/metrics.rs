@@ -1,7 +1,9 @@
 use anyhow::Result;
 use axum::{extract::State, routing::get, Json, Router};
 use once_cell::sync::Lazy;
-use prometheus::{self, Encoder, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, TextEncoder};
+use prometheus::{
+    self, Encoder, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, TextEncoder,
+};
 use serde::Serialize;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
@@ -129,9 +131,7 @@ pub fn record_llm_failure() {
 }
 
 pub fn record_provider_failure(provider: &str) {
-    LLM_PROVIDER_FAILURES
-        .with_label_values(&[provider])
-        .inc();
+    LLM_PROVIDER_FAILURES.with_label_values(&[provider]).inc();
 }
 
 pub fn record_llm_timeout() {
@@ -139,9 +139,7 @@ pub fn record_llm_timeout() {
 }
 
 pub fn record_provider_timeout(provider: &str) {
-    LLM_PROVIDER_TIMEOUTS
-        .with_label_values(&[provider])
-        .inc();
+    LLM_PROVIDER_TIMEOUTS.with_label_values(&[provider]).inc();
 }
 
 pub fn record_invalid_response() {
