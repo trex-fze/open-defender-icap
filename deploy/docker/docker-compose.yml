@@ -7,7 +7,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redis-data:/data
+      - ../../data/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -24,7 +24,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pg-data:/var/lib/postgresql/data
+      - ../../data/postgres:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-defender}"]
@@ -43,7 +43,7 @@ services:
     ports:
       - "9200:9200"
     volumes:
-      - es-data:/usr/share/elasticsearch/data
+      - ../../data/elasticsearch:/usr/share/elasticsearch/data
     ulimits:
       memlock:
         soft: -1
@@ -271,7 +271,7 @@ services:
     volumes:
       - ./squid/squid.conf:/etc/squid/squid.conf:ro
       - ./squid/certs:/etc/squid/certs:ro
-      - squid-logs:/var/log/squid
+      - ../../data/squid-logs:/var/log/squid
     depends_on:
       icap-adaptor:
         condition: service_started
@@ -296,8 +296,8 @@ services:
     command: ["filebeat", "-e"]
     volumes:
       - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-      - filebeat-data:/usr/share/filebeat/data
-      - squid-logs:/var/log/squid:ro
+      - ../../data/filebeat:/usr/share/filebeat/data
+      - ../../data/squid-logs:/var/log/squid:ro
     environment:
       OD_INGEST_ENDPOINT: ${OD_INGEST_ENDPOINT:-http://event-ingester:19100}
       OD_FILEBEAT_SECRET: ${OD_FILEBEAT_SECRET:-changeme-ingest}
@@ -326,10 +326,3 @@ services:
     depends_on:
       admin-api:
         condition: service_started
-
-volumes:
-  redis-data:
-  pg-data:
-  es-data:
-  squid-logs:
-  filebeat-data:
