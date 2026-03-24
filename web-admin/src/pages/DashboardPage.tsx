@@ -1,6 +1,9 @@
 import { kpis, reviewQueue } from '../data/mockData';
+import { useOpsStatus } from '../hooks/useOpsStatus';
 
 export const DashboardPage = () => {
+  const { data: ops, loading: opsLoading, error: opsError } = useOpsStatus();
+
   return (
     <div>
       <div className="page-header">
@@ -27,9 +30,29 @@ export const DashboardPage = () => {
       <div className="layout-grid" style={{ marginTop: '2rem' }}>
         <div className="glass-panel">
           <p className="section-title">LLM Worker Status</p>
-          <p style={{ fontSize: '1.4rem', margin: '0 0 0.75rem' }}>Classification queue is flowing at 1.2k events/min.</p>
-          <div className="skeleton" style={{ marginBottom: '0.75rem' }}></div>
-          <div className="skeleton" style={{ width: '70%' }}></div>
+          {opsLoading ? (
+            <>
+              <div className="skeleton" style={{ marginBottom: '0.75rem' }}></div>
+              <div className="skeleton" style={{ width: '70%' }}></div>
+            </>
+          ) : (
+            <>
+              <p style={{ fontSize: '1.1rem', margin: '0 0 0.6rem' }}>
+                Pending classifications: {ops.pendingCount.toLocaleString()}
+              </p>
+              <p style={{ fontSize: '1.1rem', margin: '0 0 0.6rem' }}>
+                Review queue depth: {ops.reviewQueueCount.toLocaleString()}
+              </p>
+              <p style={{ margin: 0, color: 'var(--muted)' }}>
+                Providers:{' '}
+                {ops.llmProviderNames.length > 0 ? ops.llmProviderNames.join(', ') : 'not available in this environment'}
+              </p>
+              <p style={{ marginTop: '0.6rem' }}>
+                <span className={`chip chip--${ops.source === 'live' ? 'green' : 'amber'}`}>ops source: {ops.source}</span>
+              </p>
+            </>
+          )}
+          {opsError ? <p style={{ color: '#ff9b9b', marginBottom: 0 }}>Ops status warning: {opsError}</p> : null}
         </div>
         <div className="glass-panel">
           <p className="section-title">Review SLA</p>

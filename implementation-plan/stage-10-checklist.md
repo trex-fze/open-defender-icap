@@ -21,16 +21,16 @@ This checklist tracks implementation progress for Stage 10 and maps directly to 
 
 ## Phase C - Diagnostics and Investigations Parity
 
-- [ ] Keep pending classifications workflow fully live and role-safe.
+- [x] Keep pending classifications workflow fully live and role-safe.
 - [x] Add page content inspector (show + history).
 - [x] Add cache key diagnostics (lookup + delete).
 - [x] Add CLI logs/audit viewer.
 
 ## Phase D - Reporting and Operations Parity
 
-- [ ] Surface reporting traffic endpoint with range/top filters.
-- [ ] Add operations status panel (worker/provider health and key metrics).
-- [ ] Add environment-aware fallback behavior that is explicit in UI state.
+- [x] Surface reporting traffic endpoint with range/top filters.
+- [x] Add operations status panel (worker/provider health and key metrics).
+- [x] Add environment-aware fallback behavior that is explicit in UI state.
 
 ## Phase E - Quality and Rollout
 
