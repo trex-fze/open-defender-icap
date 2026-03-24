@@ -1,12 +1,19 @@
 import { useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-const API_BASE_URL = (import.meta.env.VITE_ADMIN_API_URL ?? '').trim();
+const resolveBaseUrl = () => {
+  const runtimeOverride =
+    typeof window !== 'undefined'
+      ? (window as Window & { __OD_ADMIN_API_URL__?: string }).__OD_ADMIN_API_URL__
+      : undefined;
+  return (runtimeOverride ?? import.meta.env.VITE_ADMIN_API_URL ?? '').trim();
+};
 
 export const useAdminApi = () => {
   const { tokens } = useAuth();
+  const baseUrl = resolveBaseUrl();
   const accessToken = tokens?.accessToken?.trim();
-  const canCallApi = Boolean(API_BASE_URL && accessToken);
+  const canCallApi = Boolean(baseUrl && accessToken);
 
   const headers = useMemo<HeadersInit>(() => {
     const base: HeadersInit = {
@@ -19,7 +26,7 @@ export const useAdminApi = () => {
   }, [accessToken]);
 
   return {
-    baseUrl: API_BASE_URL,
+    baseUrl,
     accessToken,
     canCallApi,
     headers,

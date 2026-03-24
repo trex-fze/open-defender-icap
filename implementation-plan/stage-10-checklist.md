@@ -35,8 +35,8 @@ This checklist tracks implementation progress for Stage 10 and maps directly to 
 ## Phase E - Quality and Rollout
 
 - [x] Add/expand unit tests for new hooks/pages.
-- [ ] Add/expand Cypress flows for policy/review/diagnostics parity.
-- [ ] Add accessibility pass for forms, dialogs, and action tables.
+- [x] Add/expand Cypress flows for policy/review/diagnostics parity.
+- [x] Add accessibility pass for forms, dialogs, and action tables.
 - [ ] Update operator/user docs with screenshots and runbook steps.
 
 ## Acceptance Tracking
