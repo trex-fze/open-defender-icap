@@ -14,6 +14,8 @@ import { ReportsPage } from './pages/ReportsPage';
 import { SettingsRbacPage } from './pages/SettingsRbacPage';
 import { LoginPage } from './pages/LoginPage';
 import { PendingClassificationsPage } from './pages/PendingClassificationsPage';
+import { DiagnosticsCachePage } from './pages/DiagnosticsCachePage';
+import { DiagnosticsPageContentPage } from './pages/DiagnosticsPageContentPage';
 
 const guard = {
   viewer: ['policy-viewer'] as Role[],
@@ -42,6 +44,8 @@ const App = () => {
             <Route path="/classifications/pending" element={<ProtectedRoute roles={guard.viewEdit}><PendingClassificationsPage /></ProtectedRoute>} />
             <Route path="/taxonomy" element={<ProtectedRoute roles={guard.editOnly}><TaxonomyPage /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute roles={guard.reports}><ReportsPage /></ProtectedRoute>} />
+            <Route path="/diagnostics/cache" element={<ProtectedRoute roles={guard.admin}><DiagnosticsCachePage /></ProtectedRoute>} />
+            <Route path="/diagnostics/page-content" element={<ProtectedRoute roles={guard.viewEdit}><DiagnosticsPageContentPage /></ProtectedRoute>} />
             <Route path="/settings/rbac" element={<ProtectedRoute roles={guard.admin}><SettingsRbacPage /></ProtectedRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -21,6 +21,8 @@ const navItems: NavItem[] = [
   { label: 'Overrides', path: '/overrides', roles: ['policy-editor', 'policy-admin'] as Role[] },
   { label: 'Taxonomy', path: '/taxonomy', roles: ['policy-editor', 'policy-admin'] as Role[] },
   { label: 'Reports', path: '/reports', roles: ['auditor', 'policy-admin', 'policy-viewer'] as Role[] },
+  { label: 'Page Content', path: '/diagnostics/page-content', roles: ['policy-editor', 'policy-admin', 'policy-viewer'] as Role[] },
+  { label: 'Cache', path: '/diagnostics/cache', roles: ['policy-admin'] as Role[] },
   { label: 'Settings', path: '/settings/rbac', roles: ['policy-admin'] as Role[] },
 ];
 

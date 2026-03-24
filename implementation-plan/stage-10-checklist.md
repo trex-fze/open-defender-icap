@@ -22,9 +22,9 @@ This checklist tracks implementation progress for Stage 10 and maps directly to 
 ## Phase C - Diagnostics and Investigations Parity
 
 - [ ] Keep pending classifications workflow fully live and role-safe.
-- [ ] Add page content inspector (show + history).
-- [ ] Add cache key diagnostics (lookup + delete).
-- [ ] Add CLI logs/audit viewer.
+- [x] Add page content inspector (show + history).
+- [x] Add cache key diagnostics (lookup + delete).
+- [x] Add CLI logs/audit viewer.
 
 ## Phase D - Reporting and Operations Parity
 
