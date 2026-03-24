@@ -11,35 +11,54 @@ flowchart LR
         ICAP[ICAP Adaptor]
     end
 
-    subgraph Decisioning
+    subgraph Decision Plane
         PE[Policy Engine]
         Cache[(Redis Cache)]
-        LLW["LLM Worker<br/>(AI verdicts)"]
-        RCW["Reclass Worker<br/>(AI assist)"]
+        CLASS[(Postgres<br/>classifications/overrides)]
+    end
+
+    subgraph Async Classification & Fetch
+        STREAM[Redis Streams<br/>classification-jobs]
+        LLW["LLM Worker\n(AI verdicts)"]
+        RCW["Reclass Worker\n(refresh queue)"]
+        PF["Page Fetcher"]
+        CRAWL[Crawl4AI Service]
+        PAGE[(Postgres<br/>page_contents)]
     end
 
     subgraph Ops & Observability
         AA[Admin API]
-        UI[Admin React UI]
+        UI[React Admin UI]
         CLI[odctl CLI]
         EI[Event Ingester]
-        ES(["Elasticsearch<br/>+ AI analytics"])
         FB[Filebeat]
-        KB[Kibana Dashboards]
-        PR[Prometheus + Alerts]
+        ES[(Elasticsearch)]
+        KB[Kibana]
+        PR[Prometheus]
     end
 
-    SQ -->|HTTP traffic| ICAP -->|Policy request| PE
+    SQ -->|HTTP traffic| ICAP
+    ICAP -->|Policy request| PE
     ICAP -->|Cache lookup| Cache
-    PE -->|Jobs| LLW
-    PE -->|Jobs| RCW
-    LLW -->|Verdicts| AA
-    RCW -->|Overrides| AA
-    FB -->|Events| EI --> ES --> KB
+    PE -->|Verdict| ICAP
+    PE -->|Persist| CLASS
+    ICAP -->|Enqueue job| STREAM
+    STREAM --> LLW
+    STREAM --> RCW
+    LLW -->|Verdicts| CLASS
+    LLW -->|Cache update| Cache
+    RCW -->|Refresh jobs| STREAM
+    RCW -->|Overrides/TTL| CLASS
+    CLASS --> AA
+    FB -->|Logs| EI --> ES --> KB
+    EI -->|Page fetch job| PF
+    PF -->|HTTP crawl| CRAWL --> PF
+    PF -->|Store excerpt| PAGE --> AA
     AA --> UI
     AA --> CLI
     AA --> PR
     ICAP --> PR
+    LLW --> PR
     EI --> PR
 ```
 

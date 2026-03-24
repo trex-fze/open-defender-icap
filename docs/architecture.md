@@ -28,44 +28,55 @@ flowchart LR
     end
     subgraph Proxy Layer
         B[Squid Proxy]
+        C[ICAP Adaptor]
     end
     subgraph Decision Plane
-        C[ICAP Adaptor]
         D[Policy Engine]
-    end
-    subgraph Data & Async Plane
         E[(Redis Cache)]
-        F[(Postgres)]
+        F[(Postgres<br/>classifications/&nbsp;overrides)]
+    end
+    subgraph Classification & Fetch
+        STREAM[Redis Streams<br/>classification-jobs]
         G[LLM Worker]
         H[Reclass Worker]
+        PF[Page Fetcher]
+        CRAWL[Crawl4AI]
+        PAGE[(Postgres<br/>page_contents)]
     end
     subgraph Management Plane
         I[Admin API]
         J[React UI]
-        K[CLI odctl]
+        K[odctl CLI]
+        EI[Event Ingester]
+        FB[Filebeat]
     end
     subgraph Observability
         L[(Elasticsearch/Kibana)]
         M[Prometheus]
     end
-    A --> B
-    B -->|ICAP REQMOD/RESPMOD| C
-    C -->|PolicyDecisionRequest| D
+
+    A --> B -->|ICAP REQMOD| C -->|PolicyDecisionRequest| D
     D -->|PolicyDecision| C
     C -->|Cache lookup| E
-    C -->|Persist events| F
-    C -->|Async job| G
+    D -->|Persist verdict| F
+    C -->|Enqueue job| STREAM --> G & H
     G -->|Verdict update| F
     G -->|Cache update| E
-    F --> H
-    H -->|Refresh jobs| C
+    H -->|TTL refresh| STREAM
+    H -->|Override writes| F
+    FB --> EI -->|Telemetry| L
+    C -->|Events| L
+    D -->|Events| L
+    EI -->|Page fetch job| PF -->|HTTP crawl| CRAWL --> PF
+    PF -->|Store excerpt| PAGE --> I
+    F --> I
+    I --> J
+    I --> K
     I --> D
-    J --> I
-    K --> I
-    C -->|Logs/Events| L
-    D -->|Logs/Events| L
-    G -->|Metrics| M
     C -->|Metrics| M
+    G -->|Metrics| M
+    EI -->|Metrics| M
+    PF -->|Metrics| M
 ```
 
 ## 2. Detailed Component Views
