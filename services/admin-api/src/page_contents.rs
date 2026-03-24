@@ -71,7 +71,7 @@ pub async fn get_page_content(
     let excerpt_limit = clamp_excerpt(params.max_excerpt);
     let row = if let Some(version) = params.version {
         sqlx::query(
-            r#"SELECT normalized_key, fetch_version, content_type, content_hash, char_count,
+            r#"SELECT normalized_key, fetch_version::bigint AS fetch_version, content_type, content_hash, char_count,
                 byte_count, fetch_status, fetch_reason, ttl_seconds, fetched_at, expires_at,
                 text_excerpt
             FROM page_contents
@@ -84,7 +84,7 @@ pub async fn get_page_content(
         .await
     } else {
         sqlx::query(
-            r#"SELECT normalized_key, fetch_version, content_type, content_hash, char_count,
+            r#"SELECT normalized_key, fetch_version::bigint AS fetch_version, content_type, content_hash, char_count,
                 byte_count, fetch_status, fetch_reason, ttl_seconds, fetched_at, expires_at,
                 text_excerpt
             FROM page_contents
@@ -121,7 +121,7 @@ pub async fn list_page_content_history(
         .map_err(|status| (status, Json(ApiError::forbidden())))?;
     let limit = clamp_history_limit(params.limit);
     let rows = sqlx::query(
-        r#"SELECT fetch_version, fetch_status, fetch_reason, ttl_seconds,
+        r#"SELECT fetch_version::bigint AS fetch_version, fetch_status, fetch_reason, ttl_seconds,
                 fetched_at, expires_at, char_count, byte_count, content_hash
             FROM page_contents
             WHERE normalized_key = $1

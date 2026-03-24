@@ -1420,6 +1420,7 @@ async fn run_smoke(profile: &str) -> Result<()> {
     let target = match profile {
         "prod" => "icap.prod:1344",
         "staging" => "127.0.0.1:1344",
+        "compose" => "icap-adaptor:1344",
         other => other,
     };
     let request = "REQMOD icap://icap.service/req ICAP/1.0\r\nHost: icap.service\r\nX-Trace-Id: odctl-smoke\r\nEncapsulated: req-body=0, null-body=0\r\n\r\nGET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n";

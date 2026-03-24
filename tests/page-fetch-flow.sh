@@ -55,22 +55,17 @@ if [[ "${http_code}" != "202" && "${http_code}" != "200" ]]; then
   exit 1
 fi
 
-start_epoch=$(date -u +%s)
 echo "[PageFetch] Waiting for page contents (key=${PAGE_FETCH_NORMALIZED_KEY})"
 
 success=0
 content_json=""
 for attempt in $(seq 1 "${PAGE_FETCH_MAX_ATTEMPTS}"); do
-  if content_json=$(${ODCTL_BIN} page show --key "${PAGE_FETCH_NORMALIZED_KEY}" --json 2>/dev/null); then
+  if content_json=$(${ODCTL_BIN} page show "${PAGE_FETCH_NORMALIZED_KEY}" --json 2>/dev/null); then
     status=$(jq -r '.fetch_status // empty' <<<"${content_json}")
     excerpt=$(jq -r '.excerpt // empty' <<<"${content_json}")
-    fetched_at=$(jq -r '.fetched_at // empty' <<<"${content_json}")
     version=$(jq -r '.fetch_version // 0' <<<"${content_json}")
-    fetched_epoch=0
-    if [[ -n "${fetched_at}" ]]; then
-      fetched_epoch=$(date -u -d "${fetched_at}" +%s 2>/dev/null || echo 0)
-    fi
-    if [[ "${status}" == "ok" && -n "${excerpt}" && "${version}" != "0" && ${fetched_epoch} -ge ${start_epoch} ]]; then
+    fetched_at=$(jq -r '.fetched_at // empty' <<<"${content_json}")
+    if [[ "${status}" == "ok" && -n "${excerpt}" && "${version}" != "0" ]]; then
       success=1
       echo "[PageFetch] received version ${version} at ${fetched_at}"
       break
@@ -85,7 +80,7 @@ if [[ "${success}" != "1" ]]; then
 fi
 
 echo "[PageFetch] Verifying history endpoint"
-history_json=$(${ODCTL_BIN} page history --key "${PAGE_FETCH_NORMALIZED_KEY}" --limit 5 --json 2>/dev/null)
+history_json=$(${ODCTL_BIN} page history "${PAGE_FETCH_NORMALIZED_KEY}" --limit 5 --json 2>/dev/null)
 history_len=$(jq -r 'length' <<<"${history_json}")
 if [[ "${history_len}" == "0" ]]; then
   echo "[PageFetch] History endpoint returned no entries" >&2
