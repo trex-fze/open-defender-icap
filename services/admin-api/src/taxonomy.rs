@@ -703,6 +703,7 @@ mod mutation_tests {
     use super::*;
     use crate::auth::UserContext;
     use anyhow::Result;
+    use axum::{extract::State, Extension};
     use std::env;
 
     #[tokio::test]
@@ -754,6 +755,60 @@ mod mutation_tests {
         )
         .await;
         let (status, Json(err)) = result.expect_err("expected maintenance response");
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(err.code(), "TAXONOMY_MUTATION_UNSUPPORTED");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn category_mutation_route_respects_lock() -> Result<()> {
+        let db_url = match env::var("ADMIN_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!(
+                    "skipping category_mutation_route_respects_lock (set ADMIN_TEST_DATABASE_URL to run)"
+                );
+                return Ok(());
+            }
+        };
+
+        let state = build_test_state(&db_url, false).await?;
+        let uri: Uri = "/api/v1/taxonomy/categories".parse().unwrap();
+        let result = block_category_mutation(
+            Method::POST,
+            OriginalUri(uri),
+            Extension(UserContext::system()),
+            State(state.clone()),
+        )
+        .await;
+        let (status, Json(err)) = result.expect_err("expected lock");
+        assert_eq!(status, StatusCode::LOCKED);
+        assert_eq!(err.code(), "TAXONOMY_LOCKED");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn category_mutation_route_acknowledges_maintenance() -> Result<()> {
+        let db_url = match env::var("ADMIN_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!(
+                    "skipping category_mutation_route_acknowledges_maintenance (set ADMIN_TEST_DATABASE_URL to run)"
+                );
+                return Ok(());
+            }
+        };
+
+        let state = build_test_state(&db_url, true).await?;
+        let uri: Uri = "/api/v1/taxonomy/categories/legacy".parse().unwrap();
+        let result = block_category_mutation(
+            Method::DELETE,
+            OriginalUri(uri),
+            Extension(UserContext::system()),
+            State(state.clone()),
+        )
+        .await;
+        let (status, Json(err)) = result.expect_err("expected maintenance");
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
         assert_eq!(err.code(), "TAXONOMY_MUTATION_UNSUPPORTED");
         Ok(())
