@@ -518,6 +518,61 @@ mod tests {
     }
 
     #[test]
+    fn canonicalizes_rule_categories() {
+        let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
+        let rule = PolicyRule {
+            id: "social-block".into(),
+            description: Some("Block social".into()),
+            priority: 5,
+            action: PolicyAction::Block,
+            conditions: Conditions {
+                categories: Some(vec!["Social".into()]),
+                ..Default::default()
+            },
+        };
+        let store = PolicyStore::from_document(
+            PolicyDocument {
+                version: "v1".into(),
+                rules: vec![rule],
+            },
+            taxonomy,
+        )
+        .unwrap();
+
+        let stored_rules = store.list_rules();
+        assert_eq!(stored_rules.len(), 1);
+        let categories = stored_rules[0]
+            .conditions
+            .categories
+            .clone()
+            .expect("categories present");
+        assert_eq!(categories, vec![String::from("unknown-unclassified")]);
+    }
+
+    #[test]
+    fn rejects_invalid_category_in_rule() {
+        let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
+        let rule = PolicyRule {
+            id: "invalid".into(),
+            description: None,
+            priority: 1,
+            action: PolicyAction::Block,
+            conditions: Conditions {
+                categories: Some(vec!["NotARealCategory".into()]),
+                ..Default::default()
+            },
+        };
+        let result = PolicyStore::from_document(
+            PolicyDocument {
+                version: "v1".into(),
+                rules: vec![rule],
+            },
+            taxonomy,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn matches_group_condition() {
         let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
         let rule = PolicyRule {
