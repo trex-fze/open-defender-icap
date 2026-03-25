@@ -52,8 +52,8 @@ flowchart LR
     subgraph Taxonomy Governance
         TAX[Canonical Taxonomy<br/>config/canonical-taxonomy.json]
         TACT[(Postgres<br/>taxonomy_activation_profiles<br/>taxonomy_activation_entries)]
-        I[Admin API]
-        LOCK[TAXONOMY_LOCKED<br/>(legacy taxonomy CRUD)]
+        I[Admin API<br/>read-only structure & activation toggles]
+        LOCK[TAXONOMY_LOCKED<br/>legacy taxonomy CRUD blocked]
     end
 
     subgraph Management Plane

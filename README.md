@@ -31,7 +31,7 @@ flowchart LR
     subgraph Taxonomy Governance
         TAX[Canonical Taxonomy JSON<br/>config/canonical-taxonomy.json]
         TACT[(Postgres<br/>taxonomy_activation_profiles<br/>taxonomy_activation_entries)]
-        AA[Admin API<br/>(read-only structure + activation toggles)]
+        AA[Admin API<br/>read-only structure & activation toggles]
     end
 
     subgraph Ops & Observability
