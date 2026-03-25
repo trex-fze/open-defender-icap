@@ -568,10 +568,10 @@ impl LocalJwtIssuer {
             exp: now + self.ttl_seconds,
             iat: now,
         };
-        let payload = URL_SAFE_NO_PAD.encode(
-            serde_json::to_vec(&payload_claims).map_err(|_| AuthError::InvalidFormat)?,
-        );
-        let mut mac = HmacSha256::new_from_slice(&self.secret).map_err(|_| AuthError::InvalidFormat)?;
+        let payload = URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&payload_claims).map_err(|_| AuthError::InvalidFormat)?);
+        let mut mac =
+            HmacSha256::new_from_slice(&self.secret).map_err(|_| AuthError::InvalidFormat)?;
         let signing_input = format!("{}.{}", header, payload);
         mac.update(signing_input.as_bytes());
         let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
@@ -797,7 +797,10 @@ mod tests {
             vec![ROLE_POLICY_VIEWER.into(), ROLE_AUDITOR.into()],
         );
         assert!(require_roles(&ctx, ROLE_REPORTING_VIEW).is_ok());
-        assert_eq!(require_roles(&ctx, ROLE_IAM_ADMIN), Err(StatusCode::FORBIDDEN));
+        assert_eq!(
+            require_roles(&ctx, ROLE_IAM_ADMIN),
+            Err(StatusCode::FORBIDDEN)
+        );
     }
 
     #[test]

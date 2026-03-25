@@ -540,7 +540,10 @@ mod tests {
         .unwrap();
 
         let request = base_request();
-        assert_eq!(store.simulate(&request).decision.action, PolicyAction::Block);
+        assert_eq!(
+            store.simulate(&request).decision.action,
+            PolicyAction::Block
+        );
 
         let mut other = base_request();
         other.group_ids = Some(vec!["finance".into()]);

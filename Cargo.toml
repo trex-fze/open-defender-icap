@@ -3,6 +3,7 @@ members = [
     "crates/common-types",
     "crates/config-core",
     "crates/policy-dsl",
+    "crates/taxonomy",
     "services/icap-adaptor",
     "services/policy-engine",
     "services/admin-api",

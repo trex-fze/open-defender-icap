@@ -89,24 +89,41 @@ export const overrides = [
   { id: 'ovr-101', scope: 'user:ceo@example.com', action: 'require-approval', expires: 'never', status: 'active' },
 ];
 
-export const taxonomy = {
+export const taxonomyActivation = {
+  version: 'mock-2026-03-20',
+  updatedAt: '2026-03-20T15:04:00Z',
+  updatedBy: 'system',
   categories: [
     {
-      id: 'cat-social',
+      id: 'social-media',
       name: 'Social Media',
-      defaultAction: 'Warn',
+      enabled: true,
+      locked: false,
       subcategories: [
-        { id: 'sub-short', name: 'Short form video', defaultAction: 'Warn' },
-        { id: 'sub-forums', name: 'Forums', defaultAction: 'Monitor' },
+        { id: 'short-video-platforms', name: 'Short-video platforms', enabled: true, locked: false },
+        { id: 'social-networks', name: 'Social networks', enabled: true, locked: false },
+        { id: 'creator-platforms', name: 'Creator platforms', enabled: false, locked: false },
       ],
     },
     {
-      id: 'cat-malware',
-      name: 'Malware',
-      defaultAction: 'Block',
+      id: 'malware-phishing-fraud',
+      name: 'Malware / Phishing / Fraud',
+      enabled: false,
+      locked: false,
       subcategories: [
-        { id: 'sub-c2', name: 'Command & Control', defaultAction: 'Block' },
-        { id: 'sub-dropper', name: 'Dropper', defaultAction: 'Block' },
+        { id: 'phishing-sites', name: 'Phishing sites', enabled: false, locked: false },
+        { id: 'malware-delivery', name: 'Malware delivery', enabled: false, locked: false },
+        { id: 'credential-theft', name: 'Credential theft', enabled: false, locked: false },
+      ],
+    },
+    {
+      id: 'unknown-unclassified',
+      name: 'Unknown / Unclassified',
+      enabled: true,
+      locked: true,
+      subcategories: [
+        { id: 'newly-seen-unknowns', name: 'Newly seen unknowns', enabled: true, locked: true },
+        { id: 'insufficient-evidence', name: 'Insufficient evidence', enabled: true, locked: true },
       ],
     },
   ],

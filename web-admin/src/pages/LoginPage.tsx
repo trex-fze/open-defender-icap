@@ -1,4 +1,5 @@
 import { FormEvent, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 type LoginResponse = {
@@ -11,10 +12,20 @@ type LoginResponse = {
   };
 };
 
-const ADMIN_API_BASE = (import.meta.env.VITE_ADMIN_API_URL ?? '').trim();
+const resolveAdminApiBase = (): string => {
+  const configured = (import.meta.env.VITE_ADMIN_API_URL ?? '').trim();
+  if (configured) {
+    return configured;
+  }
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:19000`;
+  }
+  return 'http://localhost:19000';
+};
 
 export const LoginPage = () => {
   const { login, authNotice, clearAuthNotice } = useAuth();
+  const navigate = useNavigate();
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -28,16 +39,19 @@ export const LoginPage = () => {
     setError(undefined);
     setSubmitting(true);
     try {
-      const url = ADMIN_API_BASE
-        ? new URL('/api/v1/auth/login', ADMIN_API_BASE).toString()
-        : '/api/v1/auth/login';
+      const url = new URL('/api/v1/auth/login', resolveAdminApiBase()).toString();
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: username.trim(), password }),
       });
       if (!response.ok) {
-        throw new Error('Invalid username or password');
+        const body = await response.json().catch(() => null);
+        const message =
+          (body && typeof body.message === 'string' && body.message) ||
+          (body && typeof body.error === 'string' && body.error) ||
+          `Login failed (${response.status})`;
+        throw new Error(message);
       }
       const payload = (await response.json()) as LoginResponse;
       login(
@@ -53,6 +67,7 @@ export const LoginPage = () => {
           },
         },
       );
+      navigate('/dashboard', { replace: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Login failed';
       setError(message);

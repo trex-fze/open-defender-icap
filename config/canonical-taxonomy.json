@@ -537,14 +537,13 @@
     {
       "id": "unknown-unclassified",
       "name": "Unknown / Unclassified",
-      "always_enabled": true,
       "subcategories": [
-        { "id": "newly-seen-unknowns", "name": "Newly seen unknowns", "always_enabled": true },
-        { "id": "insufficient-evidence", "name": "Insufficient evidence", "always_enabled": true },
-        { "id": "dynamic-unresolved", "name": "Dynamic/unresolved", "always_enabled": true },
-        { "id": "parked-domains", "name": "Parked domains", "always_enabled": true },
-        { "id": "placeholder-error-pages", "name": "Placeholder/error pages", "always_enabled": true },
-        { "id": "unreachable-temporary-failures", "name": "Unreachable/temporary failures", "always_enabled": true }
+        { "id": "newly-seen-unknowns", "name": "Newly seen unknowns" },
+        { "id": "insufficient-evidence", "name": "Insufficient evidence" },
+        { "id": "dynamic-unresolved", "name": "Dynamic/unresolved" },
+        { "id": "parked-domains", "name": "Parked domains" },
+        { "id": "placeholder-error-pages", "name": "Placeholder/error pages" },
+        { "id": "unreachable-temporary-failures", "name": "Unreachable/temporary failures" }
       ]
     }
   ]

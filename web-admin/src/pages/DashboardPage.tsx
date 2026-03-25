@@ -1,10 +1,19 @@
-import { kpis, reviewQueue } from '../data/mockData';
+import { kpis } from '../data/mockData';
 import { useOpsStatus } from '../hooks/useOpsStatus';
+import { useReviewQueueData } from '../hooks/useReviewQueueData';
 import { useNavigate } from 'react-router-dom';
 
 export const DashboardPage = () => {
   const navigate = useNavigate();
   const { data: ops, loading: opsLoading, error: opsError } = useOpsStatus();
+  const review = useReviewQueueData();
+
+  const riskTone = (risk: string): 'red' | 'amber' | 'green' => {
+    const value = risk.toLowerCase();
+    if (value === 'critical' || value === 'high') return 'red';
+    if (value === 'medium' || value === 'urgent') return 'amber';
+    return 'green';
+  };
 
   return (
     <div>
@@ -58,7 +67,7 @@ export const DashboardPage = () => {
         </div>
         <div className="glass-panel">
           <p className="section-title">Review SLA</p>
-        <div className="table-wrapper" role="region" tabIndex={0} aria-label="Review SLA table">
+          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Review SLA table">
             <table>
               <thead>
                 <tr>
@@ -68,18 +77,35 @@ export const DashboardPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {reviewQueue.slice(0, 3).map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.key}</td>
-                    <td>
-                      <span className={`chip chip--${item.risk === 'critical' ? 'red' : 'amber'}`}>{item.status}</span>
+                {review.loading ? (
+                  <tr>
+                    <td colSpan={3} style={{ color: 'var(--muted)' }}>
+                      Loading live review queue...
                     </td>
-                    <td>{item.sla}</td>
                   </tr>
-                ))}
+                ) : review.data.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} style={{ color: 'var(--muted)' }}>
+                      Review queue is currently empty.
+                    </td>
+                  </tr>
+                ) : (
+                  review.data.slice(0, 3).map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.key}</td>
+                      <td>
+                        <span className={`chip chip--${riskTone(item.risk)}`}>{item.status}</span>
+                      </td>
+                      <td>{item.sla}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
+          {review.isMock ? (
+            <p style={{ marginTop: '0.6rem', color: '#ffcc88' }}>Using fallback data: {review.error ?? 'API unavailable'}</p>
+          ) : null}
         </div>
       </div>
     </div>

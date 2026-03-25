@@ -38,10 +38,13 @@ export const useAdminApi = () => {
     return base;
   }, [accessToken]);
 
-  return {
-    baseUrl,
-    accessToken,
-    canCallApi,
-    headers,
-  };
+  return useMemo(
+    () => ({
+      baseUrl,
+      accessToken,
+      canCallApi,
+      headers,
+    }),
+    [baseUrl, accessToken, canCallApi, headers],
+  );
 };

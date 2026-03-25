@@ -126,6 +126,7 @@ pub struct AppState {
     iam: Arc<IamService>,
     canonical_taxonomy: Arc<CanonicalTaxonomy>,
     taxonomy_store: Arc<TaxonomyStore>,
+    taxonomy_mutation_enabled: bool,
 }
 
 impl AppState {
@@ -147,6 +148,10 @@ impl AppState {
 
     pub fn taxonomy_store(&self) -> Arc<TaxonomyStore> {
         self.taxonomy_store.clone()
+    }
+
+    pub fn taxonomy_mutation_enabled(&self) -> bool {
+        self.taxonomy_mutation_enabled
     }
 
     async fn invalidate_override(&self, scope_type: &str, scope_value: &str) {
@@ -394,6 +399,9 @@ async fn main() -> Result<()> {
         .context("failed to load canonical taxonomy")?
         .into_arc();
     let taxonomy_store = Arc::new(TaxonomyStore::new(canonical_taxonomy.clone()));
+    let taxonomy_mutation_enabled = env::var("OD_TAXONOMY_MUTATION_ENABLED")
+        .map(|value| matches!(value.to_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
 
     let state = AppState {
         pool: pool.clone(),
@@ -405,6 +413,7 @@ async fn main() -> Result<()> {
         iam: iam_service.clone(),
         canonical_taxonomy,
         taxonomy_store,
+        taxonomy_mutation_enabled,
     };
 
     let auth_layer = {
@@ -456,6 +465,22 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/taxonomy/activation",
             put(taxonomy::update_taxonomy_activation),
+        )
+        .route(
+            "/api/v1/taxonomy/categories",
+            post(taxonomy::block_category_mutation),
+        )
+        .route(
+            "/api/v1/taxonomy/categories/:id",
+            put(taxonomy::block_category_mutation).delete(taxonomy::block_category_mutation),
+        )
+        .route(
+            "/api/v1/taxonomy/subcategories",
+            post(taxonomy::block_subcategory_mutation),
+        )
+        .route(
+            "/api/v1/taxonomy/subcategories/:id",
+            put(taxonomy::block_subcategory_mutation).delete(taxonomy::block_subcategory_mutation),
         )
         .route(
             "/api/v1/reporting/aggregates",
@@ -1003,6 +1028,10 @@ impl ApiError {
 
     pub fn forbidden() -> Self {
         Self::new("FORBIDDEN", "insufficient privileges")
+    }
+
+    pub fn code(&self) -> &str {
+        self.error_code
     }
 
     pub fn message(&self) -> &str {

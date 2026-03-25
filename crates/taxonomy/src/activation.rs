@@ -61,6 +61,40 @@ impl ActivationState {
         }
     }
 
+    pub fn from_maps(
+        category_states: HashMap<String, bool>,
+        subcategory_states: HashMap<String, HashMap<String, bool>>,
+        default_enabled: bool,
+    ) -> Self {
+        Self {
+            inner: RwLock::new(ActivationProfile {
+                id: Uuid::nil(),
+                version: "static".into(),
+                updated_at: Utc::now(),
+                category_states,
+                subcategory_states,
+                default_enabled,
+            }),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn testing_from_maps(
+        category_states: HashMap<String, bool>,
+        subcategory_states: HashMap<String, HashMap<String, bool>>,
+    ) -> Self {
+        Self {
+            inner: RwLock::new(ActivationProfile {
+                id: Uuid::nil(),
+                version: "test".into(),
+                updated_at: Utc::now(),
+                category_states,
+                subcategory_states,
+                default_enabled: false,
+            }),
+        }
+    }
+
     fn replace_if_new(&self, profile: ActivationProfile) -> Option<String> {
         let mut guard = self.inner.write();
         if profile.updated_at > guard.updated_at || profile.id != guard.id {

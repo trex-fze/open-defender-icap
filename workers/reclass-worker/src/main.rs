@@ -4,7 +4,9 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{Duration as ChronoDuration, Utc};
 use common_types::PageFetchJob;
 use serde::{Deserialize, Serialize};
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Row, Transaction};
+use std::sync::Arc;
+use taxonomy::TaxonomyStore;
 use tokio::{signal, time::Duration};
 use tracing::{error, info, warn, Level};
 use url::Url;
@@ -93,6 +95,9 @@ async fn main() -> Result<()> {
         .connect(&cfg.database_url)
         .await?;
 
+    let taxonomy_store =
+        Arc::new(TaxonomyStore::load_default().context("failed to load canonical taxonomy")?);
+
     let publisher = JobPublisher::new(&cfg.redis_url, &cfg.job_stream)?;
     let page_fetch_publisher = cfg
         .page_fetch_queue
@@ -104,6 +109,7 @@ async fn main() -> Result<()> {
         pool.clone(),
         cfg.planner_batch_size,
         Duration::from_secs(cfg.planner_interval_seconds.max(5)),
+        Arc::clone(&taxonomy_store),
     );
     let dispatcher = Dispatcher::new(
         pool.clone(),
@@ -231,14 +237,24 @@ struct Planner {
     pool: PgPool,
     batch_size: i64,
     interval: Duration,
+    taxonomy: Arc<TaxonomyStore>,
+    taxonomy_version: String,
 }
 
 impl Planner {
-    fn new(pool: PgPool, batch_size: i64, interval: Duration) -> Self {
+    fn new(
+        pool: PgPool,
+        batch_size: i64,
+        interval: Duration,
+        taxonomy: Arc<TaxonomyStore>,
+    ) -> Self {
+        let taxonomy_version = taxonomy.taxonomy().version.clone();
         Self {
             pool,
             batch_size,
             interval,
+            taxonomy,
+            taxonomy_version,
         }
     }
 
@@ -267,7 +283,8 @@ impl Planner {
         let mut tx = self.pool.begin().await?;
         let rows = sqlx::query(
             r#"
-            SELECT id, normalized_key, COALESCE(ttl_seconds, 3600) as ttl_seconds
+            SELECT id, normalized_key, primary_category, subcategory,
+                   COALESCE(ttl_seconds, 3600) as ttl_seconds
             FROM classifications
             WHERE status = 'active'
               AND next_refresh_at IS NOT NULL
@@ -292,6 +309,11 @@ impl Planner {
             let classification_id: Uuid = row.try_get("id")?;
             let normalized_key: String = row.try_get("normalized_key")?;
             let ttl_seconds: i32 = row.try_get::<i32, _>("ttl_seconds")?;
+            let primary_category: String = row.try_get("primary_category")?;
+            let subcategory: String = row.try_get("subcategory")?;
+
+            self.ensure_canonical_labels(&mut tx, classification_id, primary_category, subcategory)
+                .await?;
             let ttl = i64::from(ttl_seconds).max(300);
             let next_refresh = Utc::now() + ChronoDuration::seconds(ttl);
 
@@ -330,6 +352,42 @@ impl Planner {
         metrics::record_jobs_planned(planned as u64);
         metrics::set_reclass_backlog(self.fetch_backlog().await?);
         Ok(planned)
+    }
+
+    async fn ensure_canonical_labels(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        classification_id: Uuid,
+        category: String,
+        subcategory: String,
+    ) -> Result<()> {
+        let validated = self
+            .taxonomy
+            .validate_labels(&category, Some(subcategory.as_str()));
+        let new_category = validated.category.id.clone();
+        let new_subcategory = validated.subcategory.id.clone();
+        let needs_update = validated.fallback_reason.is_some()
+            || new_category != category
+            || new_subcategory != subcategory;
+
+        if needs_update {
+            sqlx::query(
+                "UPDATE classifications SET primary_category = $1, subcategory = $2, taxonomy_version = $3, updated_at = NOW() WHERE id = $4",
+            )
+            .bind(&new_category)
+            .bind(&new_subcategory)
+            .bind(&self.taxonomy_version)
+            .bind(classification_id)
+            .execute(&mut **tx)
+            .await?;
+            info!(
+                target = "svc-reclass",
+                classification_id = %classification_id,
+                "canonicalized legacy classification labels"
+            );
+        }
+
+        Ok(())
     }
 
     async fn fetch_backlog(&self) -> Result<i64> {
@@ -629,7 +687,8 @@ mod tests {
         )
         .await?;
 
-        let planner = Planner::new(pool.clone(), 10, Duration::from_secs(1));
+        let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
+        let planner = Planner::new(pool.clone(), 10, Duration::from_secs(1), taxonomy);
         let planned = planner.plan_batch().await?;
         assert_eq!(planned, 1);
 
@@ -700,6 +759,67 @@ mod tests {
         assert_eq!(stream_len, 1);
 
         drop(redis_guard);
+        drop(pg_guard);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn planner_canonicalizes_legacy_labels() -> Result<()> {
+        let (pg_guard, pg_port) = start_postgres_container()?;
+        let database_url = format!(
+            "postgres://postgres:postgres@{}:{}/postgres",
+            test_host(),
+            pg_port
+        );
+        let pool = connect_postgres(&database_url).await?;
+        apply_migrations(&pool).await;
+
+        let classification_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO classifications (
+                id, normalized_key, taxonomy_version, model_version,
+                primary_category, subcategory, risk_level, recommended_action,
+                confidence, sfw, flags, ttl_seconds, status, next_refresh_at
+            ) VALUES (
+                $1, $2, 'legacy', 'test', 'Social', 'Short form video',
+                'low', 'Allow', 0.5, true, '{}'::jsonb, 3600, 'active', NOW()
+            )
+            "#,
+        )
+        .bind(classification_id)
+        .bind("domain:legacy.test")
+        .execute(&pool)
+        .await?;
+
+        let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
+        let planner = Planner::new(
+            pool.clone(),
+            1,
+            Duration::from_secs(1),
+            Arc::clone(&taxonomy),
+        );
+        let mut tx = pool.begin().await?;
+        planner
+            .ensure_canonical_labels(
+                &mut tx,
+                classification_id,
+                "Social".into(),
+                "Short form video".into(),
+            )
+            .await?;
+        tx.commit().await?;
+
+        let row =
+            sqlx::query("SELECT primary_category, subcategory FROM classifications WHERE id = $1")
+                .bind(classification_id)
+                .fetch_one(&pool)
+                .await?;
+        let category: String = row.try_get("primary_category")?;
+        let subcategory: String = row.try_get("subcategory")?;
+        assert_eq!(category, "social-media");
+        assert_eq!(subcategory, "short-video-platforms");
+
         drop(pg_guard);
         Ok(())
     }

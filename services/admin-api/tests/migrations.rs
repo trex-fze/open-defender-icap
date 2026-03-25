@@ -19,15 +19,16 @@ async fn migrations_apply_and_seed_roles() -> Result<()> {
         .await?;
 
     // Apply the full migration stack to ensure the IAM tables exist.
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
 
     let role_row = sqlx::query("SELECT COUNT(*) as count FROM iam_roles")
         .fetch_one(&pool)
         .await?;
     let role_count: i64 = role_row.get("count");
-    assert!(role_count >= 5, "expected at least 5 seeded roles, saw {role_count}");
+    assert!(
+        role_count >= 5,
+        "expected at least 5 seeded roles, saw {role_count}"
+    );
 
     let perm_row = sqlx::query(
         "SELECT COUNT(*) as count FROM iam_role_permissions WHERE permission = 'iam:manage'",
@@ -35,7 +36,10 @@ async fn migrations_apply_and_seed_roles() -> Result<()> {
     .fetch_one(&pool)
     .await?;
     let perm_count: i64 = perm_row.get("count");
-    assert!(perm_count >= 1, "expected iam:manage permission to be seeded");
+    assert!(
+        perm_count >= 1,
+        "expected iam:manage permission to be seeded"
+    );
 
     Ok(())
 }

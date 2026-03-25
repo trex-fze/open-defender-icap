@@ -24,6 +24,7 @@ prometheus = { workspace = true }
 once_cell = { workspace = true }
 policy-dsl = { path = "../../crates/policy-dsl" }
 common-types = { path = "../../crates/common-types" }
+taxonomy = { path = "../../crates/taxonomy" }
 argon2 = "0.5"
 rand = "0.8"
 thiserror = { workspace = true }

@@ -27,7 +27,10 @@ async fn iam_audit_rejects_non_object_payloads() -> Result<()> {
     .bind("\"bogus\"")
     .execute(&pool)
     .await;
-    assert!(bad.is_err(), "expected payload constraint to reject string values");
+    assert!(
+        bad.is_err(),
+        "expected payload constraint to reject string values"
+    );
 
     Ok(())
 }

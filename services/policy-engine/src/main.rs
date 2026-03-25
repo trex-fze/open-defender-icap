@@ -356,7 +356,7 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use axum::routing::Router;
     use common_types::PolicyAction;
-    use std::fs;
+    use std::{collections::HashMap, fs};
     use tower::ServiceExt;
     use uuid::Uuid;
 
@@ -438,5 +438,50 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn unknown_toggle_controls_decision() {
+        let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
+        let doc = PolicyDocument {
+            version: "test".into(),
+            rules: vec![policy_dsl::PolicyRule {
+                id: "allow-all".into(),
+                description: None,
+                priority: 1,
+                action: PolicyAction::Allow,
+                conditions: policy_dsl::Conditions::default(),
+            }],
+        };
+        let store = PolicyStore::from_document(doc.clone(), Arc::clone(&taxonomy)).unwrap();
+        let evaluator = PolicyEvaluator::from_file(
+            store,
+            "test".into(),
+            Arc::new(ActivationState::allow_all()),
+        );
+        let request = DecisionRequest {
+            normalized_key: "domain:unknown.test".into(),
+            entity_level: "domain".into(),
+            source_ip: "192.0.2.10".into(),
+            user_id: None,
+            group_ids: None,
+            category_hint: Some("Unknown / Unclassified".into()),
+            risk_hint: None,
+            confidence_hint: None,
+        };
+        let decision = evaluator.evaluate(&request);
+        assert_eq!(decision.action, PolicyAction::Allow);
+
+        let mut category_states = HashMap::new();
+        category_states.insert("unknown-unclassified".into(), false);
+        let activation = Arc::new(ActivationState::from_maps(
+            category_states,
+            HashMap::new(),
+            false,
+        ));
+        let store_block = PolicyStore::from_document(doc, taxonomy).unwrap();
+        let evaluator = PolicyEvaluator::from_file(store_block, "test".into(), activation);
+        let decision = evaluator.evaluate(&request);
+        assert_eq!(decision.action, PolicyAction::Block);
     }
 }
