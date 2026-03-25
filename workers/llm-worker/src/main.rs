@@ -1260,7 +1260,7 @@ mod tests {
     use super::*;
     use axum::{extract::Json, routing::post, Router};
     use portpicker::pick_unused_port;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::{
         env,
         process::{Command, Stdio},
@@ -1459,6 +1459,107 @@ mod tests {
         assert!(
             !exists,
             "invalid LLM response should not persist classification"
+        );
+
+        consumer_handle.abort();
+        server_task.abort();
+        drop(redis_guard);
+        drop(postgres_guard);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn classification_persists_canonical_labels_and_flags() -> Result<()> {
+        let (redis_guard, redis_port) = start_redis_container()?;
+        let redis_url = format!("redis://{}:{}/", test_host(), redis_port);
+        wait_for_redis(&redis_url).await?;
+
+        let (postgres_guard, pg_port) = start_postgres_container()?;
+        let database_url = format!(
+            "postgres://postgres:postgres@{}:{}/postgres",
+            test_host(),
+            pg_port
+        );
+        let pool = connect_postgres(&database_url).await?;
+        apply_migrations(&pool).await;
+
+        let (llm_endpoint, server_task) = spawn_llm_with_payload(json!({
+            "primary_category": "Social",
+            "subcategory": "Short form video",
+            "risk_level": "low",
+            "confidence": 0.91,
+            "recommended_action": "Allow"
+        }))
+        .await;
+
+        let cfg = WorkerConfig {
+            queue_name: "classification-jobs".into(),
+            redis_url: redis_url.clone(),
+            cache_channel: "od:cache:invalidate".into(),
+            stream: "classification-jobs".into(),
+            database_url: database_url.clone(),
+            llm_endpoint: Some(llm_endpoint.clone()),
+            llm_api_key: Some("test-key".into()),
+            providers: Vec::new(),
+            routing: RoutingConfig::default(),
+            metrics_host: "127.0.0.1".into(),
+            metrics_port: 0,
+        };
+
+        let router = cfg.resolve_router().unwrap();
+        let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
+        let activation = Arc::new(ActivationState::allow_all());
+        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation)
+            .await
+            .unwrap();
+        let consumer_handle = tokio::spawn(async move { consumer.run().await });
+
+        let job = ClassificationJobPayload {
+            normalized_key: "domain:canonical.test".into(),
+            entity_level: "domain".into(),
+            hostname: "canonical.test".into(),
+            full_url: "https://canonical.test/".into(),
+            trace_id: "trace-canonical".into(),
+            requires_content: false,
+            base_url: None,
+            content_excerpt: None,
+            content_hash: None,
+            content_version: None,
+            content_language: None,
+        };
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        enqueue_job(&redis_url, &job).await.expect("enqueue job");
+
+        timeout(Duration::from_secs(30), async {
+            loop {
+                if classification_exists(&pool, &job.normalized_key)
+                    .await
+                    .expect("classification query")
+                {
+                    break;
+                }
+                sleep(Duration::from_millis(200)).await;
+            }
+        })
+        .await
+        .expect("classification persisted");
+
+        let row = sqlx::query(
+            "SELECT primary_category, subcategory, flags FROM classifications WHERE normalized_key = $1",
+        )
+        .bind(&job.normalized_key)
+        .fetch_one(&pool)
+        .await?;
+        let primary: String = row.try_get("primary_category")?;
+        let subcategory: String = row.try_get("subcategory")?;
+        let flags: Value = row.try_get("flags")?;
+
+        assert_eq!(primary, "social-media");
+        assert_eq!(subcategory, "short-video-platforms");
+        assert!(
+            flags.get("taxonomy_fallback_reason").is_none(),
+            "expected no fallback when canonical labels resolved"
         );
 
         consumer_handle.abort();
