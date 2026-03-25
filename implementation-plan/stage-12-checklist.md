@@ -26,16 +26,16 @@
 - [x] Add category/subcategory normalization and validation layer.
 - [x] Enforce unknown fallback when labels are non-canonical.
 - [x] Prevent taxonomy structure mutations by default (`TAXONOMY_LOCKED`).
-- [ ] Add optional maintenance flag `OD_TAXONOMY_MUTATION_ENABLED`.
-- [ ] Emit audit event for blocked mutation attempts.
+- [x] Add optional maintenance flag `OD_TAXONOMY_MUTATION_ENABLED`.
+- [x] Emit audit event for blocked mutation attempts.
 - [x] Add `PUT /api/v1/taxonomy/activation` endpoint.
 - [x] Return activation flags from `GET /api/v1/taxonomy`.
-- [ ] Ensure `Unknown / Unclassified` toggle controls whether unclassified traffic is allowed (no hidden overrides).
+- [x] Ensure `Unknown / Unclassified` toggle controls whether unclassified traffic is allowed (no hidden overrides).
 
 ## Classification Pipeline
 
 - [x] Apply validation/fallback in LLM worker persistence path.
-- [ ] Apply validation/fallback in reclassification worker path.
+- [x] Apply validation/fallback in reclassification worker path.
 - [x] Ensure manual unblock/classification paths also validate taxonomy labels.
 
 ## Web Admin
@@ -61,9 +61,9 @@
 - [ ] Integration tests for taxonomy mutation lock behavior.
 - [ ] Integration tests for canonical persistence in classification paths.
 - [ ] Integration tests for activation profile save/reload behavior.
-- [ ] Frontend tests confirming taxonomy read-only UX.
-- [ ] Frontend tests for checkbox toggle + save + reset workflow.
-- [ ] Tests verifying unknown toggle allow/deny behavior.
+- [x] Frontend tests confirming taxonomy read-only UX.
+- [x] Frontend tests for checkbox toggle + save + reset workflow.
+- [x] Tests verifying unknown toggle allow/deny behavior.
 
 ## Documentation and Rollout
 
@@ -79,5 +79,5 @@
 - [x] Taxonomy structure CRUD is blocked by default and audited.
 - [x] Frontend taxonomy page lists all canonical entries with checkbox controls.
 - [x] Operators can enable/disable via checkbox and persist by clicking Save.
-- [ ] Unknown toggle ON allows unclassified traffic; OFF blocks it.
+- [x] Unknown toggle ON allows unclassified traffic; OFF blocks it.
 - [x] Frontend taxonomy page is read-only for structure and explains governance + checkbox contract.
