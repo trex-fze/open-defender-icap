@@ -159,14 +159,14 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ../../config:/app/config:ro
+    ports:
+      - "19015:19015"
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
       admin-api:
-        condition: service_started
-      mock-openai:
         condition: service_started
 
   event-ingester:

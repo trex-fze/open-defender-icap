@@ -6,16 +6,24 @@
   "database_url": "postgres://defender:defender@postgres:5432/defender_admin",
   "providers": [
     {
-      "name": "mock-openai",
+      "name": "local-lmstudio",
+      "type": "lm_studio",
+      "endpoint": "http://192.168.1.170:1234/v1/chat/completions",
+      "model": "gpt-oss-120b",
+      "timeout_ms": 5000
+    },
+    {
+      "name": "openai-fallback",
       "type": "openai",
-      "endpoint": "http://mock-openai:8080/v1/chat/completions",
-      "model": "mock-gpt",
+      "endpoint": "https://api.openai.com/v1/chat/completions",
+      "model": "gpt-4o-mini",
+      "api_key_env": "OPENAI_API_KEY",
       "timeout_ms": 10000
     }
   ],
   "routing": {
-    "default": "mock-openai",
-    "fallback": "mock-openai",
+    "default": "local-lmstudio",
+    "fallback": "openai-fallback",
     "policy": "failover"
   },
   "metrics_host": "0.0.0.0",

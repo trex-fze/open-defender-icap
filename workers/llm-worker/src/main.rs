@@ -1001,7 +1001,6 @@ async fn invoke_lmstudio_chat(
         "model": model,
         "temperature": 0.0,
         "stream": false,
-        "response_format": {"type": "json_object"},
         "max_tokens": 256,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},

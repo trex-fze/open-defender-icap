@@ -213,29 +213,37 @@ INTEGRATION_BUILD=1 INTEGRATION_BUILD_RETRIES=3 tests/integration.sh
 
 ## LLM Provider Configuration
 
-`config/llm-worker.json` supports multiple providers with routing/failover. Docker compose defaults to a local mock provider:
+`config/llm-worker.json` supports multiple providers with routing/failover. Docker compose now defaults to a local LM Studio instance with OpenAI fallback:
 
 ```jsonc
 {
   "providers": [
     {
-      "name": "mock-openai",
+      "name": "local-lmstudio",
+      "type": "lm_studio",
+      "endpoint": "http://192.168.1.170:1234/v1/chat/completions",
+      "model": "gpt-oss-120b",
+      "timeout_ms": 5000
+    },
+    {
+      "name": "openai-fallback",
       "type": "openai",
-      "endpoint": "http://mock-openai:8080/v1/chat/completions",
-      "model": "mock-gpt",
+      "endpoint": "https://api.openai.com/v1/chat/completions",
+      "model": "gpt-4o-mini",
+      "api_key_env": "OPENAI_API_KEY",
       "timeout_ms": 10000
     }
   ],
   "routing": {
-    "default": "mock-openai",
-    "fallback": "mock-openai",
+    "default": "local-lmstudio",
+    "fallback": "openai-fallback",
     "policy": "failover"
   }
 }
 ```
 
 - Supported `type` values: `ollama`, `lm_studio`, `vllm`, `openai`, `openai_compatible`, `anthropic`, `custom_json` (legacy HTTP).
-- For non-mock deployments, point providers at LM Studio/Ollama/vLLM/OpenAI/Anthropic endpoints and set required API key env vars.
+- Local deployments expect LM Studio listening on `192.168.1.170`; if unreachable, the worker automatically fails over to OpenAI (`gpt-4o-mini`). Provide `OPENAI_API_KEY` for fallback safety.
 - The worker automatically records provider names in logs/metrics; fallback triggers if the primary fails.
 - Query configured providers anytime: `curl http://localhost:19015/providers | jq`.
 - CLI inspection: `odctl llm providers --url http://localhost:19015/providers`.

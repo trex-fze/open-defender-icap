@@ -53,6 +53,12 @@ docker compose run --rm odctl-runner odctl smoke --profile compose || {
   exit 1
 }
 
+echo "[integration] Running LLM provider smoke test"
+COMPOSE_FILE=./docker-compose.yml \
+  LLM_METRICS_URL=${LLM_METRICS_URL:-http://localhost:19015/metrics} \
+  LLM_PROVIDERS_URL=${LLM_PROVIDERS_URL:-http://localhost:19015/providers} \
+  "$ROOT/tests/security/llm-prompt-smoke.sh"
+
 echo "[integration] Executing Stage 6 ingest smoke test"
 docker compose run --rm odctl-runner bash -lc "INGEST_URL=http://event-ingester:19100 ELASTIC_URL=http://elasticsearch:9200 ADMIN_URL=http://admin-api:19000 tests/stage06_ingest.sh"
 

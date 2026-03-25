@@ -93,7 +93,9 @@ Before first startup:
    - `config/admin-api.json`
    - `config/llm-worker.json`
 
-Compose defaults the LLM worker to the bundled mock provider for deterministic offline smoke tests.
+Compose defaults the LLM worker to a **real-first** profile: LM Studio at `http://192.168.1.170:1234` with OpenAI (`gpt-4o-mini`) as fallback.
+- Ensure the host running docker can reach `192.168.1.170`. If not, set `OPENAI_API_KEY` before running smokes so fallback has credentials.
+- The LLM provider smoke test will fail fast if neither the local LM Studio host nor OpenAI credentials are reachable.
 
 ## 5) Environment variables and usage details
 
