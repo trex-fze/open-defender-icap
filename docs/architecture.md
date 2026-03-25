@@ -26,15 +26,18 @@ flowchart LR
     subgraph Clients
         A[Users/Devices]
     end
+
     subgraph Proxy Layer
         B[Squid Proxy]
         C[ICAP Adaptor]
     end
+
     subgraph Decision Plane
         D[Policy Engine]
         E[(Redis Cache)]
-        F[(Postgres<br/>classifications/&nbsp;overrides)]
+        F[(Postgres<br/>classifications/overrides)]
     end
+
     subgraph Classification & Fetch
         CSTREAM[Redis Streams<br/>classification-jobs]
         PSTREAM[Redis Streams<br/>page-fetch-jobs]
@@ -45,13 +48,21 @@ flowchart LR
         PAGE[(Postgres<br/>page_contents)]
         PEND[(Postgres<br/>classification_requests)]
     end
-    subgraph Management Plane
+
+    subgraph Taxonomy Governance
+        TAX[Canonical Taxonomy<br/>config/canonical-taxonomy.json]
+        TACT[(Postgres<br/>taxonomy_activation_profiles<br/>taxonomy_activation_entries)]
         I[Admin API]
+        LOCK[TAXONOMY_LOCKED<br/>(legacy taxonomy CRUD)]
+    end
+
+    subgraph Management Plane
         J[React UI]
         K[odctl CLI]
         EI[Event Ingester]
         FB[Filebeat]
     end
+
     subgraph Observability
         L[(Elasticsearch/Kibana)]
         M[Prometheus]
@@ -61,28 +72,47 @@ flowchart LR
     D -->|PolicyDecision| C
     C -->|Cache lookup| E
     D -->|Persist verdict| F
+
     C -->|Enqueue classification| CSTREAM
     C -->|Enqueue page fetch| PSTREAM
-    CSTREAM --> G & H
+    CSTREAM --> G
+    CSTREAM --> H
     G -->|Pending record| PEND
     G -->|Verdict update| F
     G -->|Cache update| E
     H -->|TTL refresh| CSTREAM
     H -->|TTL refresh| PSTREAM
     H -->|Override writes| F
-    FB --> EI -->|Telemetry| L
-    C -->|Events| L
-    D -->|Events| L
+
     EI -->|Page fetch job| PSTREAM
     PSTREAM --> PF -->|HTTP crawl| CRAWL --> PF
-    PF -->|Store excerpt| PAGE --> I
+    PF -->|Store excerpt| PAGE
+
+    TAX -->|Canonical IDs + aliases| I
+    TAX -->|Canonical IDs + aliases| D
+    TAX -->|Canonical IDs + aliases| G
+    TAX -->|Canonical IDs + aliases| H
+
+    I -->|GET/PUT taxonomy activation| TACT
+    TACT -->|Activation refresh task| D
+    TACT -->|Activation refresh task| G
+
+    I -->|Block legacy taxonomy mutations| LOCK
+    I -->|taxonomy.mutation.blocked audit| L
+    I -->|taxonomy_activation_changes_total| M
+    G -->|taxonomy_fallback_total{reason}| M
+
     F --> I
+    PAGE --> I
     PEND --> I
     I --> J
     I --> K
     I --> D
+
+    FB --> EI -->|Telemetry| L
+    C -->|Events| L
+    D -->|Events| L
     C -->|Metrics| M
-    G -->|Metrics| M
     EI -->|Metrics| M
     PF -->|Metrics| M
 ```
@@ -105,6 +135,7 @@ flowchart LR
 - **Current Enhancements**: Loads policy DSL from `config/policies.json`, exposes `/api/v1/policies` (list) and `/api/v1/policies/reload` to refresh without restart.
 - **Database Option**: When `database_url` is configured, the service applies migrations in `services/policy-engine/migrations/`, seeds policies from the DSL file if the DB is empty, and serves policy list/create/simulate routes backed by Postgres (`policies`, `policy_rules` tables).
 - **Access Control**: Admin endpoints require an `X-Admin-Token` header when `admin_token` is set; the CLI reads this from `OD_ADMIN_TOKEN`.
+- **Taxonomy enforcement**: Every decision canonicalizes `category_hint` input using the shared taxonomy store and then gates the resulting `PolicyDecision` through the activation profile (fetched + auto-refreshed from `taxonomy_activation_profiles`). Disabled categories/subcategories force the decision to `Block`, guaranteeing operator toggles are honored.
 - **Future Enhancements**: Persistent policy CRUD UI/CLI with approvals, simulation endpoint, RBAC, audit events.
 - **Interfaces**: REST (JSON) for ICAP adaptor + admin tools; eventually gRPC for low-latency decision path.
 
@@ -116,13 +147,15 @@ flowchart LR
 ### 2.4 Classification & Reclassification Workers
 - **LLM Worker**: Consumes Redis Streams, builds prompts, calls LLM, validates JSON, persists classification, updates caches, emits audit events. When `requires_content` is set, the worker waits until `page_contents` has a fresh excerpt and records interim state in `classification_requests` so operators can see what is blocked.
 - **Reclass Worker**: Scheduled jobs for TTL expiry, taxonomy/model version upgrades, manual reclass triggers. Every refresh job now republishes both the classification and base-URL crawl job so repeated validations are still content-aware.
+- **Canonicalization & fallback**: Both workers load the canonical taxonomy at startup, remap legacy/alias labels, and fall back to `Unknown / Unclassified` with `taxonomy_fallback_reason` metadata before persisting rows. Activation state is periodically refreshed so workers block verdicts automatically when operators disable categories.
 
 ### 2.5 Management Plane
 - **Admin API**: Aggregates policy, overrides, review queue, reporting endpoints with OIDC auth. New endpoints expose pending classifications (`GET /api/v1/classifications/pending`) and allow manual unblock/reclassify actions that immediately update caches.
 - **React UI**: Dashboards, investigations, policy mgmt, review queue, health, cache inspection, and a “Pending Sites” view that surfaces everything stuck in `ContentPending` so analysts can approve or escalate.
 - **CLI (`odctl`)**: Commands for env validation, policy/override import/export, cache inspection/invalidation, reclass triggers, smoke tests, migrations, and `odctl classification pending|unblock` for security teams who prefer terminal workflows. (Taxonomy structure is now loaded exclusively from `config/canonical-taxonomy.json`; no CLI seeding step is required.)
+- **Taxonomy governance**: Admin API, UI, and CLI treat the canonical taxonomy file as immutable. Operators toggle allow/deny via activation checkboxes only; legacy taxonomy CRUD routes respond with `TAXONOMY_LOCKED` unless the break-glass flag `OD_TAXONOMY_MUTATION_ENABLED=true` is set. Activation state lives in `taxonomy_activation_profiles` / `_entries` and is refreshed into policy engine + workers to gate final decisions.
 
-- **Postgres**: Authoritative store for policies, classifications, overrides, review queue, audits, taxonomy activation profiles (`taxonomy_activation_profiles` / `_entries`), `page_contents` (Stage 9 Crawl4AI excerpts), and the `classification_requests` table that tracks blocked keys awaiting content-aware verdicts.
+- **Postgres**: Authoritative store for policies, classifications, overrides, review queue, audits, taxonomy activation profiles (`taxonomy_activation_profiles` / `_entries`), `page_contents` (Stage 9 Crawl4AI excerpts), and the `classification_requests` table that tracks blocked keys awaiting content-aware verdicts. Canonical taxonomy structure lives on disk (`config/canonical-taxonomy.json`) and is reloaded into each service at startup; only activation state is mutable at runtime.
 - **Redis**: Distributed cache + queue coordination (Streams) + ephemeral job metadata.
 - **Elasticsearch**: Structured event/audit storage; Kibana dashboards.
 

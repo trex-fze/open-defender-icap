@@ -20,16 +20,21 @@ flowchart LR
     subgraph Async Classification & Fetch
         CSTREAM[Redis Streams<br/>classification-jobs]
         PSTREAM[Redis Streams<br/>page-fetch-jobs]
-        LLW["LLM Worker\n(AI verdicts)"]
-        RCW["Reclass Worker\n(refresh queue)"]
+        LLW["LLM Worker\n(canonicalize + verdict)"]
+        RCW["Reclass Worker\n(canonicalize + refresh)"]
         PF["Page Fetcher"]
         CRAWL[Crawl4AI Service]
         PAGE[(Postgres<br/>page_contents)]
         PEND[(Postgres<br/>classification_requests)]
     end
 
+    subgraph Taxonomy Governance
+        TAX[Canonical Taxonomy JSON<br/>config/canonical-taxonomy.json]
+        TACT[(Postgres<br/>taxonomy_activation_profiles<br/>taxonomy_activation_entries)]
+        AA[Admin API<br/>(read-only structure + activation toggles)]
+    end
+
     subgraph Ops & Observability
-        AA[Admin API]
         UI[React Admin UI]
         CLI[odctl CLI]
         EI[Event Ingester]
@@ -44,6 +49,7 @@ flowchart LR
     ICAP -->|Cache lookup| Cache
     PE -->|Verdict| ICAP
     PE -->|Persist| CLASS
+
     ICAP -->|Enqueue classification| CSTREAM
     ICAP -->|Enqueue page fetch| PSTREAM
     CSTREAM --> LLW
@@ -54,16 +60,27 @@ flowchart LR
     LLW -->|Verdicts| CLASS
     LLW -->|Cache update| Cache
     RCW -->|Overrides/TTL| CLASS
+
     EI -->|Page fetch job| PSTREAM
     PSTREAM --> PF
     PF -->|HTTP crawl| CRAWL --> PF
     PF -->|Store excerpt| PAGE
+
+    TAX --> AA
+    TAX --> PE
+    TAX --> LLW
+    TAX --> RCW
+    AA -->|Load/save activation profile| TACT
+    TACT -->|Activation refresh| PE
+    TACT -->|Activation refresh| LLW
+
     CLASS --> AA
     PAGE --> AA
     PEND --> AA
-    FB -->|Logs| EI --> ES --> KB
     AA --> UI
     AA --> CLI
+
+    FB -->|Logs| EI --> ES --> KB
     AA --> PR
     ICAP --> PR
     LLW --> PR
