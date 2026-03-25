@@ -4,7 +4,9 @@ This reference lists every HTTP endpoint exposed by the services in this reposit
 
 **Conventions**
 
-- `X-Admin-Token` refers to the static token configured for either the Admin API or the policy engine. When OIDC is enabled, bearer tokens must contain the roles noted in each table. The policy engine now trusts the Admin API IAM resolver, so whatever credentials you use against `/api/v1/iam/whoami` will automatically flow to downstream services.
+- `X-Admin-Token` refers to machine/service-account tokens.
+- Local interactive login uses `POST /api/v1/auth/login` and returns bearer tokens for `Authorization: Bearer ...`.
+- When OIDC mode is enabled, bearer tokens must contain the roles noted in each table. The policy engine trusts the Admin API IAM resolver, so credentials accepted by `/api/v1/iam/whoami` flow downstream.
 - Timestamps are ISO 8601 strings (`2026-03-24T10:15:30Z`).
 - All JSON bodies use UTF‑8 and should include `Content-Type: application/json`.
 - Metrics endpoints return Prometheus text exposition format and do not require auth.
@@ -36,6 +38,12 @@ All routes require `X-Admin-Token` or a JWT with the listed roles. Pagination pa
 | `GET` | `/api/v1/overrides` | List override records (filters via query: `scope_type`, `status`, `search`). | `policy-viewer`. | — | Paged list of `OverrideRecord`. |
 | `POST` | `/api/v1/overrides` | Create an override. | `policy-editor`. | `{ scope_type: "domain"\|"user"\|"ip", scope_value, action: allow/block/warn/monitor/review/require-approval, reason?, created_by?, expires_at?, status? }`. | Newly created `OverrideRecord`. |
 | `PUT`/`DELETE` | `/api/v1/overrides/:id` | Update or delete an override. | `policy-editor`. | Same payload as create (for PUT). | Updated `OverrideRecord` or `204 No Content`. |
+
+### Authentication
+
+| Method | Path | Description | Auth | Request Schema | Response |
+| --- | --- | --- | --- | --- | --- |
+| `POST` | `/api/v1/auth/login` | Local username/password login (local/hybrid auth mode). | Public route. | `{ username, password }` | `{ access_token, expires_in, user { id, username, email, roles, permissions, must_change_password } }` |
 
 ### Review Queue
 

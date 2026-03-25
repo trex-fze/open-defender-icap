@@ -6,10 +6,16 @@
   "redis_url": "redis://redis:6379",
   "cache_channel": "od:cache:invalidate",
   "auth": {
+    "mode": "local",
     "static_roles": ["policy-admin", "policy-editor", "policy-viewer", "auditor"],
     "oidc_issuer": null,
     "oidc_audience": null,
-    "oidc_hs256_secret": null
+    "oidc_hs256_secret": null,
+    "allow_claim_fallback": true,
+    "local_jwt_secret": null,
+    "local_jwt_ttl_seconds": 3600,
+    "max_failed_attempts": 5,
+    "lockout_seconds": 900
   },
   "audit": {
     "elastic_url": null,

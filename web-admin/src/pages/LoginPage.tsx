@@ -1,24 +1,64 @@
 import { FormEvent, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-const BOOTSTRAP_TOKEN = (import.meta.env.VITE_ADMIN_TOKEN ?? '').trim();
+type LoginResponse = {
+  access_token: string;
+  expires_in: number;
+  user: {
+    email: string;
+    display_name?: string | null;
+    roles: string[];
+  };
+};
+
+const ADMIN_API_BASE = (import.meta.env.VITE_ADMIN_API_URL ?? '').trim();
 
 export const LoginPage = () => {
   const { login, authNotice, clearAuthNotice } = useAuth();
-  const [email, setEmail] = useState('avery@example.com');
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string>();
 
-  const handleSubmit = (event: FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    const fallbackToken = BOOTSTRAP_TOKEN || `demo-${crypto.randomUUID?.() ?? Date.now()}`;
-    login(
-      { email, name: email.split('@')[0] },
-      {
-        tokens: {
-          accessToken: fallbackToken,
-          expiresAt: Date.now() + 60 * 60 * 1000,
+    if (!username.trim() || !password) {
+      return;
+    }
+    setError(undefined);
+    setSubmitting(true);
+    try {
+      const url = ADMIN_API_BASE
+        ? new URL('/api/v1/auth/login', ADMIN_API_BASE).toString()
+        : '/api/v1/auth/login';
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
+      if (!response.ok) {
+        throw new Error('Invalid username or password');
+      }
+      const payload = (await response.json()) as LoginResponse;
+      login(
+        {
+          email: payload.user.email,
+          name: payload.user.display_name || payload.user.email,
+          roles: payload.user.roles as any,
         },
-      },
-    );
+        {
+          tokens: {
+            accessToken: payload.access_token,
+            expiresAt: Date.now() + payload.expires_in * 1000,
+          },
+        },
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Login failed';
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -34,9 +74,9 @@ export const LoginPage = () => {
           boxShadow: '0 30px 80px rgba(0,0,0,0.45)',
         }}
       >
-        <p className="section-title">OIDC Sign-in</p>
+        <p className="section-title">Local Sign-in</p>
         <h2 style={{ marginTop: 0 }}>Welcome back</h2>
-        <p style={{ color: '#8ca0cb' }}>Prototype device flow — in production this will redirect to your IdP.</p>
+        <p style={{ color: '#8ca0cb' }}>Sign in using your local username or email and password.</p>
         {authNotice ? (
           <div
             style={{
@@ -50,17 +90,40 @@ export const LoginPage = () => {
             <p style={{ margin: 0 }}>{authNotice}</p>
           </div>
         ) : null}
-        <label htmlFor="login-email" style={{ display: 'block', marginBottom: '0.35rem' }}>
-          Email
+        {error ? (
+          <div
+            style={{
+              border: '1px solid rgba(255, 122, 122, 0.5)',
+              borderRadius: '0.75rem',
+              padding: '0.65rem 0.8rem',
+              color: '#ff9b9b',
+              marginBottom: '0.9rem',
+            }}
+          >
+            <p style={{ margin: 0 }}>{error}</p>
+          </div>
+        ) : null}
+        <label htmlFor="login-username" style={{ display: 'block', marginBottom: '0.35rem' }}>
+          Username or Email
         </label>
         <input
-          id="login-email"
+          id="login-username"
           className="search-input"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          type="email"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          type="text"
         />
-        <button type="submit" className="cta-button" style={{ width: '100%', marginTop: '1.25rem' }}>
+        <label htmlFor="login-password" style={{ display: 'block', marginTop: '0.8rem', marginBottom: '0.35rem' }}>
+          Password
+        </label>
+        <input
+          id="login-password"
+          className="search-input"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          type="password"
+        />
+        <button type="submit" className="cta-button" style={{ width: '100%', marginTop: '1.25rem' }} disabled={submitting}>
           Continue
         </button>
         {authNotice ? (

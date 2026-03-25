@@ -1,15 +1,21 @@
-use crate::iam::{EffectiveAccess, IamError, IamService, ServiceAccountPrincipal};
+use crate::iam::{
+    EffectiveAccess, IamError, IamService, LocalAuthenticatedUser, ServiceAccountPrincipal,
+};
+use crate::{ApiError, AppState};
 use axum::{
     body::Body,
+    extract::State,
     http::{header, Request, StatusCode},
     middleware::Next,
     response::Response,
+    Json,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::Sha256;
 use std::{collections::HashSet, env, sync::Arc};
 use tracing::error;
@@ -27,7 +33,11 @@ const ROLE_AUDITOR: &str = "auditor";
 pub struct AdminAuth {
     static_token: Option<String>,
     fallback_roles: Vec<String>,
+    mode: AuthMode,
     allow_claim_fallback: bool,
+    local_jwt: LocalJwtIssuer,
+    max_failed_attempts: i32,
+    lockout_seconds: i64,
     jwt: Option<JwtValidator>,
     iam: Arc<IamService>,
 }
@@ -35,16 +45,41 @@ pub struct AdminAuth {
 #[derive(Clone, Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct AuthSettings {
+    #[serde(default)]
+    pub mode: AuthMode,
     pub static_roles: Option<Vec<String>>,
     pub oidc_issuer: Option<String>,
     pub oidc_audience: Option<String>,
     pub oidc_hs256_secret: Option<String>,
     #[serde(default = "default_allow_claim_fallback")]
     pub allow_claim_fallback: bool,
+    pub local_jwt_secret: Option<String>,
+    #[serde(default = "default_local_jwt_ttl_seconds")]
+    pub local_jwt_ttl_seconds: i64,
+    #[serde(default = "default_max_failed_attempts")]
+    pub max_failed_attempts: i32,
+    #[serde(default = "default_lockout_seconds")]
+    pub lockout_seconds: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthMode {
+    #[default]
+    Local,
+    Hybrid,
+    Oidc,
 }
 
 impl AuthSettings {
     pub fn merge_env(mut self) -> Self {
+        if let Ok(mode) = env::var("OD_AUTH_MODE") {
+            self.mode = match mode.to_ascii_lowercase().as_str() {
+                "oidc" => AuthMode::Oidc,
+                "hybrid" => AuthMode::Hybrid,
+                _ => AuthMode::Local,
+            };
+        }
         if let Ok(secret) = env::var("OD_OIDC_HS256_SECRET") {
             self.oidc_hs256_secret = Some(secret);
         }
@@ -53,6 +88,24 @@ impl AuthSettings {
         }
         if let Ok(aud) = env::var("OD_OIDC_AUDIENCE") {
             self.oidc_audience = Some(aud);
+        }
+        if let Ok(secret) = env::var("OD_LOCAL_AUTH_JWT_SECRET") {
+            self.local_jwt_secret = Some(secret);
+        }
+        if let Ok(value) = env::var("OD_LOCAL_AUTH_TTL_SECONDS") {
+            if let Ok(parsed) = value.parse::<i64>() {
+                self.local_jwt_ttl_seconds = parsed.max(300);
+            }
+        }
+        if let Ok(value) = env::var("OD_LOCAL_AUTH_MAX_FAILED_ATTEMPTS") {
+            if let Ok(parsed) = value.parse::<i32>() {
+                self.max_failed_attempts = parsed.max(1);
+            }
+        }
+        if let Ok(value) = env::var("OD_LOCAL_AUTH_LOCKOUT_SECONDS") {
+            if let Ok(parsed) = value.parse::<i64>() {
+                self.lockout_seconds = parsed.max(30);
+            }
         }
         if self.static_roles.as_ref().map_or(true, |r| r.is_empty()) {
             self.static_roles = Some(default_static_roles());
@@ -72,6 +125,18 @@ fn default_static_roles() -> Vec<String> {
 
 const fn default_allow_claim_fallback() -> bool {
     true
+}
+
+const fn default_local_jwt_ttl_seconds() -> i64 {
+    60 * 60
+}
+
+const fn default_max_failed_attempts() -> i32 {
+    5
+}
+
+const fn default_lockout_seconds() -> i64 {
+    15 * 60
 }
 
 impl AdminAuth {
@@ -97,7 +162,16 @@ impl AdminAuth {
                 .static_roles
                 .clone()
                 .unwrap_or_else(default_static_roles),
+            mode: merged.mode,
             allow_claim_fallback: merged.allow_claim_fallback,
+            local_jwt: LocalJwtIssuer::new(
+                merged
+                    .local_jwt_secret
+                    .unwrap_or_else(|| "od-local-dev-secret-change-me".to_string()),
+                merged.local_jwt_ttl_seconds,
+            ),
+            max_failed_attempts: merged.max_failed_attempts,
+            lockout_seconds: merged.lockout_seconds,
             jwt,
             iam,
         })
@@ -108,14 +182,27 @@ impl AdminAuth {
         bearer: Option<String>,
         admin: Option<String>,
     ) -> Result<UserContext, StatusCode> {
-        if let Some(jwt) = &self.jwt {
-            if let Some(token) = bearer {
-                let claims = jwt.validate(&token).map_err(|err| map_auth_error(&err))?;
-                return self
-                    .resolve_claims(claims)
-                    .await
-                    .map_err(|err| map_auth_error(&err));
+        if let Some(token) = bearer {
+            if matches!(self.mode, AuthMode::Local | AuthMode::Hybrid) {
+                if let Ok(local_claims) = self.local_jwt.validate(&token) {
+                    return self
+                        .resolve_local_subject(local_claims)
+                        .await
+                        .map_err(|err| map_auth_error(&err));
+                }
             }
+
+            if matches!(self.mode, AuthMode::Oidc | AuthMode::Hybrid) {
+                if let Some(jwt) = &self.jwt {
+                    let claims = jwt.validate(&token).map_err(|err| map_auth_error(&err))?;
+                    return self
+                        .resolve_claims(claims)
+                        .await
+                        .map_err(|err| map_auth_error(&err));
+                }
+            }
+
+            return Err(StatusCode::UNAUTHORIZED);
         }
 
         if let Some(provided) = admin {
@@ -138,11 +225,56 @@ impl AdminAuth {
             return Err(StatusCode::UNAUTHORIZED);
         }
 
-        if self.static_token.is_some() {
-            return Err(StatusCode::UNAUTHORIZED);
+        Err(StatusCode::UNAUTHORIZED)
+    }
+
+    async fn resolve_local_subject(
+        &self,
+        claims: LocalTokenClaims,
+    ) -> Result<UserContext, AuthError> {
+        let user = self
+            .iam
+            .get_user(claims.sub)
+            .await
+            .map_err(|_| AuthError::NotProvisioned)?;
+        if user.status != "active" {
+            return Err(AuthError::Disabled);
+        }
+        let access = self.iam.effective_permissions_for_user(user.id).await?;
+        Ok(UserContext::from_effective(
+            claims.username.unwrap_or_else(|| user.email.clone()),
+            PrincipalType::User,
+            Some(user.id),
+            access,
+        ))
+    }
+
+    async fn login_local(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<LocalLoginSuccess, AuthError> {
+        if !matches!(self.mode, AuthMode::Local | AuthMode::Hybrid) {
+            return Err(AuthError::Internal(
+                "local authentication is disabled in current auth mode".into(),
+            ));
         }
 
-        Ok(UserContext::system())
+        let user = self
+            .iam
+            .authenticate_local_user(
+                username,
+                password,
+                self.max_failed_attempts,
+                self.lockout_seconds,
+            )
+            .await?;
+        let access_token = self.local_jwt.issue(&user)?;
+        Ok(LocalLoginSuccess {
+            access_token,
+            expires_in: self.local_jwt.ttl_seconds,
+            user,
+        })
     }
 
     async fn resolve_claims(&self, claims: Claims) -> Result<UserContext, AuthError> {
@@ -203,6 +335,75 @@ pub async fn enforce_admin(
     let user = ctx.authenticate(bearer, admin).await?;
     req.extensions_mut().insert(user);
     Ok(next.run(req).await)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LocalLoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LocalLoginResponse {
+    pub access_token: String,
+    pub expires_in: i64,
+    pub user: LocalLoginUser,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LocalLoginUser {
+    pub id: Uuid,
+    pub username: Option<String>,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub roles: Vec<String>,
+    pub permissions: Vec<String>,
+    pub must_change_password: bool,
+}
+
+pub async fn login_route(
+    State(state): State<AppState>,
+    Json(payload): Json<LocalLoginRequest>,
+) -> Result<Json<LocalLoginResponse>, (StatusCode, Json<ApiError>)> {
+    if payload.username.trim().is_empty() || payload.password.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "VALIDATION_ERROR",
+                "username and password are required",
+            )),
+        ));
+    }
+
+    let login = state
+        .admin_auth()
+        .login_local(payload.username.trim(), payload.password.as_str())
+        .await
+        .map_err(map_login_error)?;
+
+    state
+        .log_iam_event(
+            "iam.auth.login.success",
+            Some(login.user.email.clone()),
+            "user",
+            Some(login.user.id.to_string()),
+            json!({"username": login.user.username}),
+        )
+        .await;
+
+    Ok(Json(LocalLoginResponse {
+        access_token: login.access_token,
+        expires_in: login.expires_in,
+        user: LocalLoginUser {
+            id: login.user.id,
+            username: login.user.username,
+            email: login.user.email,
+            display_name: login.user.display_name,
+            roles: login.user.roles.into_iter().collect(),
+            permissions: login.user.permissions.into_iter().collect(),
+            must_change_password: login.user.must_change_password,
+        },
+    }))
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -327,6 +528,75 @@ impl JwtValidator {
     }
 }
 
+#[derive(Clone)]
+struct LocalJwtIssuer {
+    secret: Vec<u8>,
+    ttl_seconds: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct LocalTokenClaims {
+    sub: Uuid,
+    username: Option<String>,
+    email: String,
+    iss: String,
+    aud: String,
+    exp: i64,
+    iat: i64,
+}
+
+impl LocalJwtIssuer {
+    fn new(secret: String, ttl_seconds: i64) -> Self {
+        Self {
+            secret: secret.into_bytes(),
+            ttl_seconds: ttl_seconds.max(300),
+        }
+    }
+
+    fn issue(&self, user: &LocalAuthenticatedUser) -> Result<String, AuthError> {
+        let header = URL_SAFE_NO_PAD.encode(
+            serde_json::to_vec(&json!({"alg": "HS256", "typ": "JWT"}))
+                .map_err(|_| AuthError::InvalidFormat)?,
+        );
+        let now = Utc::now().timestamp();
+        let payload_claims = LocalTokenClaims {
+            sub: user.id,
+            username: user.username.clone(),
+            email: user.email.clone(),
+            iss: "od-local".to_string(),
+            aud: "od-admin-ui".to_string(),
+            exp: now + self.ttl_seconds,
+            iat: now,
+        };
+        let payload = URL_SAFE_NO_PAD.encode(
+            serde_json::to_vec(&payload_claims).map_err(|_| AuthError::InvalidFormat)?,
+        );
+        let mut mac = HmacSha256::new_from_slice(&self.secret).map_err(|_| AuthError::InvalidFormat)?;
+        let signing_input = format!("{}.{}", header, payload);
+        mac.update(signing_input.as_bytes());
+        let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        Ok(format!("{}.{}", signing_input, signature))
+    }
+
+    fn validate(&self, token: &str) -> Result<LocalTokenClaims, AuthError> {
+        let parts: Vec<&str> = token.split('.').collect();
+        if parts.len() != 3 {
+            return Err(AuthError::InvalidFormat);
+        }
+        verify_signature(&self.secret, parts[0], parts[1], parts[2])?;
+        let payload = decode_segment(parts[1])?;
+        let claims: LocalTokenClaims =
+            serde_json::from_slice(&payload).map_err(|_| AuthError::InvalidFormat)?;
+        if claims.iss != "od-local" || claims.aud != "od-admin-ui" {
+            return Err(AuthError::InvalidAudience);
+        }
+        if claims.exp <= Utc::now().timestamp() {
+            return Err(AuthError::Expired);
+        }
+        Ok(claims)
+    }
+}
+
 fn decode_segment(segment: &str) -> Result<Vec<u8>, AuthError> {
     URL_SAFE_NO_PAD
         .decode(segment)
@@ -410,16 +680,25 @@ impl Claims {
     }
 }
 
+#[derive(Debug)]
 enum AuthError {
     InvalidFormat,
     InvalidSignature,
     InvalidIssuer,
     InvalidAudience,
     Expired,
+    InvalidCredentials,
+    Locked(String),
     NotProvisioned,
     Disabled,
     Database(String),
     Internal(String),
+}
+
+struct LocalLoginSuccess {
+    access_token: String,
+    expires_in: i64,
+    user: LocalAuthenticatedUser,
 }
 
 impl From<IamError> for AuthError {
@@ -429,6 +708,9 @@ impl From<IamError> for AuthError {
             IamError::Validation(msg) => AuthError::Internal(msg),
             IamError::Db(e) => AuthError::Database(e.to_string()),
             IamError::Crypto(e) => AuthError::Internal(e),
+            IamError::InvalidCredentials => AuthError::InvalidCredentials,
+            IamError::Disabled => AuthError::Disabled,
+            IamError::Locked(until) => AuthError::Locked(until.to_rfc3339()),
         }
     }
 }
@@ -439,12 +721,44 @@ fn map_auth_error(err: &AuthError) -> StatusCode {
         | AuthError::InvalidSignature
         | AuthError::InvalidIssuer
         | AuthError::InvalidAudience
-        | AuthError::Expired => StatusCode::UNAUTHORIZED,
+        | AuthError::Expired
+        | AuthError::InvalidCredentials => StatusCode::UNAUTHORIZED,
+        AuthError::Locked(_) => StatusCode::TOO_MANY_REQUESTS,
         AuthError::NotProvisioned | AuthError::Disabled => StatusCode::FORBIDDEN,
         AuthError::Database(msg) | AuthError::Internal(msg) => {
             error!(target = "svc-admin", %msg, "auth middleware failure");
             StatusCode::INTERNAL_SERVER_ERROR
         }
+    }
+}
+
+fn map_login_error(err: AuthError) -> (StatusCode, Json<ApiError>) {
+    match err {
+        AuthError::Disabled => (
+            StatusCode::FORBIDDEN,
+            Json(ApiError::new("ACCOUNT_DISABLED", "account disabled")),
+        ),
+        AuthError::NotProvisioned
+        | AuthError::InvalidCredentials
+        | AuthError::InvalidFormat
+        | AuthError::InvalidSignature
+        | AuthError::InvalidIssuer
+        | AuthError::InvalidAudience
+        | AuthError::Expired => (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiError::new("INVALID_CREDENTIALS", "invalid credentials")),
+        ),
+        AuthError::Locked(until) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ApiError::new(
+                "ACCOUNT_LOCKED",
+                format!("account locked until {}", until),
+            )),
+        ),
+        AuthError::Database(msg) | AuthError::Internal(msg) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("AUTH_ERROR", msg)),
+        ),
     }
 }
 
@@ -500,5 +814,29 @@ mod tests {
         });
         assert!(ctx.has_role(ROLE_POLICY_ADMIN));
         assert!(ctx.has_permission("iam:manage"));
+    }
+
+    #[test]
+    fn local_jwt_round_trip() {
+        let mut roles = HashSet::new();
+        roles.insert("policy-admin".to_string());
+        let mut permissions = HashSet::new();
+        permissions.insert("iam:manage".to_string());
+        let user = LocalAuthenticatedUser {
+            id: Uuid::new_v4(),
+            username: Some("admin".into()),
+            email: "admin@local".into(),
+            display_name: Some("Default Admin".into()),
+            roles,
+            permissions,
+            must_change_password: true,
+        };
+
+        let issuer = LocalJwtIssuer::new("test-secret".into(), 3600);
+        let token = issuer.issue(&user).expect("issue token");
+        let claims = issuer.validate(&token).expect("validate token");
+        assert_eq!(claims.sub, user.id);
+        assert_eq!(claims.username.as_deref(), Some("admin"));
+        assert_eq!(claims.email, "admin@local");
     }
 }

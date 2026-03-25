@@ -10,7 +10,8 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - **CLI Power Users**: Use `odctl` for automation (smoke tests, migrations, cache operations).
 
 ### 1.1 Authentication
-- Admin API/UI/CLI authenticate via enterprise OIDC (client credentials or device flow).
+- Admin API/UI use local username/password login by default (`POST /api/v1/auth/login`) and issue bearer tokens.
+- OIDC remains optional through `OD_AUTH_MODE=hybrid|oidc` for future enterprise integration.
 - Service-to-service communication (ICAP adaptor → policy engine, workers → DB) uses mTLS/service tokens.
 
 ## 2. Getting Started
@@ -36,8 +37,10 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 ## 5. Admin API & Overrides
 - Config file: `config/admin-api.json` controls host/port, optional `database_url`, optional `admin_token`, and cache invalidation wiring (`redis_url`, `cache_channel`). Leave `database_url` as `null` for check-ins, but set either `database_url` in the file or `OD_ADMIN_DATABASE_URL`/`DATABASE_URL` env vars in deployment shells; the service refuses to start without one of these values.
 - Cache invalidation: when `redis_url` is configured (or `OD_CACHE_REDIS_URL` env var is set) the Admin API publishes override/review updates to the `cache_channel` (defaults to `od:cache:invalidate`) and deletes the matching Redis keys before returning to the client. Without Redis configured the API logs a warning and skips invalidation, which means cached policy decisions may take up to 5 minutes to expire.
-- Admin authentication: set `admin_token` in the config or provide `OD_ADMIN_TOKEN` (the CLI already reads this variable). Requests must include header `X-Admin-Token` when any token is configured.
-- OIDC/RBAC: set `OD_OIDC_ISSUER`, `OD_OIDC_AUDIENCE`, and `OD_OIDC_HS256_SECRET` (or configure the `auth` block in `config/admin-api.json`) to validate HS256 JWT bearer tokens. Roles extracted from the token (`policy-admin`, `policy-editor`, `policy-viewer`, `review-approver`, `auditor`) determine access; static tokens inherit the roles listed in `auth.static_roles`.
+- Local authentication (default): set `OD_AUTH_MODE=local`, `OD_LOCAL_AUTH_JWT_SECRET`, and `OD_DEFAULT_ADMIN_PASSWORD`. On first startup, Admin API bootstraps `admin` / `admin@local` with `policy-admin` role using the env password hash.
+- Login endpoint: `POST /api/v1/auth/login` with `{ "username": "admin", "password": "..." }`; use returned bearer token for UI/API calls.
+- Service-account/static tokens remain valid for automation through `X-Admin-Token`.
+- Optional OIDC mode: set `OD_AUTH_MODE=hybrid|oidc` + `OD_OIDC_*` variables to validate external JWTs.
 - Audit logging: every override create/update/delete and review resolution writes to `audit_events` (Postgres) and, when `audit.elastic_url`/`audit.index` (or the `OD_AUDIT_ELASTIC_*` env vars) are set, also ships JSON documents to Elasticsearch for downstream dashboards.
 - Service startup: `cargo run -p admin-api` applies migrations in `services/admin-api/migrations/` and exposes overrides + review queue routes under `/api/v1`. Operators can also run inside Docker by adding the same env vars to the container spec.
 - Metrics: `GET /metrics` exposes Prometheus gauges/counters for review queue depth and SLA compliance. Configure `metrics.review_sla_seconds` (or `OD_REVIEW_SLA_SECONDS`) to adjust the SLA threshold (default 4 hours).
@@ -49,7 +52,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl help` | Display available commands | Lists current subcommands. |
 | `odctl health` | Run health checks (future) | Will query backend `/health` endpoints. |
 | `odctl smoke [host:port]` | Send sample ICAP REQMOD to adaptor | Defaults to `127.0.0.1:1344`; prints ICAP status line. |
-| `odctl policy list` | List active policy rules via policy engine | Respects `OD_POLICY_URL` (default `http://localhost:19010`); add `OD_ADMIN_TOKEN` for protected endpoints. |
+| `odctl policy list` | List active policy rules via policy engine | Respects `OD_POLICY_URL` (default `http://localhost:19010`); add `OD_ADMIN_TOKEN` or a bearer token for protected endpoints. |
 | `odctl policy reload` | Trigger policy reload (file/DB backed) | Requires admin token when configured. |
 | `odctl policy simulate <file>` | Hit `/api/v1/policies/simulate` with a JSON request | JSON must match `DecisionRequest`; requires admin token when configured. |
 | `odctl policy import <file> [name] [created_by]` | Create a DB-backed policy from a DSL file | Wraps `POST /api/v1/policies`; honors `OD_ADMIN_TOKEN`. |
@@ -57,7 +60,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl policy import/export` | Manage policy packages (future) | Depends on Stage 2 completion. |
 | `odctl cache lookup/invalidate` | Inspect redis entries (future) | Tied to Stage 3 cache enhancements. |
 | `odctl migrate run [admin|policy|all]` | Apply Postgres migrations for admin/policy services | Reads `OD_ADMIN_DATABASE_URL` / `OD_POLICY_DATABASE_URL` unless `--admin-url/--policy-url` provided; runs both when target omitted. |
-| `odctl seed policies [file] [name] [created_by]` | Load policy DSL file via Policy API | Defaults to `config/policies.json`, `name=default`; requires admin token. |
+| `odctl seed policies [file] [name] [created_by]` | Load policy DSL file via Policy API | Defaults to `config/policies.json`, `name=default`; requires admin auth token. |
 | `odctl override update <id> <file>` | PUT override definition | JSON matches Admin API payload; invalidates caches instantly. |
 | `odctl review list` | List pending review queue items | Displays status, normalized key, submitter/assignee. |
 | `odctl review resolve <id> <file>` | Resolve review item via JSON payload | Wraps `/api/v1/review-queue/{id}/resolve`; triggers cache invalidation. |
@@ -70,7 +73,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 ## 7. React Admin UI
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
 - Routes: Dashboard, Investigations, Policies (+ draft create/publish), Review queue (resolve actions), **Pending Sites** (structured manual decision flow), Overrides (CRUD), Taxonomy (category/subcategory CRUD), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs).
-- Authentication: OIDC login; RBAC controlling navigation.
+- Authentication: local username/password login screen; RBAC controls navigation after token issuance.
 - Build: `npm run build`; deploy static assets behind reverse proxy.
 - Operator runbook and screenshot checklist: `docs/runbooks/stage10-web-admin-operator-runbook.md`.
 - Frontend expansion roadmap: see `rfc/stage-10-frontend-management-parity.md` and `implementation-plan/stage-10-frontend-management-parity.md` for full management-feature parity scope.

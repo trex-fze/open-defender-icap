@@ -16,8 +16,9 @@ mod taxonomy;
 use anyhow::{Context, Result};
 use audit::{AuditEvent, AuditLogger, ElasticExporter};
 use auth::{
-    enforce_admin, require_roles, AdminAuth, AuthSettings, UserContext, ROLE_OVERRIDES_DELETE,
-    ROLE_OVERRIDES_VIEW, ROLE_OVERRIDES_WRITE, ROLE_REVIEW_RESOLVE, ROLE_REVIEW_VIEW,
+    enforce_admin, require_roles, AdminAuth, AuthMode, AuthSettings, UserContext,
+    ROLE_OVERRIDES_DELETE, ROLE_OVERRIDES_VIEW, ROLE_OVERRIDES_WRITE, ROLE_REVIEW_RESOLVE,
+    ROLE_REVIEW_VIEW,
 };
 use axum::{
     extract::{Path, State},
@@ -116,6 +117,7 @@ fn default_review_sla_seconds() -> u64 {
 #[derive(Clone)]
 pub struct AppState {
     pool: PgPool,
+    admin_auth: Arc<AdminAuth>,
     cache_invalidator: Option<Arc<CacheInvalidator>>,
     audit_logger: AuditLogger,
     metrics: ReviewMetrics,
@@ -126,6 +128,10 @@ pub struct AppState {
 impl AppState {
     pub fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    pub fn admin_auth(&self) -> Arc<AdminAuth> {
+        self.admin_auth.clone()
     }
 
     pub fn iam(&self) -> Arc<IamService> {
@@ -321,8 +327,19 @@ async fn main() -> Result<()> {
 
     let iam_service = Arc::new(IamService::new(pool.clone()));
 
+    let merged_auth = cfg.auth.clone().merge_env();
+    if matches!(merged_auth.mode, AuthMode::Local | AuthMode::Hybrid) {
+        let default_password = env::var("OD_DEFAULT_ADMIN_PASSWORD").context(
+            "OD_DEFAULT_ADMIN_PASSWORD is required when auth.mode is local or hybrid",
+        )?;
+        iam_service
+            .bootstrap_local_admin(&default_password)
+            .await
+            .context("failed to bootstrap default local admin")?;
+    }
+
     let admin_auth = Arc::new(
-        AdminAuth::from_config(admin_token.clone(), cfg.auth.clone(), iam_service.clone())
+        AdminAuth::from_config(admin_token.clone(), merged_auth, iam_service.clone())
             .await
             .context("failed to initialize auth")?,
     );
@@ -365,6 +382,7 @@ async fn main() -> Result<()> {
 
     let state = AppState {
         pool: pool.clone(),
+        admin_auth: admin_auth.clone(),
         cache_invalidator,
         audit_logger: AuditLogger::new(pool.clone(), elastic_exporter),
         metrics: review_metrics,
@@ -525,6 +543,7 @@ async fn main() -> Result<()> {
         .route("/health/ready", get(health))
         .route("/health/live", get(health))
         .route("/metrics", get(metrics_endpoint))
+        .route("/api/v1/auth/login", post(auth::login_route))
         .with_state(state)
         .merge(admin_routes)
         .layer(cors_layer);

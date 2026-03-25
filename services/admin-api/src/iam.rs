@@ -12,6 +12,7 @@ use axum::{
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use chrono::Duration as ChronoDuration;
 use sqlx::{types::chrono::Utc, PgPool, Row};
 use std::collections::HashSet;
 use thiserror::Error;
@@ -773,6 +774,153 @@ impl IamService {
         }
         Ok(ids)
     }
+
+    pub async fn bootstrap_local_admin(&self, default_password: &str) -> Result<(), IamError> {
+        if default_password.trim().is_empty() {
+            return Err(IamError::Validation(
+                "OD_DEFAULT_ADMIN_PASSWORD cannot be empty".into(),
+            ));
+        }
+
+        let row = sqlx::query(
+            r#"
+            SELECT u.id
+            FROM iam_users u
+            JOIN iam_user_roles ur ON ur.user_id = u.id
+            JOIN iam_roles r ON r.id = ur.role_id
+            WHERE r.name = 'policy-admin' AND u.status = 'active'
+            LIMIT 1
+        "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        if row.is_some() {
+            return Ok(());
+        }
+
+        let password_hash = hash_token(default_password)?;
+        let user_id = Uuid::new_v4();
+        let mut tx = self.pool.begin().await?;
+        let admin_id = sqlx::query(
+            r#"
+            INSERT INTO iam_users (id, username, email, display_name, status, password_hash, password_updated_at, must_change_password)
+            VALUES ($1, 'admin', 'admin@local', 'Default Admin', 'active', $2, NOW(), TRUE)
+            ON CONFLICT (email) DO UPDATE
+                SET username = COALESCE(iam_users.username, EXCLUDED.username),
+                    password_hash = COALESCE(iam_users.password_hash, EXCLUDED.password_hash),
+                    password_updated_at = COALESCE(iam_users.password_updated_at, EXCLUDED.password_updated_at),
+                    must_change_password = iam_users.must_change_password
+            RETURNING id
+        "#,
+        )
+        .bind(user_id)
+        .bind(password_hash)
+        .fetch_one(&mut *tx)
+        .await?
+        .get::<Uuid, _>("id");
+
+        let role_id = sqlx::query("SELECT id FROM iam_roles WHERE name = 'policy-admin'")
+            .fetch_one(&mut *tx)
+            .await?
+            .get::<Uuid, _>("id");
+        sqlx::query(
+            r#"INSERT INTO iam_user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"#,
+        )
+        .bind(admin_id)
+        .bind(role_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn authenticate_local_user(
+        &self,
+        username_or_email: &str,
+        password: &str,
+        max_failed_attempts: i32,
+        lockout_seconds: i64,
+    ) -> Result<LocalAuthenticatedUser, IamError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, username, email, display_name, status, password_hash, failed_login_attempts, locked_until, must_change_password
+            FROM iam_users
+            WHERE LOWER(email) = LOWER($1) OR LOWER(COALESCE(username, '')) = LOWER($1)
+            LIMIT 1
+        "#,
+        )
+        .bind(username_or_email.trim())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let row = row.ok_or(IamError::InvalidCredentials)?;
+        let user_id = row.get::<Uuid, _>("id");
+        let status = row.get::<String, _>("status");
+        if status != "active" {
+            return Err(IamError::Disabled);
+        }
+
+        let locked_until = row.get::<Option<sqlx::types::chrono::DateTime<Utc>>, _>("locked_until");
+        if let Some(locked_until) = locked_until {
+            if locked_until > Utc::now() {
+                return Err(IamError::Locked(locked_until));
+            }
+        }
+
+        let hash = row
+            .get::<Option<String>, _>("password_hash")
+            .ok_or(IamError::InvalidCredentials)?;
+        let valid = verify_hash(password, &hash)?;
+        if !valid {
+            let failed = row.get::<i32, _>("failed_login_attempts") + 1;
+            let lock_until = if failed >= max_failed_attempts {
+                Some(Utc::now() + ChronoDuration::seconds(lockout_seconds.max(1)))
+            } else {
+                None
+            };
+            sqlx::query(
+                r#"
+                UPDATE iam_users
+                SET failed_login_attempts = $2,
+                    locked_until = $3,
+                    updated_at = NOW()
+                WHERE id = $1
+            "#,
+            )
+            .bind(user_id)
+            .bind(failed)
+            .bind(lock_until)
+            .execute(&self.pool)
+            .await?;
+            return Err(IamError::InvalidCredentials);
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE iam_users
+            SET failed_login_attempts = 0,
+                locked_until = NULL,
+                last_login_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $1
+        "#,
+        )
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        let access = self.effective_permissions_for_user(user_id).await?;
+        Ok(LocalAuthenticatedUser {
+            id: user_id,
+            username: row.get::<Option<String>, _>("username"),
+            email: row.get::<String, _>("email"),
+            display_name: row.get::<Option<String>, _>("display_name"),
+            roles: access.roles,
+            permissions: access.permissions,
+            must_change_password: row.get::<bool, _>("must_change_password"),
+        })
+    }
 }
 
 #[derive(Error, Debug)]
@@ -785,6 +933,12 @@ pub enum IamError {
     Db(#[from] sqlx::Error),
     #[error("crypto error: {0}")]
     Crypto(String),
+    #[error("invalid credentials")]
+    InvalidCredentials,
+    #[error("account disabled")]
+    Disabled,
+    #[error("account locked until {0}")]
+    Locked(sqlx::types::chrono::DateTime<Utc>),
 }
 
 impl From<argon2::password_hash::Error> for IamError {
@@ -823,7 +977,33 @@ fn map_iam_error(err: IamError) -> (StatusCode, Json<ApiError>) {
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiError::new("CRYPTO_ERROR", err)),
         ),
+        IamError::InvalidCredentials => (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiError::new("INVALID_CREDENTIALS", "invalid credentials")),
+        ),
+        IamError::Disabled => (
+            StatusCode::FORBIDDEN,
+            Json(ApiError::new("ACCOUNT_DISABLED", "account disabled")),
+        ),
+        IamError::Locked(until) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ApiError::new(
+                "ACCOUNT_LOCKED",
+                format!("account locked until {}", until.to_rfc3339()),
+            )),
+        ),
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct LocalAuthenticatedUser {
+    pub id: Uuid,
+    pub username: Option<String>,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub roles: HashSet<String>,
+    pub permissions: HashSet<String>,
+    pub must_change_password: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
