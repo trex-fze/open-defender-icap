@@ -100,7 +100,7 @@ flowchart LR
     I -->|Block legacy taxonomy mutations| LOCK
     I -->|taxonomy.mutation.blocked audit| L
     I -->|taxonomy_activation_changes_total| M
-    G -->|taxonomy_fallback_total{reason}| M
+    G -->|taxonomy_fallback_total reason| M
 
     F --> I
     PAGE --> I
