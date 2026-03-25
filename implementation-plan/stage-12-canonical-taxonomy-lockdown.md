@@ -10,10 +10,12 @@ This plan is intentionally explicit so a coding agent can execute it with minima
 
 ### Scope Confirmation (Remaining Tasks)
 
-The following items remain open for Stage 12 completion and define the active scope going forward:
+Stage 12 delivery items are now satisfied:
 
-1. Document fallback/activation monitoring guidance (dashboard or runbook note) and capture explicit rollout + rollback instructions for the taxonomy lock.
-2. Add backend integration coverage for taxonomy mutation lock behavior, canonical classification persistence (LLM + reclass + policy), and activation profile save/reload flows.
+1. Fallback/activation monitoring plus rollout + rollback notes captured in `docs/runbooks/stage10-web-admin-operator-runbook.md`.
+2. Backend integration coverage added for taxonomy mutation lock, canonical persistence (LLM + policy), and activation profile save/reload in the respective test modules.
+
+No additional tasks remain in the Stage 12 scope.
 
 ## 1) Deliverables
 

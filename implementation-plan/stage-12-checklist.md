@@ -53,14 +53,14 @@
 
 - [x] Add `taxonomy_fallback_total{reason}` metric.
 - [x] Add logs for fallback events (with safe context).
-- [ ] Add dashboard/runbook note for fallback monitoring.
+- [x] Add dashboard/runbook note for fallback monitoring. (docs/runbooks/stage10-web-admin-operator-runbook.md)
 
 ## Testing
 
 - [x] Unit tests for normalization/alias/validation/fallback.
-- [ ] Integration tests for taxonomy mutation lock behavior.
-- [ ] Integration tests for canonical persistence in classification paths.
-- [ ] Integration tests for activation profile save/reload behavior.
+- [x] Integration tests for taxonomy mutation lock behavior. (services/admin-api/src/taxonomy.rs::mutation_tests)
+- [x] Integration tests for canonical persistence in classification paths. (workers/llm-worker/src/main.rs::classification_persists_canonical_labels_and_flags)
+- [x] Integration tests for activation profile save/reload behavior. (services/admin-api/src/taxonomy.rs::tests)
 - [x] Frontend tests confirming taxonomy read-only UX.
 - [x] Frontend tests for checkbox toggle + save + reset workflow.
 - [x] Tests verifying unknown toggle allow/deny behavior.
@@ -70,7 +70,7 @@
 - [x] Update `docs/api-catalog.md` taxonomy endpoint semantics.
 - [x] Update `docs/user-guide.md` taxonomy operating model.
 - [x] Update `docs/architecture.md` with canonical taxonomy ownership.
-- [ ] Add rollout + rollback notes for taxonomy lock enforcement.
+- [x] Add rollout + rollback notes for taxonomy lock enforcement. (docs/runbooks/stage10-web-admin-operator-runbook.md)
 
 ## Acceptance
 
