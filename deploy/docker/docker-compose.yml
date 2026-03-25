@@ -278,7 +278,7 @@ services:
     image: ubuntu/squid:5.2-22.04_edge
     restart: unless-stopped
     ports:
-      - "3128:3128"
+      - "0.0.0.0:3128:3128"
     volumes:
       - ./squid/squid.conf:/etc/squid/squid.conf:ro
       - ./squid/certs:/etc/squid/certs:ro
