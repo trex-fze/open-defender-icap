@@ -120,9 +120,9 @@ flowchart LR
 ### 2.5 Management Plane
 - **Admin API**: Aggregates policy, overrides, review queue, reporting endpoints with OIDC auth. New endpoints expose pending classifications (`GET /api/v1/classifications/pending`) and allow manual unblock/reclassify actions that immediately update caches.
 - **React UI**: Dashboards, investigations, policy mgmt, review queue, health, cache inspection, and a “Pending Sites” view that surfaces everything stuck in `ContentPending` so analysts can approve or escalate.
-- **CLI (`odctl`)**: Commands for env validation, policy/override import/export, cache inspection/invalidation, reclass triggers, smoke tests, migrations, taxonomy seeding, **plus** `odctl classification pending|unblock` for security teams who prefer terminal workflows.
+- **CLI (`odctl`)**: Commands for env validation, policy/override import/export, cache inspection/invalidation, reclass triggers, smoke tests, migrations, and `odctl classification pending|unblock` for security teams who prefer terminal workflows. (Taxonomy structure is now loaded exclusively from `config/canonical-taxonomy.json`; no CLI seeding step is required.)
 
-- **Postgres**: Authoritative store for policies, classifications, overrides, review queue, audits, taxonomy, `page_contents` (Stage 9 Crawl4AI excerpts), and the new `classification_requests` table that tracks blocked keys awaiting content-aware verdicts.
+- **Postgres**: Authoritative store for policies, classifications, overrides, review queue, audits, taxonomy activation profiles (`taxonomy_activation_profiles` / `_entries`), `page_contents` (Stage 9 Crawl4AI excerpts), and the `classification_requests` table that tracks blocked keys awaiting content-aware verdicts.
 - **Redis**: Distributed cache + queue coordination (Streams) + ephemeral job metadata.
 - **Elasticsearch**: Structured event/audit storage; Kibana dashboards.
 
@@ -162,7 +162,7 @@ The workflow for an unclassified site emphasizes “content-first” verificatio
 3. Overrides audit events emitted and TTL managed.
 
 ## 4. Data Model Snapshot
-- `classifications` (normalized_key, taxonomy_version, verdict fields, TTL).
+- `classifications` (normalized_key, taxonomy_version, activation-aware verdict fields, TTL).
 - `policies` / `policy_rules` (compiled DSL, priorities, outcomes).
 - `overrides`, `review_queue`, `audit_events`, `reporting_aggregates` (per Spec §20).
 - `page_contents` + `classification_requests` (Stage 9 content-aware pipeline storing Crawl4AI excerpts and pending keys).

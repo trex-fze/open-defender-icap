@@ -41,6 +41,7 @@ use tokio::net::TcpListener;
 use tracing::{error, info, warn, Level};
 use uuid::Uuid;
 
+use ::taxonomy::{CanonicalTaxonomy, TaxonomyStore};
 use cache::CacheInvalidator;
 use metrics::ReviewMetrics;
 use reporting_es::{ElasticReportingClient, ReportingConfig};
@@ -123,6 +124,8 @@ pub struct AppState {
     metrics: ReviewMetrics,
     reporting_client: Option<ElasticReportingClient>,
     iam: Arc<IamService>,
+    canonical_taxonomy: Arc<CanonicalTaxonomy>,
+    taxonomy_store: Arc<TaxonomyStore>,
 }
 
 impl AppState {
@@ -136,6 +139,14 @@ impl AppState {
 
     pub fn iam(&self) -> Arc<IamService> {
         self.iam.clone()
+    }
+
+    pub fn canonical_taxonomy(&self) -> Arc<CanonicalTaxonomy> {
+        self.canonical_taxonomy.clone()
+    }
+
+    pub fn taxonomy_store(&self) -> Arc<TaxonomyStore> {
+        self.taxonomy_store.clone()
     }
 
     async fn invalidate_override(&self, scope_type: &str, scope_value: &str) {
@@ -329,9 +340,8 @@ async fn main() -> Result<()> {
 
     let merged_auth = cfg.auth.clone().merge_env();
     if matches!(merged_auth.mode, AuthMode::Local | AuthMode::Hybrid) {
-        let default_password = env::var("OD_DEFAULT_ADMIN_PASSWORD").context(
-            "OD_DEFAULT_ADMIN_PASSWORD is required when auth.mode is local or hybrid",
-        )?;
+        let default_password = env::var("OD_DEFAULT_ADMIN_PASSWORD")
+            .context("OD_DEFAULT_ADMIN_PASSWORD is required when auth.mode is local or hybrid")?;
         iam_service
             .bootstrap_local_admin(&default_password)
             .await
@@ -380,6 +390,11 @@ async fn main() -> Result<()> {
     let reporting_client = ElasticReportingClient::from_config(&reporting_cfg)
         .context("failed to initialize reporting client")?;
 
+    let canonical_taxonomy = CanonicalTaxonomy::load_from_env()
+        .context("failed to load canonical taxonomy")?
+        .into_arc();
+    let taxonomy_store = Arc::new(TaxonomyStore::new(canonical_taxonomy.clone()));
+
     let state = AppState {
         pool: pool.clone(),
         admin_auth: admin_auth.clone(),
@@ -388,6 +403,8 @@ async fn main() -> Result<()> {
         metrics: review_metrics,
         reporting_client,
         iam: iam_service.clone(),
+        canonical_taxonomy,
+        taxonomy_store,
     };
 
     let auth_layer = {
@@ -435,21 +452,10 @@ async fn main() -> Result<()> {
             "/api/v1/policies/:id/publish",
             post(policies::publish_policy),
         )
+        .route("/api/v1/taxonomy", get(taxonomy::get_taxonomy))
         .route(
-            "/api/v1/taxonomy/categories",
-            get(taxonomy::list_categories).post(taxonomy::create_category),
-        )
-        .route(
-            "/api/v1/taxonomy/categories/:id",
-            put(taxonomy::update_category).delete(taxonomy::delete_category),
-        )
-        .route(
-            "/api/v1/taxonomy/subcategories",
-            get(taxonomy::list_subcategories).post(taxonomy::create_subcategory),
-        )
-        .route(
-            "/api/v1/taxonomy/subcategories/:id",
-            put(taxonomy::update_subcategory).delete(taxonomy::delete_subcategory),
+            "/api/v1/taxonomy/activation",
+            put(taxonomy::update_taxonomy_activation),
         )
         .route(
             "/api/v1/reporting/aggregates",

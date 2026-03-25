@@ -3,16 +3,19 @@ use crate::{
     store::{insert_policy_document, update_policy_document, PolicyStore, SimulationResult},
 };
 use anyhow::{anyhow, Result};
-use common_types::PolicyDecision;
+use common_types::{PolicyAction, PolicyDecision};
 use policy_dsl::PolicyDocument;
 use sqlx::PgPool;
 use std::sync::Arc;
+use taxonomy::ActivationState;
+use tracing::warn;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct PolicyEvaluator {
     store: Arc<PolicyStore>,
     source: PolicySource,
+    activation: Arc<ActivationState>,
 }
 
 #[derive(Clone)]
@@ -27,51 +30,71 @@ enum PolicySource {
 }
 
 impl PolicyEvaluator {
-    pub fn from_file(store: PolicyStore, policy_file: String) -> Self {
+    pub fn from_file(
+        store: PolicyStore,
+        policy_file: String,
+        activation: Arc<ActivationState>,
+    ) -> Self {
         Self {
             store: Arc::new(store),
             source: PolicySource::File { path: policy_file },
+            activation,
         }
     }
 
-    pub fn from_database(store: PolicyStore, pool: PgPool, seed_path: Option<String>) -> Self {
+    pub fn from_database(
+        store: PolicyStore,
+        pool: PgPool,
+        seed_path: Option<String>,
+        activation: Arc<ActivationState>,
+    ) -> Self {
         Self {
             store: Arc::new(store),
             source: PolicySource::Database { pool, seed_path },
+            activation,
         }
     }
 
     pub fn evaluate(&self, request: &DecisionRequest) -> PolicyDecision {
-        self.store.evaluate(request)
+        let mut result = self.store.simulate(request);
+        self.apply_activation(&mut result.decision);
+        result.decision
     }
 
     pub fn simulate(&self, request: &DecisionRequest) -> SimulationResult {
-        self.store.simulate(request)
+        let mut result = self.store.simulate(request);
+        self.apply_activation(&mut result.decision);
+        result
     }
 
     pub async fn reload(&self) -> Result<()> {
+        let taxonomy = self.store.taxonomy();
         match &self.source {
             PolicySource::File { path } => {
                 let doc = PolicyDocument::load_from_file(path)?;
-                self.store.update(doc);
+                self.store.update(doc)?;
             }
             PolicySource::Database { pool, seed_path } => {
-                if let Some(new_store) = PolicyStore::load_from_db(pool).await? {
+                if let Some(new_store) =
+                    PolicyStore::load_from_db(pool, Arc::clone(&taxonomy)).await?
+                {
                     self.store.update_from_rules(
                         new_store.list_rules(),
                         new_store.version(),
                         new_store.policy_id(),
-                    );
+                    )?;
                 } else if let Some(seed) = seed_path {
                     let doc = PolicyDocument::load_from_file(seed)?;
                     PolicyStore::seed_db_from_document(pool, &doc, "default", Some("system"))
                         .await?;
-                    if let Some(new_store) = PolicyStore::load_from_db(pool).await? {
+                    if let Some(new_store) =
+                        PolicyStore::load_from_db(pool, Arc::clone(&taxonomy)).await?
+                    {
                         self.store.update_from_rules(
                             new_store.list_rules(),
                             new_store.version(),
                             new_store.policy_id(),
-                        );
+                        )?;
                     }
                 }
             }
@@ -122,5 +145,18 @@ impl PolicyEvaluator {
 
     pub fn policy_id(&self) -> Option<Uuid> {
         self.store.policy_id()
+    }
+
+    fn apply_activation(&self, decision: &mut PolicyDecision) {
+        if let Some(verdict) = decision.verdict.as_ref() {
+            if !self.activation.is_enabled(&verdict.primary_category, None) {
+                warn!(
+                    target = "svc-policy",
+                    category = %verdict.primary_category,
+                    "taxonomy activation blocked policy decision"
+                );
+                decision.action = PolicyAction::Block;
+            }
+        }
     }
 }

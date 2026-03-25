@@ -8,9 +8,10 @@ use redis::AsyncCommands;
 use reqwest::{Client, RequestBuilder};
 use schema::{LlmResponse, PromptPayload};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::{collections::HashMap, env, fmt, sync::Arc, time::Duration};
+use taxonomy::{ActivationState, FallbackReason, TaxonomyStore};
 use tokio::{signal, time::Instant};
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn, Level};
@@ -288,10 +289,20 @@ async fn main() -> Result<()> {
         .connect(&cfg.database_url)
         .await?;
 
+    let taxonomy =
+        Arc::new(TaxonomyStore::load_default().context("failed to load canonical taxonomy")?);
+    let activation = Arc::new(
+        ActivationState::load(&pool)
+            .await
+            .context("failed to load taxonomy activation profile")?,
+    );
+    ActivationState::spawn_refresh_task(Arc::clone(&activation), pool.clone());
+
     let cache_listener = CacheListener::new(&cfg.redis_url, &cfg.cache_channel).await?;
     tokio::spawn(cache_listener.run());
 
-    let job_consumer = JobConsumer::new(&cfg, router, pool).await?;
+    let job_consumer =
+        JobConsumer::new(&cfg, router, pool.clone(), taxonomy.clone(), activation).await?;
     tokio::spawn(job_consumer.run());
 
     signal::ctrl_c().await?;
@@ -346,10 +357,18 @@ struct JobConsumer {
     pool: PgPool,
     router: ProviderRouter,
     cache_publisher: DecisionCachePublisher,
+    taxonomy: Arc<TaxonomyStore>,
+    activation: Arc<ActivationState>,
 }
 
 impl JobConsumer {
-    async fn new(cfg: &WorkerConfig, router: ProviderRouter, pool: PgPool) -> Result<Self> {
+    async fn new(
+        cfg: &WorkerConfig,
+        router: ProviderRouter,
+        pool: PgPool,
+        taxonomy: Arc<TaxonomyStore>,
+        activation: Arc<ActivationState>,
+    ) -> Result<Self> {
         let cache_publisher =
             DecisionCachePublisher::new(&cfg.redis_url, &cfg.cache_channel).await?;
         Ok(Self {
@@ -358,6 +377,8 @@ impl JobConsumer {
             pool,
             router,
             cache_publisher,
+            taxonomy,
+            activation,
         })
     }
 
@@ -435,9 +456,51 @@ impl JobConsumer {
         }
         self.enrich_job_with_content(&mut job).await?;
         let (verdict, provider_name) = self.invoke_with_fallback(&job).await?;
-        let action = store_classification(&self.pool, &job, &verdict)
-            .await
-            .context("failed to persist classification")?;
+        let raw_category = verdict.primary_category.clone();
+        let raw_subcategory = verdict.subcategory.clone();
+        let (mut verdict, fallback_reason) = self.apply_taxonomy(verdict);
+        if let Some(reason) = fallback_reason {
+            metrics::record_taxonomy_fallback(reason.as_str());
+            warn!(
+                target = "svc-llm-worker",
+                reason = reason.as_str(),
+                original_category = %raw_category,
+                original_subcategory = %raw_subcategory,
+                canonical_category = %verdict.primary_category,
+                canonical_subcategory = %verdict.subcategory,
+                "non-canonical taxonomy labels remapped"
+            );
+        }
+        let recommended_action = parse_policy_action(&verdict.recommended_action)?;
+        let activation_allowed = self
+            .activation
+            .is_enabled(&verdict.primary_category, Some(&verdict.subcategory));
+        let activation_blocked = !activation_allowed;
+        let final_action = if activation_allowed {
+            recommended_action
+        } else {
+            metrics::record_activation_block();
+            warn!(
+                target = "svc-llm-worker",
+                category = %verdict.primary_category,
+                subcategory = %verdict.subcategory,
+                "taxonomy activation blocked verdict"
+            );
+            PolicyAction::Block
+        };
+        verdict.recommended_action = final_action.to_string();
+        let taxonomy_version = self.taxonomy.taxonomy().version.clone();
+        let action = store_classification(
+            &self.pool,
+            &job,
+            &verdict,
+            &taxonomy_version,
+            fallback_reason,
+            final_action,
+            activation_blocked,
+        )
+        .await
+        .context("failed to persist classification")?;
         self.publish_cache_entry(&job, &verdict, action.clone())
             .await
             .context("failed to publish cache entry")?;
@@ -450,6 +513,27 @@ impl JobConsumer {
             "classification stored"
         );
         Ok(())
+    }
+
+    fn apply_taxonomy(&self, verdict: LlmResponse) -> (LlmResponse, Option<FallbackReason>) {
+        let sub_input = if verdict.subcategory.trim().is_empty() {
+            None
+        } else {
+            Some(verdict.subcategory.as_str())
+        };
+        let validated = self
+            .taxonomy
+            .validate_labels(&verdict.primary_category, sub_input);
+
+        let canonical = LlmResponse {
+            primary_category: validated.category.id.clone(),
+            subcategory: validated.subcategory.id.clone(),
+            risk_level: verdict.risk_level,
+            confidence: verdict.confidence,
+            recommended_action: verdict.recommended_action,
+        };
+
+        (canonical, validated.fallback_reason)
     }
 
     async fn publish_cache_entry(
@@ -698,18 +782,35 @@ async fn store_classification(
     pool: &PgPool,
     job: &ClassificationJobPayload,
     verdict: &schema::LlmResponse,
+    taxonomy_version: &str,
+    fallback_reason: Option<FallbackReason>,
+    final_action: PolicyAction,
+    activation_blocked: bool,
 ) -> Result<PolicyAction> {
-    let action = parse_policy_action(&verdict.recommended_action)?;
     let new_id = Uuid::new_v4();
     let ttl_seconds = 3600;
-    let sfw = matches!(action, PolicyAction::Allow);
-    let flags: Value = json!({"source": "llm-worker"});
+    let sfw = matches!(final_action, PolicyAction::Allow);
+    let mut flags_map = Map::new();
+    flags_map.insert("source".to_string(), Value::from("llm-worker"));
+    if let Some(reason) = fallback_reason {
+        flags_map.insert(
+            "taxonomy_fallback_reason".to_string(),
+            Value::from(reason.as_str()),
+        );
+    }
+    if activation_blocked {
+        flags_map.insert(
+            "taxonomy_activation_state".to_string(),
+            Value::from("blocked"),
+        );
+    }
+    let flags = Value::Object(flags_map);
 
     let row = sqlx::query(
         r#"INSERT INTO classifications
             (id, normalized_key, taxonomy_version, model_version, primary_category, subcategory,
              risk_level, recommended_action, confidence, sfw, flags, ttl_seconds, status, next_refresh_at)
-            VALUES ($1, $2, 'v1', 'llm-sim', $3, $4, $5, $6, $7, $8, $9, $10, 'active', NOW() + INTERVAL '4 hours')
+            VALUES ($1, $2, $3, 'llm-sim', $4, $5, $6, $7, $8, $9, $10, $11, 'active', NOW() + INTERVAL '4 hours')
             ON CONFLICT (normalized_key)
             DO UPDATE SET
                 primary_category = EXCLUDED.primary_category,
@@ -725,10 +826,11 @@ async fn store_classification(
     )
     .bind(new_id)
     .bind(&job.normalized_key)
+    .bind(taxonomy_version)
     .bind(&verdict.primary_category)
     .bind(&verdict.subcategory)
     .bind(&verdict.risk_level)
-    .bind(action.to_string())
+    .bind(final_action.to_string())
     .bind(verdict.confidence as f64)
     .bind(sfw)
     .bind(flags)
@@ -758,12 +860,12 @@ async fn store_classification(
     .bind(json!({
         "normalized_key": job.normalized_key,
         "category": verdict.primary_category,
-        "action": action,
+        "action": final_action,
     }))
     .execute(pool)
         .await?;
 
-    Ok(action)
+    Ok(final_action)
 }
 
 async fn invoke_llm(
@@ -1242,7 +1344,11 @@ mod tests {
         };
 
         let router = cfg.resolve_router().unwrap();
-        let consumer = JobConsumer::new(&cfg, router, pool.clone()).await.unwrap();
+        let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
+        let activation = Arc::new(ActivationState::allow_all());
+        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation)
+            .await
+            .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
         let job = ClassificationJobPayload {
@@ -1322,7 +1428,11 @@ mod tests {
         };
 
         let router = cfg.resolve_router().unwrap();
-        let consumer = JobConsumer::new(&cfg, router, pool.clone()).await.unwrap();
+        let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
+        let activation = Arc::new(ActivationState::allow_all());
+        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation)
+            .await
+            .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
         let job = ClassificationJobPayload {

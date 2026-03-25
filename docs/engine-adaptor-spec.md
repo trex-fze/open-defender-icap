@@ -140,7 +140,7 @@ Observability: Prometheus exporters + logs -> Elasticsearch, metrics -> Kibana O
 
 ## 6.12 CLI (`odctl`)
 - **Purpose**: Terminal tool for admins/devops.
-- **Responsibilities**: Provide commands for env/config validation, policies/overrides import/export, cache, classification inspection, reclassification, health, smoke tests, migrations, taxonomy seeding, report/audit queries, debug.
+- **Responsibilities**: Provide commands for env/config validation, policies/overrides import/export, cache, classification inspection, reclassification, health, smoke tests, migrations, and report/audit queries. (Taxonomy structure now lives in `config/canonical-taxonomy.json`; the CLI no longer seeds taxonomy tables.)
 
 ## 6.13 Observability subsystem
 - **Purpose**: Provide metrics/logs/traces/dashboards/alerts using Elasticsearch, Kibana, Prometheus.
@@ -200,7 +200,7 @@ For each category: definition, subcategories, sample site types, enterprise acti
 | urls | Full URL metadata | url_hash, domain, path, query_fingerprint | (url_hash) | 180d | Classification | canonicalization |
 | classifications | Current verdicts | id, normalized_key, taxonomy_version, model_version, primary_category, subcategory, risk_level, confidence, recommended_action, sfw, flags, ttl, status | (normalized_key), (taxonomy_version) | until replaced + 2y | Classification | versioning |
 | classification_versions | Historical verdicts | classification_id, version, changed_by, reason | (classification_id) | 2y | Audit | version history |
-| taxonomy_categories/subcategories | Seed taxonomy data | id, name, default_action | (name) | permanent | Product | seeding tests |
+| taxonomy_activation_profiles / taxonomy_activation_entries | Canonical activation state | profile metadata (`id`, `version`, `updated_by`, `updated_at`), checkbox states (`category_id`, `subcategory_id`, `enabled`) | (profile_id, category_id, subcategory_id) | permanent | Product | activation save tests |
 | policies | Tenant policy objects | policy_id, tenant_id, version, status, compiled_hash, created_by | (tenant_id,version) | history kept | Policy engine | DSL parse |
 | policy_rules | Atomic rules | rule_id, policy_id, priority, conditions JSONB, outcome | (policy_id, priority) | same as policies | Policy engine | precedence tests |
 | cache_entries | Cache materialization metadata | key, value_json, expires_at, source | (key) | 7d | Cache team | TTL tests |
@@ -295,7 +295,6 @@ For each category: definition, subcategories, sample site types, enterprise acti
   - `odctl health check --component all`
   - `odctl smoke run`
   - `odctl migrate run`
-  - `odctl taxonomy seed`
   - `odctl report query --ip 10.1.2.3 --range 24h`
   - `odctl audit query --actor user@example.com`
   - `odctl debug trace --trace-id <id>`
@@ -429,7 +428,7 @@ Rules:
 - **Compose files**: `docker-compose.yml` (dev), `docker-compose.test.yml` (integration), `docker-compose.smoke.yml` (smoke). Use `depends_on` with healthchecks.
 - **Env management**: `.env` file with non-secret defaults, `.env.secrets` loaded via docker secrets. Secrets (LLM API, OIDC) mounted as files.
 - **Volumes**: persistent for Postgres, Redis, ES, Squid logs, Kibana config.
-- **Startup sequence**: `docker-compose up -d postgres redis elasticsearch`; wait for health; run `odctl migrate run`; `odctl taxonomy seed`; start rest services; run smoke tests `odctl smoke run`.
+- **Startup sequence**: `docker-compose up -d postgres redis elasticsearch`; wait for health; run `odctl migrate run`; verify `config/canonical-taxonomy.json` is mounted/available; start rest services; run smoke tests `odctl smoke run`.
 - **Post-start validation**: check `docker compose ps`, run `curl http://localhost:19000/health/ready`, open Kibana.
 - **CI/CD**: pipeline uses compose to run unit/integration/perf; artifacts stored per build.
 

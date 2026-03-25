@@ -86,6 +86,23 @@ static LLM_INVALID_RESPONSES: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+static TAXONOMY_ACTIVATION_BLOCKS: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "taxonomy_activation_blocks_total",
+        "Classification verdicts blocked by activation profile"
+    )
+    .unwrap()
+});
+
+static TAXONOMY_FALLBACKS: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "taxonomy_fallback_total",
+        "Number of taxonomy normalization fallbacks",
+        &["reason"]
+    )
+    .unwrap()
+});
+
 static LLM_LATENCY: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "llm_request_duration_seconds",
@@ -144,6 +161,14 @@ pub fn record_provider_timeout(provider: &str) {
 
 pub fn record_invalid_response() {
     LLM_INVALID_RESPONSES.inc();
+}
+
+pub fn record_activation_block() {
+    TAXONOMY_ACTIVATION_BLOCKS.inc();
+}
+
+pub fn record_taxonomy_fallback(reason: &str) {
+    TAXONOMY_FALLBACKS.with_label_values(&[reason]).inc();
 }
 
 pub fn observe_llm_latency(seconds: f64) {

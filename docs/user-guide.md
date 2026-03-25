@@ -19,7 +19,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 2. **Install prerequisites**: Rust stable (>=1.80), Node LTS, Docker, docker-compose.
 3. **Bootstrap workspace**: `cargo check`, `npm install` inside `web-admin`, `docker compose -f deploy/docker/docker-compose.yml up --build`.
 4. **Run migrations**: `odctl migrate run all` (or `--target admin|policy`) to apply Postgres schema updates before starting services.
-5. **Seed taxonomy**: `odctl taxonomy seed` to populate initial categories (Stage 3+).
+5. **Review canonical taxonomy**: `config/canonical-taxonomy.json` now defines the complete category/subcategory tree. Operators only toggle allow/deny state via the Admin UI/API; no CLI seeding is required post-Stage 12.
 
 ## 3. Operating the ICAP Adaptor
 - Config file: `config/icap.json` (host/port, preview size, Redis URL, policy endpoint, metrics host/port, cache invalidation channel, optional `job_queue`). `cache_channel` defaults to `od:cache:invalidate` and controls the Redis pub/sub topic used for cache flush notifications. When `job_queue` is configured, the adaptor publishes classification jobs to the specified Redis stream for Stage 4 LLM workers.
@@ -43,7 +43,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - Optional OIDC mode: set `OD_AUTH_MODE=hybrid|oidc` + `OD_OIDC_*` variables to validate external JWTs.
 - Audit logging: every override create/update/delete and review resolution writes to `audit_events` (Postgres) and, when `audit.elastic_url`/`audit.index` (or the `OD_AUDIT_ELASTIC_*` env vars) are set, also ships JSON documents to Elasticsearch for downstream dashboards.
 - Service startup: `cargo run -p admin-api` applies migrations in `services/admin-api/migrations/` and exposes overrides + review queue routes under `/api/v1`. Operators can also run inside Docker by adding the same env vars to the container spec.
-- Metrics: `GET /metrics` exposes Prometheus gauges/counters for review queue depth and SLA compliance. Configure `metrics.review_sla_seconds` (or `OD_REVIEW_SLA_SECONDS`) to adjust the SLA threshold (default 4 hours).
+- Metrics: `GET /metrics` exposes Prometheus gauges/counters for review queue depth, SLA compliance, and the `taxonomy_activation_changes_total` counter that increments whenever operators save checkbox state. Configure `metrics.review_sla_seconds` (or `OD_REVIEW_SLA_SECONDS`) to adjust the SLA threshold (default 4 hours).
 - Health checks: `curl http://localhost:19000/health/ready` (readiness) and `/health/live` (liveness). Use `OD_ADMIN_URL` (default `http://localhost:19000`) to point `odctl override ...` commands at the service.
 
 ## 6. CLI (`odctl`) Usage
@@ -72,7 +72,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 
 ## 7. React Admin UI
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
-- Routes: Dashboard, Investigations, Policies (+ draft create/publish), Review queue (resolve actions), **Pending Sites** (structured manual decision flow), Overrides (CRUD), Taxonomy (category/subcategory CRUD), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs).
+- Routes: Dashboard, Investigations, Policies (+ draft create/publish), Review queue (resolve actions), **Pending Sites** (structured manual decision flow), Overrides (CRUD), Taxonomy (read-only canonical listing with checkbox activation toggles), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs).
 - Authentication: local username/password login screen; RBAC controls navigation after token issuance.
 - Build: `npm run build`; deploy static assets behind reverse proxy.
 - Operator runbook and screenshot checklist: `docs/runbooks/stage10-web-admin-operator-runbook.md`.

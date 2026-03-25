@@ -5,7 +5,7 @@ mod evaluator;
 mod models;
 mod store;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use audit::{PolicyAuditEvent, PolicyAuditLogger};
 use auth::{
     enforce_admin, require_roles, AdminAuth, AuthSettings, UserContext, ROLE_POLICY_EDITOR_ROLES,
@@ -27,6 +27,7 @@ use policy_dsl::PolicyDocument;
 use sqlx::postgres::PgPoolOptions;
 use std::{env, net::SocketAddr, sync::Arc};
 use store::PolicyStore;
+use taxonomy::{ActivationState, TaxonomyStore};
 use tokio::net::TcpListener;
 use tracing::{error, info, Level};
 use uuid::Uuid;
@@ -65,6 +66,8 @@ async fn main() -> Result<()> {
         .clone()
         .or_else(|| env::var("OD_POLICY_DATABASE_URL").ok())
         .or_else(|| env::var("DATABASE_URL").ok());
+    let taxonomy =
+        Arc::new(TaxonomyStore::load_default().context("failed to load canonical taxonomy")?);
     let mut audit_logger = None;
 
     let evaluator = if let Some(db_url) = db_url {
@@ -73,21 +76,28 @@ async fn main() -> Result<()> {
             .connect(&db_url)
             .await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
-        let store = match PolicyStore::load_from_db(&pool).await? {
+        let activation = Arc::new(
+            ActivationState::load(&pool)
+                .await
+                .context("failed to load taxonomy activation profile")?,
+        );
+        ActivationState::spawn_refresh_task(Arc::clone(&activation), pool.clone());
+        let store = match PolicyStore::load_from_db(&pool, Arc::clone(&taxonomy)).await? {
             Some(store) => store,
             None => {
                 let doc = PolicyDocument::load_from_file(&cfg.policy_file)?;
                 PolicyStore::seed_db_from_document(&pool, &doc, "default", Some("system")).await?;
-                PolicyStore::load_from_db(&pool)
+                PolicyStore::load_from_db(&pool, Arc::clone(&taxonomy))
                     .await?
                     .expect("seeded policy must exist")
             }
         };
         audit_logger = Some(PolicyAuditLogger::new(pool.clone()));
-        PolicyEvaluator::from_database(store, pool, Some(cfg.policy_file.clone()))
+        PolicyEvaluator::from_database(store, pool, Some(cfg.policy_file.clone()), activation)
     } else {
-        let store = PolicyStore::load_from_file(&cfg.policy_file)?;
-        PolicyEvaluator::from_file(store, cfg.policy_file.clone())
+        let activation = Arc::new(ActivationState::allow_all());
+        let store = PolicyStore::load_from_file(&cfg.policy_file, Arc::clone(&taxonomy))?;
+        PolicyEvaluator::from_file(store, cfg.policy_file.clone(), activation)
     };
     let auth_settings = AuthSettings::from_env(cfg.auth.clone());
     let admin_auth = Arc::new(AdminAuth::from_config(auth_settings).await?);
@@ -353,8 +363,11 @@ mod tests {
     fn in_memory_app(doc: PolicyDocument) -> Router {
         let tmp = std::env::temp_dir().join(format!("policy-app-test-{}.json", Uuid::new_v4()));
         fs::write(&tmp, serde_json::to_string(&doc).unwrap()).unwrap();
-        let store = PolicyStore::load_from_file(tmp.to_str().unwrap()).unwrap();
-        let evaluator = PolicyEvaluator::from_file(store, tmp.to_string_lossy().into());
+        let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
+        let activation = Arc::new(ActivationState::allow_all());
+        let store =
+            PolicyStore::load_from_file(tmp.to_str().unwrap(), Arc::clone(&taxonomy)).unwrap();
+        let evaluator = PolicyEvaluator::from_file(store, tmp.to_string_lossy().into(), activation);
         let state = AppState {
             evaluator: Arc::new(evaluator),
             audit_logger: None,

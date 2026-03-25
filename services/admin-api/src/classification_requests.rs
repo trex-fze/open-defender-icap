@@ -2,6 +2,7 @@ use crate::{
     auth::{require_roles, UserContext, ROLE_POLICY_EDIT, ROLE_POLICY_VIEW},
     ApiError, AppState,
 };
+use ::taxonomy::FallbackReason;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -12,7 +13,7 @@ use common_types::PolicyAction;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgPool, Row};
-use tracing::error;
+use tracing::{error, warn};
 
 #[derive(Debug, Deserialize)]
 pub struct PendingQuery {
@@ -117,10 +118,41 @@ pub async fn manual_unblock(
         ));
     }
 
-    let record =
-        persist_manual_classification(state.pool(), &normalized_key, &payload, &user.actor)
-            .await
-            .map_err(db_error)?;
+    let taxonomy_store = state.taxonomy_store();
+    let sub_input = if payload.subcategory.trim().is_empty() {
+        None
+    } else {
+        Some(payload.subcategory.as_str())
+    };
+    let validated = taxonomy_store.validate_labels(&payload.primary_category, sub_input);
+    let fallback_reason = validated.fallback_reason;
+    if let Some(reason) = fallback_reason {
+        warn!(
+            target = "svc-admin",
+            reason = reason.as_str(),
+            actor = %user.actor,
+            original_category = %payload.primary_category,
+            original_subcategory = %payload.subcategory,
+            canonical_category = %validated.category.id,
+            canonical_subcategory = %validated.subcategory.id,
+            "manual classification normalized to canonical taxonomy"
+        );
+    }
+
+    let taxonomy_version = taxonomy_store.taxonomy().version.clone();
+
+    let record = persist_manual_classification(
+        state.pool(),
+        &normalized_key,
+        &payload,
+        &user.actor,
+        &validated.category.id,
+        &validated.subcategory.id,
+        &taxonomy_version,
+        fallback_reason,
+    )
+    .await
+    .map_err(db_error)?;
 
     if let Err(err) = sqlx::query("DELETE FROM classification_requests WHERE normalized_key = $1")
         .bind(&normalized_key)
@@ -139,14 +171,23 @@ async fn persist_manual_classification(
     normalized_key: &str,
     payload: &ManualUnblockRequest,
     actor: &str,
+    canonical_category: &str,
+    canonical_subcategory: &str,
+    taxonomy_version: &str,
+    fallback_reason: Option<FallbackReason>,
 ) -> Result<ManualClassificationRecord, sqlx::Error> {
     use sqlx::postgres::PgRow;
     let ttl_seconds = 3600;
-    let flags = json!({
+    let mut flags = json!({
         "source": "manual-unblock",
         "actor": actor,
         "reason": payload.reason,
     });
+    if let Some(reason) = fallback_reason {
+        if let Some(obj) = flags.as_object_mut() {
+            obj.insert("taxonomy_fallback_reason".into(), json!(reason.as_str()));
+        }
+    }
 
     let row: PgRow = sqlx::query(
         r#"
@@ -154,7 +195,7 @@ async fn persist_manual_classification(
             id, normalized_key, taxonomy_version, model_version, primary_category,
             subcategory, risk_level, recommended_action, confidence, sfw, flags,
             ttl_seconds, status, next_refresh_at
-        ) VALUES ($1, $2, 'manual', 'manual', $3, $4, $5, $6, $7, false, $8, $9, 'active', NOW() + INTERVAL '4 hours')
+        ) VALUES ($1, $2, $3, 'manual', $4, $5, $6, $7, $8, false, $9, $10, 'active', NOW() + INTERVAL '4 hours')
         ON CONFLICT (normalized_key)
         DO UPDATE SET
             primary_category = EXCLUDED.primary_category,
@@ -171,8 +212,9 @@ async fn persist_manual_classification(
     )
     .bind(uuid::Uuid::new_v4())
     .bind(normalized_key)
-    .bind(&payload.primary_category)
-    .bind(&payload.subcategory)
+    .bind(taxonomy_version)
+    .bind(canonical_category)
+    .bind(canonical_subcategory)
     .bind(&payload.risk_level)
     .bind(payload.action.to_string())
     .bind(payload.confidence as f64)
@@ -202,7 +244,7 @@ async fn persist_manual_classification(
     .bind(payload.reason.clone())
     .bind(json!({
         "normalized_key": normalized_key,
-        "category": payload.primary_category,
+        "category": canonical_category,
         "action": payload.action,
     }))
     .execute(pool)

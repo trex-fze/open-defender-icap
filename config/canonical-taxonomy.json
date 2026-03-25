@@ -1,0 +1,551 @@
+{
+  "version": "2026-03-25-draft-1",
+  "source": "stage-12-canonical-taxonomy-lockdown",
+  "categories": [
+    {
+      "id": "adult-sexual-content",
+      "name": "Adult / Sexual Content",
+      "subcategories": [
+        { "id": "pornography", "name": "Pornography" },
+        { "id": "nudity", "name": "Nudity" },
+        { "id": "explicit-sexual-acts", "name": "Explicit sexual acts" },
+        { "id": "erotic-content", "name": "Erotic content" },
+        { "id": "lingerie-suggestive-content", "name": "Lingerie / suggestive content" },
+        { "id": "sexual-wellness-sex-education", "name": "Sexual wellness / sex education" },
+        { "id": "escort-services", "name": "Escort services" },
+        { "id": "fetish-bdsm", "name": "Fetish / BDSM" },
+        { "id": "adult-live-cams", "name": "Adult live cams" },
+        { "id": "adult-forums", "name": "Adult forums" }
+      ]
+    },
+    {
+      "id": "gambling",
+      "name": "Gambling",
+      "subcategories": [
+        { "id": "online-casinos", "name": "Online casinos" },
+        { "id": "sports-betting", "name": "Sports betting" },
+        { "id": "poker", "name": "Poker" },
+        { "id": "lottery", "name": "Lottery" },
+        { "id": "fantasy-betting", "name": "Fantasy betting" },
+        { "id": "gambling-tips-predictions", "name": "Gambling tips/predictions" },
+        { "id": "betting-exchanges", "name": "Betting exchanges" },
+        { "id": "sweepstakes-prize-gambling", "name": "Sweepstakes / prize gambling" },
+        { "id": "crypto-gambling", "name": "Crypto gambling" }
+      ]
+    },
+    {
+      "id": "violence-weapons",
+      "name": "Violence / Weapons",
+      "subcategories": [
+        { "id": "graphic-violence", "name": "Graphic violence" },
+        { "id": "gore", "name": "Gore" },
+        { "id": "weapons-sales", "name": "Weapons sales" },
+        { "id": "firearms", "name": "Firearms" },
+        { "id": "ammunition", "name": "Ammunition" },
+        { "id": "weapon-accessories", "name": "Weapon accessories" },
+        { "id": "combat-tactical-content", "name": "Combat / tactical content" },
+        { "id": "explosive-making-content", "name": "Explosive-making content" },
+        { "id": "violent-extremist-propaganda", "name": "Violent extremist propaganda" }
+      ]
+    },
+    {
+      "id": "drugs-controlled-substances",
+      "name": "Drugs / Controlled Substances",
+      "subcategories": [
+        { "id": "illegal-drugs", "name": "Illegal drugs" },
+        { "id": "drug-paraphernalia", "name": "Drug paraphernalia" },
+        { "id": "cannabis-dispensaries", "name": "Cannabis dispensaries" },
+        { "id": "prescription-drug-misuse", "name": "Prescription drug misuse" },
+        { "id": "performance-enhancing-drugs", "name": "Performance-enhancing drugs" },
+        { "id": "psychedelics", "name": "Psychedelics" },
+        { "id": "drug-forums", "name": "Drug forums" },
+        { "id": "substance-abuse-promotion", "name": "Substance abuse promotion" }
+      ]
+    },
+    {
+      "id": "hate-extremism",
+      "name": "Hate / Extremism",
+      "subcategories": [
+        { "id": "hate-speech", "name": "Hate speech" },
+        { "id": "extremist-ideology", "name": "Extremist ideology" },
+        { "id": "terror-propaganda", "name": "Terror propaganda" },
+        { "id": "radicalization-material", "name": "Radicalization material" },
+        { "id": "supremacist-content", "name": "Supremacist content" },
+        { "id": "harassment-abusive-communities", "name": "Harassment / abusive communities" },
+        { "id": "violent-political-extremism", "name": "Violent political extremism" }
+      ]
+    },
+    {
+      "id": "illegal-criminal-activity",
+      "name": "Illegal / Criminal Activity",
+      "subcategories": [
+        { "id": "hacking-cracking", "name": "Hacking/cracking" },
+        { "id": "carding-fraud-guides", "name": "Carding/fraud guides" },
+        { "id": "counterfeit-goods", "name": "Counterfeit goods" },
+        { "id": "piracy-torrent-indexes", "name": "Piracy/torrent indexes" },
+        { "id": "stolen-data-marketplaces", "name": "Stolen data marketplaces" },
+        { "id": "forged-documents", "name": "Forged documents" },
+        { "id": "smuggling-trafficking", "name": "Smuggling / trafficking" },
+        { "id": "evasion-guides", "name": "Evasion guides" },
+        { "id": "criminal-marketplaces", "name": "Criminal marketplaces" }
+      ]
+    },
+    {
+      "id": "malware-phishing-fraud",
+      "name": "Malware / Phishing / Fraud",
+      "subcategories": [
+        { "id": "phishing-sites", "name": "Phishing sites" },
+        { "id": "malware-delivery", "name": "Malware delivery" },
+        { "id": "scam-fraud", "name": "Scam/fraud" },
+        { "id": "impersonation", "name": "Impersonation" },
+        { "id": "botnet-c2-indicators", "name": "Botnet C2 indicators" },
+        { "id": "credential-theft", "name": "Credential theft" },
+        { "id": "malvertising-destinations", "name": "Malvertising destinations" },
+        { "id": "tech-support-scams", "name": "Tech support scams" },
+        { "id": "fake-banking-login-portals", "name": "Fake banking/login portals" }
+      ]
+    },
+    {
+      "id": "social-media",
+      "name": "Social Media",
+      "subcategories": [
+        { "id": "social-networks", "name": "Social networks" },
+        { "id": "microblogging", "name": "Microblogging" },
+        { "id": "short-video-platforms", "name": "Short-video platforms" },
+        { "id": "photo-sharing", "name": "Photo sharing" },
+        { "id": "creator-platforms", "name": "Creator platforms" },
+        { "id": "social-messaging-integrated-platforms", "name": "Social messaging integrated platforms" },
+        { "id": "influencer-community-networks", "name": "Influencer/community networks" }
+      ]
+    },
+    {
+      "id": "streaming-entertainment",
+      "name": "Streaming / Entertainment",
+      "subcategories": [
+        { "id": "video-streaming", "name": "Video streaming" },
+        { "id": "music-streaming", "name": "Music streaming" },
+        { "id": "live-streaming", "name": "Live streaming" },
+        { "id": "internet-radio", "name": "Internet radio" },
+        { "id": "celebrity-entertainment-news", "name": "Celebrity / entertainment news" },
+        { "id": "tv-movie-portals", "name": "TV/movie portals" },
+        { "id": "fan-sites", "name": "Fan sites" }
+      ]
+    },
+    {
+      "id": "games",
+      "name": "Games",
+      "subcategories": [
+        { "id": "online-gaming", "name": "Online gaming" },
+        { "id": "game-downloads", "name": "Game downloads" },
+        { "id": "browser-games", "name": "Browser games" },
+        { "id": "game-streaming", "name": "Game streaming" },
+        { "id": "gaming-communities", "name": "Gaming communities" },
+        { "id": "esports", "name": "Esports" },
+        { "id": "cheat-mod-sites", "name": "Cheat/mod sites" }
+      ]
+    },
+    {
+      "id": "shopping-e-commerce",
+      "name": "Shopping / E-Commerce",
+      "subcategories": [
+        { "id": "general-retail", "name": "General retail" },
+        { "id": "marketplaces", "name": "Marketplaces" },
+        { "id": "auctions", "name": "Auctions" },
+        { "id": "fashion-beauty-retail", "name": "Fashion/beauty retail" },
+        { "id": "electronics-retail", "name": "Electronics retail" },
+        { "id": "grocery-delivery", "name": "Grocery delivery" },
+        { "id": "subscription-commerce", "name": "Subscription commerce" },
+        { "id": "coupon-deal-sites", "name": "Coupon/deal sites" },
+        { "id": "luxury-goods", "name": "Luxury goods" },
+        { "id": "second-hand-marketplaces", "name": "Second-hand marketplaces" }
+      ]
+    },
+    {
+      "id": "news-media",
+      "name": "News / Media",
+      "subcategories": [
+        { "id": "general-news", "name": "General news" },
+        { "id": "local-news", "name": "Local news" },
+        { "id": "international-news", "name": "International news" },
+        { "id": "alternative-media", "name": "Alternative media" },
+        { "id": "opinion-editorial", "name": "Opinion/editorial" },
+        { "id": "tabloids", "name": "Tabloids" },
+        { "id": "press-release-sites", "name": "Press release sites" },
+        { "id": "investigative-journalism", "name": "Investigative journalism" }
+      ]
+    },
+    {
+      "id": "education",
+      "name": "Education",
+      "subcategories": [
+        { "id": "schools-universities", "name": "Schools/universities" },
+        { "id": "e-learning", "name": "E-learning" },
+        { "id": "certification-training", "name": "Certification/training" },
+        { "id": "research-institutions", "name": "Research institutions" },
+        { "id": "academic-journals", "name": "Academic journals" },
+        { "id": "homework-study-tools", "name": "Homework/study tools" },
+        { "id": "child-education", "name": "Child education" }
+      ]
+    },
+    {
+      "id": "government-public-services",
+      "name": "Government / Public Services",
+      "subcategories": [
+        { "id": "government-portals", "name": "Government portals" },
+        { "id": "ministries-agencies", "name": "Ministries/agencies" },
+        { "id": "public-records", "name": "Public records" },
+        { "id": "tax-customs", "name": "Tax/customs" },
+        { "id": "immigration-visa", "name": "Immigration/visa" },
+        { "id": "law-enforcement", "name": "Law enforcement" },
+        { "id": "municipal-services", "name": "Municipal services" },
+        { "id": "utilities-public-service-portals", "name": "Utilities/public service portals" }
+      ]
+    },
+    {
+      "id": "finance-banking",
+      "name": "Finance / Banking",
+      "subcategories": [
+        { "id": "banking", "name": "Banking" },
+        { "id": "insurance", "name": "Insurance" },
+        { "id": "investments", "name": "Investments" },
+        { "id": "brokerage", "name": "Brokerage" },
+        { "id": "personal-finance", "name": "Personal finance" },
+        { "id": "accounting-tax-tools", "name": "Accounting/tax tools" },
+        { "id": "payment-gateways", "name": "Payment gateways" },
+        { "id": "lending", "name": "Lending" },
+        { "id": "fintech-platforms", "name": "Fintech platforms" }
+      ]
+    },
+    {
+      "id": "health-medical",
+      "name": "Health / Medical",
+      "subcategories": [
+        { "id": "hospitals-clinics", "name": "Hospitals/clinics" },
+        { "id": "telemedicine", "name": "Telemedicine" },
+        { "id": "medical-information", "name": "Medical information" },
+        { "id": "pharmacies", "name": "Pharmacies" },
+        { "id": "mental-health", "name": "Mental health" },
+        { "id": "fitness-wellness", "name": "Fitness/wellness" },
+        { "id": "nutrition", "name": "Nutrition" },
+        { "id": "medical-research", "name": "Medical research" },
+        { "id": "patient-portals", "name": "Patient portals" }
+      ]
+    },
+    {
+      "id": "religion-belief",
+      "name": "Religion / Belief",
+      "subcategories": [
+        { "id": "religious-institutions", "name": "Religious institutions" },
+        { "id": "faith-education", "name": "Faith education" },
+        { "id": "sermons-media", "name": "Sermons/media" },
+        { "id": "religious-communities", "name": "Religious communities" },
+        { "id": "spirituality", "name": "Spirituality" },
+        { "id": "occult-esoteric-beliefs", "name": "Occult/esoteric beliefs" },
+        { "id": "atheist-secular-organizations", "name": "Atheist/secular organizations" }
+      ]
+    },
+    {
+      "id": "travel-transportation",
+      "name": "Travel / Transportation",
+      "subcategories": [
+        { "id": "airlines", "name": "Airlines" },
+        { "id": "hotels-accommodation", "name": "Hotels/accommodation" },
+        { "id": "ride-hailing", "name": "Ride hailing" },
+        { "id": "public-transport", "name": "Public transport" },
+        { "id": "maps-navigation", "name": "Maps/navigation" },
+        { "id": "travel-booking", "name": "Travel booking" },
+        { "id": "reviews-travel-guides", "name": "Reviews/travel guides" },
+        { "id": "car-rental", "name": "Car rental" },
+        { "id": "visa-travel-advisory", "name": "Visa/travel advisory" }
+      ]
+    },
+    {
+      "id": "technology-it",
+      "name": "Technology / IT",
+      "subcategories": [
+        { "id": "vendor-sites", "name": "Vendor sites" },
+        { "id": "developer-documentation", "name": "Developer documentation" },
+        { "id": "open-source-repositories", "name": "Open source repositories" },
+        { "id": "technical-forums", "name": "Technical forums" },
+        { "id": "software-downloads", "name": "Software downloads" },
+        { "id": "saas-tools", "name": "SaaS tools" },
+        { "id": "hardware-vendors", "name": "Hardware vendors" },
+        { "id": "it-news-blogs", "name": "IT news/blogs" }
+      ]
+    },
+    {
+      "id": "web-infrastructure-hosting-cdn",
+      "name": "Web Infrastructure / Hosting / CDN",
+      "subcategories": [
+        { "id": "hosting-providers", "name": "Hosting providers" },
+        { "id": "cdns", "name": "CDNs" },
+        { "id": "dns-providers", "name": "DNS providers" },
+        { "id": "domain-registrars", "name": "Domain registrars" },
+        { "id": "cloud-platforms", "name": "Cloud platforms" },
+        { "id": "reverse-proxy-services", "name": "Reverse proxy services" },
+        { "id": "ddos-protection", "name": "DDoS protection" },
+        { "id": "edge-infrastructure", "name": "Edge infrastructure" },
+        { "id": "web-acceleration", "name": "Web acceleration" }
+      ]
+    },
+    {
+      "id": "business-corporate",
+      "name": "Business / Corporate",
+      "subcategories": [
+        { "id": "corporate-websites", "name": "Corporate websites" },
+        { "id": "b2b-services", "name": "B2B services" },
+        { "id": "consulting", "name": "Consulting" },
+        { "id": "manufacturing", "name": "Manufacturing" },
+        { "id": "logistics", "name": "Logistics" },
+        { "id": "professional-services", "name": "Professional services" },
+        { "id": "legal-services", "name": "Legal services" },
+        { "id": "hr-payroll", "name": "HR/payroll" },
+        { "id": "enterprise-vendors", "name": "Enterprise vendors" }
+      ]
+    },
+    {
+      "id": "email-messaging-collaboration",
+      "name": "Email / Messaging / Collaboration",
+      "subcategories": [
+        { "id": "webmail", "name": "Webmail" },
+        { "id": "instant-messaging", "name": "Instant messaging" },
+        { "id": "team-collaboration", "name": "Team collaboration" },
+        { "id": "video-conferencing", "name": "Video conferencing" },
+        { "id": "shared-calendars", "name": "Shared calendars" },
+        { "id": "document-collaboration", "name": "Document collaboration" },
+        { "id": "internal-comms-tools", "name": "Internal comms tools" }
+      ]
+    },
+    {
+      "id": "file-sharing-storage",
+      "name": "File Sharing / Storage",
+      "subcategories": [
+        { "id": "cloud-storage", "name": "Cloud storage" },
+        { "id": "file-transfer", "name": "File transfer" },
+        { "id": "backup-sync", "name": "Backup/sync" },
+        { "id": "document-hosting", "name": "Document hosting" },
+        { "id": "media-hosting", "name": "Media hosting" },
+        { "id": "anonymous-file-sharing", "name": "Anonymous file sharing" },
+        { "id": "large-file-transfer", "name": "Large-file transfer" }
+      ]
+    },
+    {
+      "id": "ai-llm-tools",
+      "name": "AI / LLM Tools",
+      "subcategories": [
+        { "id": "general-chatbots", "name": "General chatbots" },
+        { "id": "code-assistants", "name": "Code assistants" },
+        { "id": "image-generation", "name": "Image generation" },
+        { "id": "voice-video-ai", "name": "Voice/video AI" },
+        { "id": "ai-search", "name": "AI search" },
+        { "id": "model-hosting", "name": "Model hosting" },
+        { "id": "prompt-libraries", "name": "Prompt libraries" },
+        { "id": "agent-platforms", "name": "Agent platforms" },
+        { "id": "ai-productivity-tools", "name": "AI productivity tools" }
+      ]
+    },
+    {
+      "id": "search-engines-portals",
+      "name": "Search Engines / Portals",
+      "subcategories": [
+        { "id": "search-engines", "name": "Search engines" },
+        { "id": "web-portals", "name": "Web portals" },
+        { "id": "meta-search", "name": "Meta search" },
+        { "id": "vertical-search", "name": "Vertical search" },
+        { "id": "homepage-portals", "name": "Homepage portals" },
+        { "id": "knowledge-search", "name": "Knowledge search" }
+      ]
+    },
+    {
+      "id": "kids-family",
+      "name": "Kids / Family",
+      "subcategories": [
+        { "id": "childrens-entertainment", "name": "Children's entertainment" },
+        { "id": "educational-kids-content", "name": "Educational kids content" },
+        { "id": "parenting-resources", "name": "Parenting resources" },
+        { "id": "family-activities", "name": "Family activities" },
+        { "id": "kids-games", "name": "Kids games" },
+        { "id": "child-safe-video-platforms", "name": "Child-safe video platforms" }
+      ]
+    },
+    {
+      "id": "dating-relationships",
+      "name": "Dating / Relationships",
+      "subcategories": [
+        { "id": "dating-apps-sites", "name": "Dating apps/sites" },
+        { "id": "matchmaking", "name": "Matchmaking" },
+        { "id": "casual-dating", "name": "Casual dating" },
+        { "id": "relationship-advice", "name": "Relationship advice" },
+        { "id": "marriage-family-counseling", "name": "Marriage/family counseling" },
+        { "id": "adult-dating", "name": "Adult dating" }
+      ]
+    },
+    {
+      "id": "job-search-career",
+      "name": "Job Search / Career",
+      "subcategories": [
+        { "id": "job-boards", "name": "Job boards" },
+        { "id": "recruiting-platforms", "name": "Recruiting platforms" },
+        { "id": "professional-networking", "name": "Professional networking" },
+        { "id": "resume-cv-tools", "name": "Resume/CV tools" },
+        { "id": "freelance-gig-work", "name": "Freelance/gig work" },
+        { "id": "career-coaching", "name": "Career coaching" },
+        { "id": "employer-review-sites", "name": "Employer review sites" }
+      ]
+    },
+    {
+      "id": "forums-communities",
+      "name": "Forums / Communities",
+      "subcategories": [
+        { "id": "general-forums", "name": "General forums" },
+        { "id": "q-a-communities", "name": "Q&A communities" },
+        { "id": "hobby-communities", "name": "Hobby communities" },
+        { "id": "anonymous-boards", "name": "Anonymous boards" },
+        { "id": "niche-interest-groups", "name": "Niche interest groups" },
+        { "id": "support-communities", "name": "Support communities" }
+      ]
+    },
+    {
+      "id": "reference-knowledge",
+      "name": "Reference / Knowledge",
+      "subcategories": [
+        { "id": "encyclopedias", "name": "Encyclopedias" },
+        { "id": "dictionaries", "name": "Dictionaries" },
+        { "id": "wikis", "name": "Wikis" },
+        { "id": "how-to-sites", "name": "How-to sites" },
+        { "id": "manuals-reference-docs", "name": "Manuals/reference docs" },
+        { "id": "public-datasets", "name": "Public datasets" },
+        { "id": "libraries-archives", "name": "Libraries/archives" }
+      ]
+    },
+    {
+      "id": "proxy-vpn-anonymizers",
+      "name": "Proxy / VPN / Anonymizers",
+      "subcategories": [
+        { "id": "vpn-services", "name": "VPN services" },
+        { "id": "web-proxies", "name": "Web proxies" },
+        { "id": "socks-http-proxies", "name": "SOCKS/HTTP proxies" },
+        { "id": "tor-related-sites", "name": "Tor-related sites" },
+        { "id": "anonymous-browsers", "name": "Anonymous browsers" },
+        { "id": "relay-anonymizer-services", "name": "Relay/anonymizer services" },
+        { "id": "circumvention-tools", "name": "Circumvention tools" }
+      ]
+    },
+    {
+      "id": "remote-access-tunneling",
+      "name": "Remote Access / Tunneling",
+      "subcategories": [
+        { "id": "remote-desktop", "name": "Remote desktop" },
+        { "id": "ssh-web-terminals", "name": "SSH/web terminals" },
+        { "id": "tunneling-services", "name": "Tunneling services" },
+        { "id": "zero-trust-access", "name": "Zero-trust access" },
+        { "id": "reverse-tunnels", "name": "Reverse tunnels" },
+        { "id": "secure-relay-tools", "name": "Secure relay tools" },
+        { "id": "admin-remote-control-tools", "name": "Admin remote-control tools" }
+      ]
+    },
+    {
+      "id": "cryptocurrency-blockchain",
+      "name": "Cryptocurrency / Blockchain",
+      "subcategories": [
+        { "id": "exchanges", "name": "Exchanges" },
+        { "id": "wallets", "name": "Wallets" },
+        { "id": "blockchain-explorers", "name": "Blockchain explorers" },
+        { "id": "nft-marketplaces", "name": "NFT marketplaces" },
+        { "id": "defi-platforms", "name": "DeFi platforms" },
+        { "id": "mining", "name": "Mining" },
+        { "id": "token-launchpads", "name": "Token launchpads" },
+        { "id": "crypto-news", "name": "Crypto news" },
+        { "id": "memecoin-speculative-sites", "name": "Memecoin/speculative sites" }
+      ]
+    },
+    {
+      "id": "real-estate",
+      "name": "Real Estate",
+      "subcategories": [
+        { "id": "property-listings", "name": "Property listings" },
+        { "id": "commercial-real-estate", "name": "Commercial real estate" },
+        { "id": "rentals", "name": "Rentals" },
+        { "id": "property-management", "name": "Property management" },
+        { "id": "mortgage-property-finance", "name": "Mortgage/property finance" },
+        { "id": "real-estate-agencies", "name": "Real estate agencies" },
+        { "id": "home-valuation-tools", "name": "Home valuation tools" }
+      ]
+    },
+    {
+      "id": "food-dining",
+      "name": "Food / Dining",
+      "subcategories": [
+        { "id": "restaurant-sites", "name": "Restaurant sites" },
+        { "id": "delivery-platforms", "name": "Delivery platforms" },
+        { "id": "recipes", "name": "Recipes" },
+        { "id": "food-blogs", "name": "Food blogs" },
+        { "id": "reservations", "name": "Reservations" },
+        { "id": "grocery-meal-planning", "name": "Grocery/meal planning" },
+        { "id": "reviews", "name": "Reviews" }
+      ]
+    },
+    {
+      "id": "sports",
+      "name": "Sports",
+      "subcategories": [
+        { "id": "sports-news", "name": "Sports news" },
+        { "id": "live-scores", "name": "Live scores" },
+        { "id": "team-league-sites", "name": "Team/league sites" },
+        { "id": "streaming-sports", "name": "Streaming sports" },
+        { "id": "fantasy-sports", "name": "Fantasy sports" },
+        { "id": "sports-communities", "name": "Sports communities" },
+        { "id": "training-coaching", "name": "Training/coaching" }
+      ]
+    },
+    {
+      "id": "arts-culture",
+      "name": "Arts / Culture",
+      "subcategories": [
+        { "id": "museums", "name": "Museums" },
+        { "id": "galleries", "name": "Galleries" },
+        { "id": "cultural-institutions", "name": "Cultural institutions" },
+        { "id": "literature", "name": "Literature" },
+        { "id": "performing-arts", "name": "Performing arts" },
+        { "id": "photography", "name": "Photography" },
+        { "id": "design-fashion-culture", "name": "Design/fashion culture" },
+        { "id": "heritage-history", "name": "Heritage/history" }
+      ]
+    },
+    {
+      "id": "personal-blogs-personal-pages",
+      "name": "Personal Blogs / Personal Pages",
+      "subcategories": [
+        { "id": "personal-blogs", "name": "Personal blogs" },
+        { "id": "portfolio-sites", "name": "Portfolio sites" },
+        { "id": "personal-hosting-pages", "name": "Personal hosting pages" },
+        { "id": "hobby-journals", "name": "Hobby journals" },
+        { "id": "memoirs-opinion-pages", "name": "Memoirs/opinion pages" }
+      ]
+    },
+    {
+      "id": "url-shorteners-redirectors",
+      "name": "URL Shorteners / Redirectors",
+      "subcategories": [
+        { "id": "url-shorteners", "name": "URL shorteners" },
+        { "id": "link-aggregation-pages", "name": "Link aggregation pages" },
+        { "id": "redirect-tracking-links", "name": "Redirect/tracking links" },
+        { "id": "campaign-links", "name": "Campaign links" },
+        { "id": "qr-redirect-services", "name": "QR redirect services" }
+      ]
+    },
+    {
+      "id": "unknown-unclassified",
+      "name": "Unknown / Unclassified",
+      "always_enabled": true,
+      "subcategories": [
+        { "id": "newly-seen-unknowns", "name": "Newly seen unknowns", "always_enabled": true },
+        { "id": "insufficient-evidence", "name": "Insufficient evidence", "always_enabled": true },
+        { "id": "dynamic-unresolved", "name": "Dynamic/unresolved", "always_enabled": true },
+        { "id": "parked-domains", "name": "Parked domains", "always_enabled": true },
+        { "id": "placeholder-error-pages", "name": "Placeholder/error pages", "always_enabled": true },
+        { "id": "unreachable-temporary-failures", "name": "Unreachable/temporary failures", "always_enabled": true }
+      ]
+    }
+  ]
+}

@@ -47,11 +47,11 @@ npx start-server-and-test "npm run dev" http://127.0.0.1:19001 "npx cypress run 
    - Go to `/overrides`
    - Create override, edit it, then delete it
    - Confirm each mutation with success feedback
-5. **Taxonomy CRUD**
+5. **Taxonomy activation**
    - Go to `/taxonomy`
-   - Create category + subcategory
-   - Edit both records
-   - Delete created records
+   - Toggle a category and a subcategory checkbox (locked entries should remain disabled)
+   - Click **Save** and confirm the success banner
+   - Click **Reset** and verify the state matches the persisted profile
 6. **Diagnostics**
    - `/diagnostics/page-content`: lookup key and verify latest + history
    - `/diagnostics/cache`: lookup key and evict cache entry
@@ -82,7 +82,7 @@ Store screenshots under `docs/evidence/stage10-web-admin/` using this naming con
 - `02-review-resolve.png`
 - `03-pending-decision.png`
 - `04-overrides-crud.png`
-- `05-taxonomy-crud.png`
+- `05-taxonomy-activation.png`
 - `06-page-content-diagnostics.png`
 - `07-cache-diagnostics.png`
 - `08-cli-logs.png`

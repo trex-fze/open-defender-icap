@@ -63,12 +63,12 @@ All routes require `X-Admin-Token` or a JWT with the listed roles. Pagination pa
 
 ### Taxonomy
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `GET`/`POST` | `/api/v1/taxonomy/categories` | List or create categories (`{ name, description?, weight? }`). |
-| `PUT`/`DELETE` | `/api/v1/taxonomy/categories/:id` | Update/delete category. |
-| `GET`/`POST` | `/api/v1/taxonomy/subcategories` | Manage subcategories (`category_id`, `name`, `description?`). |
-| `PUT`/`DELETE` | `/api/v1/taxonomy/subcategories/:id` | Update/delete subcategory. |
+| Method | Path | Description | Roles | Request Schema | Response |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/v1/taxonomy` | Returns the canonical taxonomy (40 categories + subcategories) with the current activation profile. Structure is read-only. | `policy-viewer`. | — | `{ version, updated_at, updated_by, categories: [{ id, name, enabled, locked, subcategories: [...] }] }` |
+| `PUT` | `/api/v1/taxonomy/activation` | Saves checkbox state for every category/subcategory. IDs must match the canonical file and `Unknown / Unclassified` cannot be disabled. | `policy-editor` (`ROLE_TAXONOMY_EDIT`). | `ActivationUpdateRequest`: `{ version, categories: [{ id, enabled, subcategories: [{ id, enabled }] }] }`. Version must match the canonical taxonomy version. | `{ version, updated_at, updated_by }`. Also increments `taxonomy_activation_changes_total`. |
+
+> **Note:** Category/subcategory creation and deletion endpoints have been removed; taxonomy structure is governed solely by `config/canonical-taxonomy.json` and operator toggles only control allow/deny state.
 
 ### Reporting
 
@@ -164,7 +164,7 @@ Prometheus scrapes these paths; they do not accept application payloads but are 
 
 | Service | Path | Notes |
 | --- | --- | --- |
-| Admin API | `/metrics` | Review queue SLA + cache invalidation stats. |
+| Admin API | `/metrics` | Review queue SLA, cache invalidation stats, `taxonomy_activation_changes_total`. |
 | Policy Engine | (exposed via `metrics_host` in config) | Counters for decisions, reload times (feature planned). |
 | ICAP Adaptor | `/metrics` | Request rates, cache hits, Redis publication metrics. |
 | Event Ingester | `/metrics` | Ingest batch counts, crawl job attempts. |

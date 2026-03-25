@@ -34,6 +34,14 @@ static REVIEW_SLA_BREACHED: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+static TAXONOMY_ACTIVATION_CHANGES: Lazy<IntCounter> = Lazy::new(|| {
+    register_int_counter!(
+        "taxonomy_activation_changes_total",
+        "Number of times the taxonomy activation profile was saved"
+    )
+    .unwrap()
+});
+
 #[derive(Clone)]
 pub struct ReviewMetrics {
     sla_seconds: f64,
@@ -74,6 +82,10 @@ impl ReviewMetrics {
         TextEncoder::new().encode(&metric_families, &mut buffer)?;
         Ok(String::from_utf8(buffer).unwrap_or_default())
     }
+}
+
+pub fn record_taxonomy_activation_change() {
+    TAXONOMY_ACTIVATION_CHANGES.inc();
 }
 
 #[cfg(test)]
