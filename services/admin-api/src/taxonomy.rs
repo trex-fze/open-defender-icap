@@ -1,8 +1,13 @@
 use std::collections::HashMap;
 
-use axum::{extract::State, http::StatusCode, Extension, Json};
+use axum::{
+    extract::{OriginalUri, State},
+    http::{Method, StatusCode, Uri},
+    Extension, Json,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::{PgPool, Row};
 use tracing::error;
 use uuid::Uuid;
@@ -80,6 +85,24 @@ pub async fn update_taxonomy_activation(
         updated_at: updated.updated_at,
         updated_by: updated.updated_by.clone(),
     }))
+}
+
+pub async fn block_category_mutation(
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    handle_mutation_request(method, uri, user, state, "category").await
+}
+
+pub async fn block_subcategory_mutation(
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    handle_mutation_request(method, uri, user, state, "subcategory").await
 }
 
 #[derive(Debug, Serialize)]
@@ -577,8 +600,174 @@ fn db_error(err: sqlx::Error) -> (StatusCode, Json<ApiError>) {
 }
 
 #[cfg(test)]
-mod tests {
+mod support {
     use super::*;
+    use crate::{
+        audit::AuditLogger,
+        auth::{AdminAuth, AuthSettings},
+        iam::IamService,
+        metrics::ReviewMetrics,
+    };
+    use ::taxonomy::TaxonomyStore;
+    use anyhow::Result;
+    use sqlx::postgres::PgPoolOptions;
+    use std::sync::Arc;
+
+    pub async fn build_test_state(db_url: &str, mutation_enabled: bool) -> Result<AppState> {
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(db_url)
+            .await?;
+        sqlx::migrate!("./migrations").run(&pool).await?;
+        let iam = Arc::new(IamService::new(pool.clone()));
+        let admin_auth = Arc::new(
+            AdminAuth::from_config(
+                Some("test-token".into()),
+                AuthSettings::default(),
+                iam.clone(),
+            )
+            .await
+            .expect("admin auth"),
+        );
+        let audit_logger = AuditLogger::new(pool.clone(), None);
+        let metrics = ReviewMetrics::new(4 * 60 * 60);
+        let canonical_taxonomy =
+            Arc::new(CanonicalTaxonomy::load_from_env().expect("canonical taxonomy should load"));
+        let taxonomy_store = Arc::new(TaxonomyStore::new(canonical_taxonomy.clone()));
+
+        Ok(AppState {
+            pool,
+            admin_auth,
+            cache_invalidator: None,
+            audit_logger,
+            metrics,
+            reporting_client: None,
+            iam,
+            canonical_taxonomy,
+            taxonomy_store,
+            taxonomy_mutation_enabled: mutation_enabled,
+        })
+    }
+}
+
+async fn handle_mutation_request(
+    method: Method,
+    uri: Uri,
+    user: UserContext,
+    state: AppState,
+    target: &'static str,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    let mutation_enabled = state.taxonomy_mutation_enabled();
+    state
+        .log_policy_event(
+            if mutation_enabled {
+                "taxonomy.mutation.maintenance"
+            } else {
+                "taxonomy.mutation.blocked"
+            },
+            Some(user.actor.clone()),
+            None,
+            json!({
+                "method": method.as_str(),
+                "path": uri.to_string(),
+                "target": target,
+                "mutation_enabled": mutation_enabled,
+            }),
+        )
+        .await;
+
+    let (status, error) = if mutation_enabled {
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            ApiError::new(
+                "TAXONOMY_MUTATION_UNSUPPORTED",
+                "Maintenance mode enabled, but taxonomy structure is governed by config/canonical-taxonomy.json. Update the file and redeploy instead of calling legacy mutation endpoints.",
+            ),
+        )
+    } else {
+        (
+            StatusCode::LOCKED,
+            ApiError::new(
+                "TAXONOMY_LOCKED",
+                "Taxonomy structure is locked. Set OD_TAXONOMY_MUTATION_ENABLED=true only if you must perform break-glass maintenance.",
+            ),
+        )
+    };
+
+    Err((status, Json(error)))
+}
+
+#[cfg(test)]
+mod mutation_tests {
+    use super::support::build_test_state;
+    use super::*;
+    use crate::auth::UserContext;
+    use anyhow::Result;
+    use std::env;
+
+    #[tokio::test]
+    async fn taxonomy_mutation_locked_by_default() -> Result<()> {
+        let db_url = match env::var("ADMIN_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!(
+                    "skipping taxonomy_mutation_locked_by_default (set ADMIN_TEST_DATABASE_URL to run)"
+                );
+                return Ok(());
+            }
+        };
+
+        let state = build_test_state(&db_url, false).await?;
+        let result = handle_mutation_request(
+            Method::POST,
+            "/api/v1/taxonomy/categories".parse().unwrap(),
+            UserContext::system(),
+            state,
+            "category",
+        )
+        .await;
+        let (status, Json(err)) = result.expect_err("expected lock error");
+        assert_eq!(status, StatusCode::LOCKED);
+        assert_eq!(err.code(), "TAXONOMY_LOCKED");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn taxonomy_mutation_maintenance_flag_acknowledged() -> Result<()> {
+        let db_url = match env::var("ADMIN_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!(
+                    "skipping taxonomy_mutation_maintenance_flag_acknowledged (set ADMIN_TEST_DATABASE_URL to run)"
+                );
+                return Ok(());
+            }
+        };
+
+        let state = build_test_state(&db_url, true).await?;
+        let result = handle_mutation_request(
+            Method::DELETE,
+            "/api/v1/taxonomy/categories/legacy".parse().unwrap(),
+            UserContext::system(),
+            state,
+            "category",
+        )
+        .await;
+        let (status, Json(err)) = result.expect_err("expected maintenance response");
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(err.code(), "TAXONOMY_MUTATION_UNSUPPORTED");
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::support::build_test_state;
+    use super::*;
+    use anyhow::Result;
+    use axum::{extract::State, Extension};
+    use sqlx::postgres::PgPoolOptions;
+    use std::env;
 
     fn build_taxonomy() -> CanonicalTaxonomy {
         CanonicalTaxonomy {
@@ -648,5 +837,150 @@ mod tests {
         };
         let err = validate_activation_payload(payload, &taxonomy).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn activation_profile_save_and_reload() -> Result<()> {
+        let db_url = match env::var("ADMIN_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!(
+                    "skipping activation_profile_save_and_reload (set ADMIN_TEST_DATABASE_URL to run)"
+                );
+                return Ok(());
+            }
+        };
+
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await?;
+        sqlx::migrate!("./migrations").run(&pool).await?;
+        sqlx::query("TRUNCATE taxonomy_activation_entries CASCADE")
+            .execute(&pool)
+            .await?;
+        sqlx::query("TRUNCATE taxonomy_activation_profiles CASCADE")
+            .execute(&pool)
+            .await?;
+
+        let taxonomy = CanonicalTaxonomy::load_from_env().expect("canonical taxonomy");
+        let profile = ensure_activation_profile(&pool, &taxonomy).await.unwrap();
+        assert!(profile.category_states.contains_key("unknown-unclassified"));
+
+        let request = ActivationUpdateRequest {
+            version: taxonomy.version.clone(),
+            categories: taxonomy
+                .categories
+                .iter()
+                .map(|cat| ActivationCategoryInput {
+                    id: cat.id.clone(),
+                    enabled: cat.id != "unknown-unclassified",
+                    subcategories: cat
+                        .subcategories
+                        .iter()
+                        .map(|sub| ActivationSubcategoryInput {
+                            id: sub.id.clone(),
+                            enabled: cat.id != "unknown-unclassified",
+                        })
+                        .collect(),
+                })
+                .collect(),
+        };
+        let validated = validate_activation_payload(request, &taxonomy).unwrap();
+        persist_activation_profile(&pool, profile.id, &validated, &taxonomy, "tester")
+            .await
+            .unwrap();
+
+        let reloaded = ensure_activation_profile(&pool, &taxonomy).await.unwrap();
+        assert_eq!(
+            reloaded
+                .category_states
+                .get("unknown-unclassified")
+                .copied(),
+            Some(false)
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn taxonomy_activation_round_trip() -> Result<()> {
+        let db_url = match env::var("ADMIN_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!(
+                    "skipping taxonomy_activation_round_trip (set ADMIN_TEST_DATABASE_URL to run)"
+                );
+                return Ok(());
+            }
+        };
+
+        let state = build_test_state(&db_url, false).await?;
+        sqlx::query("TRUNCATE taxonomy_activation_entries CASCADE")
+            .execute(state.pool())
+            .await?;
+        sqlx::query("TRUNCATE taxonomy_activation_profiles CASCADE")
+            .execute(state.pool())
+            .await?;
+
+        let Json(initial) = get_taxonomy(Extension(UserContext::system()), State(state.clone()))
+            .await
+            .expect("taxonomy fetch");
+        assert!(!initial.categories.is_empty(), "expected taxonomy data");
+
+        let mut payload = ActivationUpdateRequest {
+            version: initial.version.clone(),
+            categories: initial
+                .categories
+                .iter()
+                .map(|category| ActivationCategoryInput {
+                    id: category.id.clone(),
+                    enabled: category.enabled,
+                    subcategories: category
+                        .subcategories
+                        .iter()
+                        .map(|sub| ActivationSubcategoryInput {
+                            id: sub.id.clone(),
+                            enabled: sub.enabled,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        };
+
+        let unknown = payload
+            .categories
+            .iter_mut()
+            .find(|cat| cat.id == "unknown-unclassified")
+            .expect("unknown category present");
+        unknown.enabled = false;
+        for sub in &mut unknown.subcategories {
+            sub.enabled = false;
+        }
+
+        let editor =
+            UserContext::from_fallback("taxonomy-editor".into(), vec!["policy-admin".into()]);
+        let _ = update_taxonomy_activation(Extension(editor), State(state.clone()), Json(payload))
+            .await
+            .expect("activation update");
+
+        let Json(updated) = get_taxonomy(Extension(UserContext::system()), State(state.clone()))
+            .await
+            .expect("taxonomy refetch");
+        let unknown_response = updated
+            .categories
+            .iter()
+            .find(|cat| cat.id == "unknown-unclassified")
+            .expect("unknown response");
+        assert!(
+            !unknown_response.enabled,
+            "unknown category should reflect updated state"
+        );
+        assert!(unknown_response
+            .subcategories
+            .iter()
+            .all(|sub| !sub.enabled));
+
+        Ok(())
     }
 }
