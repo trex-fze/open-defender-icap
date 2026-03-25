@@ -61,6 +61,36 @@ npx start-server-and-test "npm run dev" http://127.0.0.1:19001 "npx cypress run 
 8. **Ops status**
    - `/dashboard`: verify pending/review counts and ops source badge (`live`, `partial`, or `mock`)
 
+## Taxonomy Lockdown Monitoring (Stage 12)
+
+Operators are responsible for confirming that the Stage 12 canonical taxonomy lock stays healthy during each deploy:
+
+- **Metrics**
+  - `taxonomy_fallback_total{reason="unknown_label"}` (emitted by LLM/reclass workers) should remain near zero; non-zero spikes mean upstream sources are still emitting legacy categories. Investigate by sampling `svc-llm-worker` logs for `taxonomy.fallback` events.
+  - `taxonomy_activation_changes_total` (admin-api) should increment only when an operator intentionally clicks **Save** on the taxonomy page. Unexpected increments suggest automation or scripts are mutating activation state.
+- **Audit stream**
+  - Search admin-api logs for `taxonomy.mutation.blocked`; that event confirms locked CRUD routes are still being called (for example by an old CLI). Coordinate with the caller to remove the request; do **not** re-enable mutations.
+- **UI verification**
+  - `/taxonomy` must show the canonical version/updated metadata banner. Unknown/Unclassified should always be present; toggling it off should immediately disable all nested subcategories.
+
+If fallback or blocked-mutation metrics climb steadily for more than 5 minutes, halt any rollout, collect the offending payloads, and page the taxonomy owner.
+
+## Stage 12 Rollout / Rollback Procedure
+
+1. **Pre-flight**
+   - Confirm `config/canonical-taxonomy.json` change (if any) is reviewed and versioned.
+   - Ensure `OD_TAXONOMY_MUTATION_ENABLED` is **unset/false** in all environments before deploying.
+2. **Rollout steps**
+   - Deploy admin-api, policy-engine, llm-worker, and reclass-worker together (they all read the canonical taxonomy).
+   - After deploy, hit `GET /api/v1/taxonomy` and verify the returned `version`, `updated_at`, and `activation` flags match the canonical file.
+   - Watch `taxonomy_fallback_total` and `taxonomy_activation_changes_total` for 10 minutes; if both are flat, the rollout is healthy.
+3. **Rollback plan**
+   - If a bad taxonomy update ships, revert the commit touching `config/canonical-taxonomy.json`, redeploy the stack, and reload the UI.
+   - Only if an emergency structural edit is required, set `OD_TAXONOMY_MUTATION_ENABLED=true` on admin-api, redeploy **that service only**, perform the minimal mutation through the legacy endpoint, then immediately flip the flag back to false and redeploy to restore the lock. Record the event in the incident log.
+   - If LLM/reclass fall back continuously because of a faulty canonical entry, disable the affected category via `/taxonomy`, redeploy the corrected taxonomy file, then re-enable the category once validation passes.
+
+Document every rollout/rollback in the release notes with the taxonomy version string and activation snapshot for auditability.
+
 ## Screenshot capture checklist
 
 Capture one screenshot for each of the following and attach to release evidence:
