@@ -175,12 +175,14 @@ impl PageFetcher {
         let redis = redis::Client::open(self.cfg.redis_url.clone())?;
         let mut conn = redis.get_async_connection().await?;
         let options = StreamReadOptions::default().block(5000).count(10);
+        let mut last_id = "0-0".to_string();
         loop {
             let reply: StreamReadReply = conn
-                .xread_options(&[&self.cfg.stream], &["$"], &options)
+                .xread_options(&[&self.cfg.stream], &[last_id.as_str()], &options)
                 .await?;
             for stream in &reply.keys {
                 for entry in &stream.ids {
+                    last_id = entry.id.clone();
                     if let Some(payload) = entry.get::<String>("payload") {
                         if let Err(err) = self.process_job(&payload).await {
                             self.metrics.record_job_failed();
@@ -220,13 +222,13 @@ impl PageFetcher {
     }
 
     async fn content_fresh(&self, normalized_key: &str) -> Result<bool> {
-        let exists: Option<i64> = sqlx::query_scalar(
-            "SELECT 1 FROM page_contents WHERE normalized_key = $1 AND expires_at > NOW() LIMIT 1",
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM page_contents WHERE normalized_key = $1 AND expires_at > NOW())",
         )
         .bind(normalized_key)
-        .fetch_optional(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
-        Ok(exists.is_some())
+        Ok(exists)
     }
 
     async fn fetch_content(&self, job: &PageFetchJob, url: &Url) -> Result<CrawlApiResponse> {
@@ -371,12 +373,12 @@ impl PageFetcher {
     }
 
     async fn next_version(&self, normalized_key: &str) -> Result<i64> {
-        let current: Option<i64> = sqlx::query_scalar::<_, Option<i64>>(
+        let current: Option<i32> = sqlx::query_scalar::<_, Option<i32>>(
             "SELECT MAX(fetch_version) FROM page_contents WHERE normalized_key = $1",
         )
         .bind(normalized_key)
         .fetch_one(&self.pool)
         .await?;
-        Ok(current.unwrap_or(0) + 1)
+        Ok(current.unwrap_or(0) as i64 + 1)
     }
 }

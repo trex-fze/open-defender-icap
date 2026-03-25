@@ -76,12 +76,22 @@ async fn main() -> Result<()> {
             .connect(&db_url)
             .await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
-        let activation = Arc::new(
-            ActivationState::load(&pool)
-                .await
-                .context("failed to load taxonomy activation profile")?,
-        );
-        ActivationState::spawn_refresh_task(Arc::clone(&activation), pool.clone());
+        let (activation_state, activation_refresh_enabled) =
+            match ActivationState::load(&pool).await {
+                Ok(state) => (state, true),
+                Err(err) => {
+                    tracing::warn!(
+                        target = "svc-policy",
+                        %err,
+                        "failed to load taxonomy activation profile; defaulting to allow-all"
+                    );
+                    (ActivationState::allow_all(), false)
+                }
+            };
+        let activation = Arc::new(activation_state);
+        if activation_refresh_enabled {
+            ActivationState::spawn_refresh_task(Arc::clone(&activation), pool.clone());
+        }
         let store = match PolicyStore::load_from_db(&pool, Arc::clone(&taxonomy)).await? {
             Some(store) => store,
             None => {

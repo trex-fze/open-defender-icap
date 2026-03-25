@@ -291,12 +291,21 @@ async fn main() -> Result<()> {
 
     let taxonomy =
         Arc::new(TaxonomyStore::load_default().context("failed to load canonical taxonomy")?);
-    let activation = Arc::new(
-        ActivationState::load(&pool)
-            .await
-            .context("failed to load taxonomy activation profile")?,
-    );
-    ActivationState::spawn_refresh_task(Arc::clone(&activation), pool.clone());
+    let (activation_state, activation_refresh_enabled) = match ActivationState::load(&pool).await {
+        Ok(state) => (state, true),
+        Err(err) => {
+            warn!(
+                target = "svc-llm-worker",
+                %err,
+                "failed to load taxonomy activation profile; defaulting to allow-all"
+            );
+            (ActivationState::allow_all(), false)
+        }
+    };
+    let activation = Arc::new(activation_state);
+    if activation_refresh_enabled {
+        ActivationState::spawn_refresh_task(Arc::clone(&activation), pool.clone());
+    }
 
     let cache_listener = CacheListener::new(&cfg.redis_url, &cfg.cache_channel).await?;
     tokio::spawn(cache_listener.run());
@@ -395,12 +404,14 @@ impl JobConsumer {
         let client = redis::Client::open(self.redis_url.clone())?;
         let mut conn = client.get_async_connection().await?;
         let options = StreamReadOptions::default().block(5000).count(10);
+        let mut last_id = "0-0".to_string();
         loop {
             let reply: StreamReadReply = conn
-                .xread_options(&[&self.stream], &["$"], &options)
+                .xread_options(&[&self.stream], &[last_id.as_str()], &options)
                 .await?;
             for stream in reply.keys {
                 for entry in stream.ids {
+                    last_id = entry.id.clone();
                     if let Some(payload) = entry.get::<String>("payload") {
                         if let Err(err) = self.process_job(&payload).await {
                             error!(target = "svc-llm-worker", %err, "failed to process job");
