@@ -47,11 +47,7 @@ export const TaxonomyPage = () => {
     setLocalCategories((prev) =>
       prev.map((category) => {
         if (category.id !== categoryId || category.locked) return category;
-        const nextSubcategories = category.subcategories.map((sub) => ({
-          ...sub,
-          enabled,
-        }));
-        return { ...category, enabled, subcategories: nextSubcategories };
+        return { ...category, enabled };
       }),
     );
   };
@@ -60,7 +56,7 @@ export const TaxonomyPage = () => {
     const enabled = !disabled;
     setLocalCategories((prev) =>
       prev.map((category) => {
-        if (category.id !== categoryId || !category.enabled || category.locked) return category;
+        if (category.id !== categoryId || category.locked) return category;
         const subcategories = category.subcategories.map((sub) => {
           if (sub.id !== subId || sub.locked) return sub;
           return { ...sub, enabled };
@@ -82,11 +78,7 @@ export const TaxonomyPage = () => {
       enabled: category.locked ? true : category.enabled,
       subcategories: category.subcategories.map((sub) => ({
         id: sub.id,
-        enabled: sub.locked
-          ? true
-          : category.enabled
-            ? sub.enabled
-            : false,
+        enabled: sub.locked ? true : sub.enabled,
       })),
     })),
   });
@@ -161,7 +153,8 @@ export const TaxonomyPage = () => {
         <p style={{ margin: '0 0 0.3rem' }}>
           Taxonomy structure is locked to the canonical file. Checked boxes mean traffic is disabled/blocked; unchecked
           boxes mean the category/subcategory is allowed. Unknown / Unclassified traffic can now be disabled the same way.
-          Re-enabling a category resets all of its topics to allowed so you can then disable specific subcategories.
+          Configure individual topics even when a category is disabled—those settings will apply the moment the category
+          is re-enabled.
         </p>
         <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
           <div>
@@ -224,8 +217,8 @@ export const TaxonomyPage = () => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                       <input
                         type="checkbox"
-                        checked={category.enabled ? (!sub.enabled) : true}
-                        disabled={!category.enabled || !canEdit || busy || sub.locked}
+                        checked={!sub.enabled}
+                        disabled={!canEdit || busy || sub.locked}
                         onChange={(event) => handleSubcategoryToggle(category.id, sub.id, event.target.checked)}
                       />
                       <span>{sub.name}</span>

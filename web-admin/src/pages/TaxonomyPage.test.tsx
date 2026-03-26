@@ -84,7 +84,7 @@ describe('TaxonomyPage', () => {
     expect(screen.getAllByText('Locked').length).toBeGreaterThan(0);
   });
 
-  it('allows operators to toggle Unknown traffic, cascades to subs, and resets on re-enable', async () => {
+  it('allows operators to configure subcategories independently of category toggle', async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     const saveActivation = vi.fn().mockResolvedValue(undefined);
     mockedUseTaxonomyData.mockReturnValue({
@@ -111,27 +111,27 @@ describe('TaxonomyPage', () => {
 
     expect(unknownCategory).not.toBeChecked();
 
-    // Disable category -> all subs disabled
+    // Disable category -> sub toggles remain editable for future configuration
     await act(async () => {
       await user.click(unknownCategory);
     });
 
     expect(unknownCategory).toBeChecked();
-    expect(unknownSubcategory).toBeChecked();
-    expect(unknownSubcategory).toBeDisabled();
+    expect(unknownSubcategory).not.toBeChecked();
+    expect(unknownSubcategory).not.toBeDisabled();
 
-    // Re-enable category -> subs reset to enabled
+    // Disable a specific subcategory while parent is disabled
+    await act(async () => {
+      await user.click(screen.getByLabelText('Newly seen unknowns'));
+    });
+    expect(screen.getByLabelText('Newly seen unknowns')).toBeChecked();
+
+    // Re-enable category -> subs keep configured choices
     await act(async () => {
       await user.click(unknownCategory);
     });
 
     expect(unknownCategory).not.toBeChecked();
-    expect(screen.getByLabelText('Newly seen unknowns')).not.toBeChecked();
-
-    // Disable a specific subcategory while parent is enabled
-    await act(async () => {
-      await user.click(screen.getByLabelText('Newly seen unknowns'));
-    });
     expect(screen.getByLabelText('Newly seen unknowns')).toBeChecked();
 
     const saveButton = screen.getByRole('button', { name: /Save Changes/i });
