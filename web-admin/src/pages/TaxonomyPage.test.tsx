@@ -109,12 +109,14 @@ describe('TaxonomyPage', () => {
     const unknownCategory = screen.getByLabelText('Unknown / Unclassified') as HTMLInputElement;
     const unknownSubcategory = screen.getByLabelText('Newly seen unknowns') as HTMLInputElement;
 
+    expect(unknownCategory).not.toBeChecked();
+
     await act(async () => {
       await user.click(unknownCategory);
     });
 
-    expect(unknownCategory).not.toBeChecked();
-    expect(unknownSubcategory).not.toBeChecked();
+    expect(unknownCategory).toBeChecked();
+    expect(unknownSubcategory).toBeChecked();
     expect(unknownSubcategory).toBeDisabled();
 
     const saveButton = screen.getByRole('button', { name: /Save Changes/i });
@@ -134,7 +136,7 @@ describe('TaxonomyPage', () => {
     await act(async () => {
       await user.click(resetButton);
     });
-    expect(screen.getByLabelText('Unknown / Unclassified')).toBeChecked();
+    expect(screen.getByLabelText('Unknown / Unclassified')).not.toBeChecked();
   });
 
   it('shows mock banner and disables editing when Admin API is offline', async () => {
