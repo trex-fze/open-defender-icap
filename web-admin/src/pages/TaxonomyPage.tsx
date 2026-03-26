@@ -79,6 +79,11 @@ export const TaxonomyPage = () => {
 
   const resetLocal = () => {
     setLocalCategories(cloneCategories(data.categories));
+    const resetFlags: Record<string, boolean> = {};
+    data.categories.forEach((category) => {
+      resetFlags[category.id] = !category.enabled;
+    });
+    setExplicitDisabled(resetFlags);
     setMessage(undefined);
   };
 

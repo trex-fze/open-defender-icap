@@ -40,7 +40,8 @@ const defaultUser: UserProfile = {
 };
 
 const TOKEN_STORAGE_KEY = 'od.admin.tokens';
-const ENV_BOOTSTRAP_TOKEN = (import.meta.env.VITE_ADMIN_TOKEN ?? '').trim();
+const DEFAULT_ADMIN_TOKEN = (import.meta.env.VITE_DEFAULT_ADMIN_TOKEN ?? 'changeme-admin').trim();
+const ENV_BOOTSTRAP_TOKEN = (import.meta.env.VITE_ADMIN_TOKEN ?? DEFAULT_ADMIN_TOKEN).trim();
 const DEFAULT_TOKEN_TTL_MS = 60 * 60 * 1000;
 
 const isExpired = (token?: AuthTokens | null): boolean => {

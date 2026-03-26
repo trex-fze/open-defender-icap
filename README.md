@@ -251,7 +251,7 @@ INTEGRATION_BUILD=1 INTEGRATION_BUILD_RETRIES=3 tests/integration.sh
 ## FAQ
 
 **Q: How do I log in to the Admin UI?**  
-Set `VITE_ADMIN_TOKEN` (for mock mode) or configure OIDC. In dev, enter any email on `/login`; it seeds `localStorage` with the bootstrap token so you can explore AI insights immediately.
+Set `VITE_ADMIN_TOKEN` (for mock mode) or configure OIDC. When not provided, the UI now falls back to `VITE_DEFAULT_ADMIN_TOKEN` (defaults to `changeme-admin`) and targets `VITE_ADMIN_API_URL` or `http://localhost:19000`. Enter any email on `/login`; it seeds `localStorage` with the bootstrap token so you can explore AI insights immediately. Override or clear the fallback by setting `VITE_DEFAULT_ADMIN_TOKEN=""`.
 
 **Q: Why does `odctl` say "No stored session"?**  
 Run `odctl auth login --client-id ...` to trigger the device code flow, or pass `--token $OD_ADMIN_TOKEN` explicitly.

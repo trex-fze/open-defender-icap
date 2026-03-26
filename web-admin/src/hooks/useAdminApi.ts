@@ -8,12 +8,23 @@ const isLikelyJwt = (token: string): boolean => {
   return parts.length === 3 && parts.every((part) => part.length > 0);
 };
 
+const localhostFallback = () => {
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname || 'localhost';
+    return `http://${hostname}:19000`;
+  }
+  return 'http://localhost:19000';
+};
+
 const resolveBaseUrl = () => {
   const runtimeOverride =
     typeof window !== 'undefined'
       ? (window as Window & { __OD_ADMIN_API_URL__?: string }).__OD_ADMIN_API_URL__
       : undefined;
-  return (runtimeOverride ?? import.meta.env.VITE_ADMIN_API_URL ?? '').trim();
+  const envUrl = (import.meta.env.VITE_ADMIN_API_URL ?? '').trim();
+  const fallbackEnv = (import.meta.env.VITE_ADMIN_API_FALLBACK ?? '').trim();
+  const candidate = envUrl || fallbackEnv || localhostFallback();
+  return (runtimeOverride ?? candidate).trim();
 };
 
 export const useAdminApi = () => {

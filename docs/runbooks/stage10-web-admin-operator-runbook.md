@@ -121,7 +121,7 @@ Store screenshots under `docs/evidence/stage10-web-admin/` using this naming con
 
 ## Troubleshooting
 
-- **UI shows mock mode unexpectedly**: verify `VITE_ADMIN_API_URL` and token state in local storage.
+- **UI shows mock mode unexpectedly**: verify `VITE_ADMIN_API_URL`/`VITE_ADMIN_API_FALLBACK` resolve to the live Admin API and that a bootstrap token (`VITE_ADMIN_TOKEN` or `VITE_DEFAULT_ADMIN_TOKEN`) is present in local storage.
 - **403 from mutations**: verify role claims include required permissions.
 - **No CLI logs shown**: ensure admin API has `audit` access and data exists.
 - **Ops provider list empty**: set `VITE_LLM_PROVIDERS_URL` to worker providers endpoint.
