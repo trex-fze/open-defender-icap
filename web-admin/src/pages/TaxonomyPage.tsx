@@ -22,9 +22,15 @@ export const TaxonomyPage = () => {
   const { saveActivation, busy, error: actionError } = useTaxonomyActions();
   const [localCategories, setLocalCategories] = useState<TaxonomyCategoryRow[]>([]);
   const [message, setMessage] = useState<string | undefined>();
+  const [explicitDisabled, setExplicitDisabled] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setLocalCategories(cloneCategories(data.categories));
+    const initialFlags: Record<string, boolean> = {};
+    data.categories.forEach((category) => {
+      initialFlags[category.id] = !category.enabled;
+    });
+    setExplicitDisabled(initialFlags);
   }, [data]);
 
   const isDirty = useMemo(() => {
@@ -44,10 +50,15 @@ export const TaxonomyPage = () => {
 
   const handleCategoryToggle = (categoryId: string, disabled: boolean) => {
     const enabled = !disabled;
+    setExplicitDisabled((prev) => ({ ...prev, [categoryId]: disabled }));
     setLocalCategories((prev) =>
       prev.map((category) => {
         if (category.id !== categoryId || category.locked) return category;
-        return { ...category, enabled };
+        const nextSubcategories = category.subcategories.map((sub) => ({
+          ...sub,
+          enabled,
+        }));
+        return { ...category, enabled, subcategories: nextSubcategories };
       }),
     );
   };
@@ -56,7 +67,7 @@ export const TaxonomyPage = () => {
     const enabled = !disabled;
     setLocalCategories((prev) =>
       prev.map((category) => {
-        if (category.id !== categoryId || category.locked) return category;
+        if (category.id !== categoryId || !category.enabled || category.locked) return category;
         const subcategories = category.subcategories.map((sub) => {
           if (sub.id !== subId || sub.locked) return sub;
           return { ...sub, enabled };
@@ -73,14 +84,17 @@ export const TaxonomyPage = () => {
 
   const buildPayload = (version: string): ActivationUpdatePayload => ({
     version,
-    categories: localCategories.map((category) => ({
-      id: category.id,
-      enabled: category.locked ? true : category.enabled,
-      subcategories: category.subcategories.map((sub) => ({
-        id: sub.id,
-        enabled: sub.locked ? true : sub.enabled,
-      })),
-    })),
+    categories: localCategories.map((category) => {
+      const isExplicitlyDisabled = explicitDisabled[category.id] ?? !category.enabled;
+      return {
+        id: category.id,
+        enabled: category.locked ? true : !isExplicitlyDisabled,
+        subcategories: category.subcategories.map((sub) => ({
+          id: sub.id,
+          enabled: sub.locked ? true : isExplicitlyDisabled ? false : sub.enabled,
+        })),
+      };
+    }),
   });
 
   const handleSave = async () => {
@@ -152,9 +166,9 @@ export const TaxonomyPage = () => {
       <div className="glass-panel" style={{ marginTop: '1rem', background: 'rgba(108,140,255,0.08)' }}>
         <p style={{ margin: '0 0 0.3rem' }}>
           Taxonomy structure is locked to the canonical file. Checked boxes mean traffic is disabled/blocked; unchecked
-          boxes mean the category/subcategory is allowed. Unknown / Unclassified traffic can now be disabled the same way.
-          Configure individual topics even when a category is disabled—those settings will apply the moment the category
-          is re-enabled.
+          boxes mean the category/subcategory is allowed. Enabling a category resets all of its topics to allowed—you can
+          then disable specific subcategories for fine-grained control. If any topic is disabled, the category appears
+          disabled to highlight the block.
         </p>
         <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
           <div>
@@ -187,49 +201,56 @@ export const TaxonomyPage = () => {
           </div>
         ) : null}
 
-        {localCategories.map((category) => (
-          <div key={category.id} className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 600 }}>
-                <input
-                  type="checkbox"
-                  checked={category.enabled ? false : true}
-                  disabled={!canEdit || busy || category.locked}
-                  onChange={(event) => handleCategoryToggle(category.id, event.target.checked)}
-                />
-                {category.name}
-              </label>
-              {category.locked ? <span className="chip chip--teal">Locked</span> : null}
-            </div>
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.5rem' }}>
-              <p className="section-title" style={{ marginBottom: '0.4rem' }}>Subcategories</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                {category.subcategories.map((sub) => (
-                  <label
-                    key={sub.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '0.75rem',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={!sub.enabled}
-                        disabled={!canEdit || busy || sub.locked}
-                        onChange={(event) => handleSubcategoryToggle(category.id, sub.id, event.target.checked)}
-                      />
-                      <span>{sub.name}</span>
-                    </div>
-                    {sub.locked ? <span className="chip chip--slate">Locked</span> : null}
-                  </label>
-                ))}
+        {localCategories.map((category) => {
+          const explicitlyDisabledFlag = explicitDisabled[category.id] ?? !category.enabled;
+          const hasDisabledSub = category.subcategories.some((sub) => !sub.enabled && !sub.locked);
+          const categoryChecked = explicitlyDisabledFlag || hasDisabledSub;
+          const allowSubEdits = !explicitlyDisabledFlag && category.enabled;
+
+          return (
+            <div key={category.id} className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 600 }}>
+                  <input
+                    type="checkbox"
+                    checked={categoryChecked}
+                    disabled={!canEdit || busy || category.locked}
+                    onChange={(event) => handleCategoryToggle(category.id, event.target.checked)}
+                  />
+                  {category.name}
+                </label>
+                {category.locked ? <span className="chip chip--teal">Locked</span> : null}
+              </div>
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.5rem' }}>
+                <p className="section-title" style={{ marginBottom: '0.4rem' }}>Subcategories</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                  {category.subcategories.map((sub) => (
+                    <label
+                      key={sub.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '0.75rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={!sub.enabled}
+                          disabled={!allowSubEdits || !canEdit || busy || sub.locked}
+                          onChange={(event) => handleSubcategoryToggle(category.id, sub.id, event.target.checked)}
+                        />
+                        <span>{sub.name}</span>
+                      </div>
+                      {sub.locked ? <span className="chip chip--slate">Locked</span> : null}
+                    </label>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

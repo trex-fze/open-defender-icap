@@ -84,7 +84,7 @@ describe('TaxonomyPage', () => {
     expect(screen.getAllByText('Locked').length).toBeGreaterThan(0);
   });
 
-  it('allows operators to configure subcategories independently of category toggle', async () => {
+  it('supports full-category disable and per-topic disable semantics', async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     const saveActivation = vi.fn().mockResolvedValue(undefined);
     mockedUseTaxonomyData.mockReturnValue({
@@ -111,28 +111,41 @@ describe('TaxonomyPage', () => {
 
     expect(unknownCategory).not.toBeChecked();
 
-    // Disable category -> sub toggles remain editable for future configuration
+    // Disable category -> subs forced off and inputs disabled
     await act(async () => {
       await user.click(unknownCategory);
     });
 
     expect(unknownCategory).toBeChecked();
-    expect(unknownSubcategory).not.toBeChecked();
-    expect(unknownSubcategory).not.toBeDisabled();
+    expect(unknownSubcategory).toBeChecked();
+    expect(unknownSubcategory).toBeDisabled();
 
-    // Disable a specific subcategory while parent is disabled
+    // Save full disable payload
+    const saveButtonFull = screen.getByRole('button', { name: /Save Changes/i });
     await act(async () => {
-      await user.click(screen.getByLabelText('Newly seen unknowns'));
+      await user.click(saveButtonFull);
     });
-    expect(screen.getByLabelText('Newly seen unknowns')).toBeChecked();
+    const payloadFull = saveActivation.mock.calls[0][0] as ActivationUpdatePayload;
+    const unknownFull = payloadFull.categories.find((cat: { id: string }) => cat.id === 'unknown-unclassified');
+    expect(unknownFull?.enabled).toBe(false);
+    unknownFull?.subcategories?.forEach((sub: { enabled: boolean }) => expect(sub.enabled).toBe(false));
+    saveActivation.mockClear();
+    refresh.mockClear();
 
-    // Re-enable category -> subs keep configured choices
+    // Re-enable category -> subs reset
     await act(async () => {
       await user.click(unknownCategory);
     });
 
     expect(unknownCategory).not.toBeChecked();
+    expect(screen.getByLabelText('Newly seen unknowns')).not.toBeChecked();
+
+    // Disable a specific subcategory while parent is enabled
+    await act(async () => {
+      await user.click(screen.getByLabelText('Newly seen unknowns'));
+    });
     expect(screen.getByLabelText('Newly seen unknowns')).toBeChecked();
+    expect(unknownCategory).toBeChecked();
 
     const saveButton = screen.getByRole('button', { name: /Save Changes/i });
     await act(async () => {
