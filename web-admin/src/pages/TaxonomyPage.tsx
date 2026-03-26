@@ -49,7 +49,7 @@ export const TaxonomyPage = () => {
         if (category.id !== categoryId || category.locked) return category;
         const nextSubcategories = category.subcategories.map((sub) => ({
           ...sub,
-          enabled: enabled ? sub.enabled : false,
+          enabled,
         }));
         return { ...category, enabled, subcategories: nextSubcategories };
       }),
@@ -161,6 +161,7 @@ export const TaxonomyPage = () => {
         <p style={{ margin: '0 0 0.3rem' }}>
           Taxonomy structure is locked to the canonical file. Checked boxes mean traffic is disabled/blocked; unchecked
           boxes mean the category/subcategory is allowed. Unknown / Unclassified traffic can now be disabled the same way.
+          Re-enabling a category resets all of its topics to allowed so you can then disable specific subcategories.
         </p>
         <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
           <div>

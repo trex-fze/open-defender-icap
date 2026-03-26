@@ -84,7 +84,7 @@ describe('TaxonomyPage', () => {
     expect(screen.getAllByText('Locked').length).toBeGreaterThan(0);
   });
 
-  it('allows operators to toggle Unknown traffic and persist the activation payload', async () => {
+  it('allows operators to toggle Unknown traffic, cascades to subs, and resets on re-enable', async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     const saveActivation = vi.fn().mockResolvedValue(undefined);
     mockedUseTaxonomyData.mockReturnValue({
@@ -111,6 +111,7 @@ describe('TaxonomyPage', () => {
 
     expect(unknownCategory).not.toBeChecked();
 
+    // Disable category -> all subs disabled
     await act(async () => {
       await user.click(unknownCategory);
     });
@@ -118,6 +119,20 @@ describe('TaxonomyPage', () => {
     expect(unknownCategory).toBeChecked();
     expect(unknownSubcategory).toBeChecked();
     expect(unknownSubcategory).toBeDisabled();
+
+    // Re-enable category -> subs reset to enabled
+    await act(async () => {
+      await user.click(unknownCategory);
+    });
+
+    expect(unknownCategory).not.toBeChecked();
+    expect(screen.getByLabelText('Newly seen unknowns')).not.toBeChecked();
+
+    // Disable a specific subcategory while parent is enabled
+    await act(async () => {
+      await user.click(screen.getByLabelText('Newly seen unknowns'));
+    });
+    expect(screen.getByLabelText('Newly seen unknowns')).toBeChecked();
 
     const saveButton = screen.getByRole('button', { name: /Save Changes/i });
     await act(async () => {
@@ -128,8 +143,14 @@ describe('TaxonomyPage', () => {
     expect(saveActivation).toHaveBeenCalledTimes(1);
     const payload = saveActivation.mock.calls[0][0] as ActivationUpdatePayload;
     const unknownPayload = payload.categories.find((cat: { id: string }) => cat.id === 'unknown-unclassified');
-    expect(unknownPayload?.enabled).toBe(false);
-    unknownPayload?.subcategories?.forEach((sub: { enabled: boolean }) => expect(sub.enabled).toBe(false));
+    expect(unknownPayload?.enabled).toBe(true);
+    unknownPayload?.subcategories?.forEach((sub: { id: string; enabled: boolean }) => {
+      if (sub.id === 'newly-seen-unknowns') {
+        expect(sub.enabled).toBe(false);
+      } else {
+        expect(sub.enabled).toBe(true);
+      }
+    });
     expect(refresh).toHaveBeenCalledTimes(1);
 
     const resetButton = screen.getByRole('button', { name: 'Reset' });
