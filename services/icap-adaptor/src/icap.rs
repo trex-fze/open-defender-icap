@@ -7,10 +7,10 @@ pub struct IcapRequest {
     pub method: String,
     pub service: String,
     pub headers: HashMap<String, String>,
-    pub http_method: String,
-    pub http_path: String,
+    pub http_method: Option<String>,
+    pub http_path: Option<String>,
     pub http_scheme: Option<String>,
-    pub http_host: String,
+    pub http_host: Option<String>,
     pub trace_id: Option<String>,
 }
 
@@ -46,18 +46,31 @@ impl IcapRequest {
             }
         }
 
-        let (http_method, http_path, http_scheme, http_host) = parse_http_block(http_block)?;
-
         let trace_id = headers.get("x-trace-id").map(|value| value.to_string());
+
+        if method.eq_ignore_ascii_case("OPTIONS") {
+            return Ok(Self {
+                method,
+                service,
+                headers,
+                http_method: None,
+                http_path: None,
+                http_scheme: None,
+                http_host: None,
+                trace_id,
+            });
+        }
+
+        let (http_method, http_path, http_scheme, http_host) = parse_http_block(http_block)?;
 
         Ok(Self {
             method,
             service,
             headers,
-            http_method,
-            http_path,
+            http_method: Some(http_method),
+            http_path: Some(http_path),
             http_scheme,
-            http_host,
+            http_host: Some(http_host),
             trace_id,
         })
     }
@@ -147,9 +160,9 @@ mod tests {
     fn parses_basic_icap_request() {
         let req = IcapRequest::parse(SAMPLE).unwrap();
         assert_eq!(req.method, "REQMOD");
-        assert_eq!(req.http_method, "GET");
-        assert_eq!(req.http_host, "example.com");
-        assert_eq!(req.http_path, "/path");
+        assert_eq!(req.http_method.as_deref(), Some("GET"));
+        assert_eq!(req.http_host.as_deref(), Some("example.com"));
+        assert_eq!(req.http_path.as_deref(), Some("/path"));
         assert_eq!(req.http_scheme.as_deref(), Some("http"));
         assert_eq!(req.trace_id.as_deref(), Some("abc123"));
     }
@@ -158,8 +171,8 @@ mod tests {
     fn parses_relative_target() {
         let raw = "REQMOD icap://icap/req ICAP/1.0\r\nHost: icap\r\n\r\nGET /foo/bar HTTP/1.1\r\nHost: sub.example.com\r\n\r\n";
         let req = IcapRequest::parse(raw).unwrap();
-        assert_eq!(req.http_path, "/foo/bar");
-        assert_eq!(req.http_host, "sub.example.com");
+        assert_eq!(req.http_path.as_deref(), Some("/foo/bar"));
+        assert_eq!(req.http_host.as_deref(), Some("sub.example.com"));
         assert!(req.http_scheme.is_none());
     }
 
@@ -174,18 +187,29 @@ mod tests {
     fn parses_connect_with_port() {
         let raw = "REQMOD icap://icap/req ICAP/1.0\r\nHost: icap\r\n\r\nCONNECT Facebook.com:443 HTTP/1.1\r\nHost: Facebook.com:443\r\n\r\n";
         let req = IcapRequest::parse(raw).unwrap();
-        assert_eq!(req.http_method, "CONNECT");
-        assert_eq!(req.http_host, "facebook.com");
+        assert_eq!(req.http_method.as_deref(), Some("CONNECT"));
+        assert_eq!(req.http_host.as_deref(), Some("facebook.com"));
         assert_eq!(req.http_scheme.as_deref(), Some("https"));
-        assert_eq!(req.http_path, "/");
+        assert_eq!(req.http_path.as_deref(), Some("/"));
     }
 
     #[test]
     fn parses_connect_with_ipv6_host() {
         let raw = "REQMOD icap://icap/req ICAP/1.0\r\nHost: icap\r\n\r\nCONNECT [2001:db8::1]:443 HTTP/1.1\r\nHost: [2001:db8::1]:443\r\n\r\n";
         let req = IcapRequest::parse(raw).unwrap();
-        assert_eq!(req.http_host, "2001:db8::1");
+        assert_eq!(req.http_host.as_deref(), Some("2001:db8::1"));
         assert_eq!(req.http_scheme.as_deref(), Some("https"));
-        assert_eq!(req.http_path, "/");
+        assert_eq!(req.http_path.as_deref(), Some("/"));
+    }
+
+    #[test]
+    fn parses_options_without_http_block() {
+        let raw = "OPTIONS icap://icap.service/req ICAP/1.0\r\nHost: icap.service\r\nUser-Agent: Squid\r\n\r\n";
+        let req = IcapRequest::parse(raw).unwrap();
+        assert_eq!(req.method, "OPTIONS");
+        assert_eq!(req.service, "icap://icap.service/req");
+        assert!(req.http_host.is_none());
+        assert!(req.http_path.is_none());
+        assert!(req.http_method.is_none());
     }
 }

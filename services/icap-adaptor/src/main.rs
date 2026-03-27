@@ -99,11 +99,23 @@ async fn handle_connection(
     let n = socket.read(&mut buf).await?;
     let raw = String::from_utf8_lossy(&buf[..n]);
     let icap_req = icap::IcapRequest::parse(&raw)?;
-    let normalized = normalize_target(
-        icap_req.http_host.as_str(),
-        &icap_req.http_path,
-        icap_req.http_scheme.as_deref(),
-    )?;
+    if icap_req.method.eq_ignore_ascii_case("OPTIONS") {
+        socket
+            .write_all(icap_options_response(cfg.preview_size).as_bytes())
+            .await?;
+        socket.shutdown().await?;
+        return Ok(());
+    }
+
+    let http_host = icap_req
+        .http_host
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("HTTP host header missing"))?;
+    let http_path = icap_req
+        .http_path
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("HTTP path missing"))?;
+    let normalized = normalize_target(http_host, http_path, icap_req.http_scheme.as_deref())?;
 
     if let Some(trace_id) = &icap_req.trace_id {
         tracing::Span::current().record("trace_id", &tracing::field::display(trace_id));
@@ -130,7 +142,7 @@ async fn handle_connection(
     let request = PolicyDecisionRequest {
         normalized_key: normalized.normalized_key.clone(),
         entity_level: normalized.entity_level.clone(),
-        source_ip: icap_req.http_host.clone(),
+        source_ip: http_host.to_string(),
         user_id: identity.user_id.clone(),
         group_ids: identity.group_ids.clone(),
     };
@@ -335,6 +347,21 @@ fn icap_response(action: &PolicyAction) -> String {
             )
         }
     }
+}
+
+fn icap_options_response(preview_size: usize) -> String {
+    format!(
+        concat!(
+            "ICAP/1.0 200 OK\r\n",
+            "Methods: REQMOD\r\n",
+            "Service: OpenDefender-REQMOD\r\n",
+            "ISTag: \"open-defender\"\r\n",
+            "Allow: 204\r\n",
+            "Preview: {}\r\n",
+            "Encapsulated: null-body=0\r\n\r\n"
+        ),
+        preview_size
+    )
 }
 
 fn derive_base_url(full_url: &str) -> Option<String> {
