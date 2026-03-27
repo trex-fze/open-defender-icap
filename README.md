@@ -64,7 +64,7 @@ flowchart LR
     EI -->|Page fetch job| PSTREAM
     PSTREAM --> PF
     PF -->|HTTP crawl| CRAWL --> PF
-    PF -->|Store excerpt| PAGE
+    PF -->|Store HTML context [HEAD/TITLE/BODY]| PAGE
 
     TAX --> AA
     TAX --> PE
@@ -93,7 +93,7 @@ flowchart LR
 - **Automated reclassification** – `reclass-worker` uses AI outputs and telemetry to queue overrides or second-pass scans.
 - **AI-assisted reporting** – the Elasticsearch/Kibana layer surfaces trending threats with context derived from LLM annotations and metadata enrichment.
 - **Hybrid AI routing** – configure offline engines (Ollama/LM Studio/vLLM) or online SaaS (OpenAI/Claude) with automatic failover per policy.
-- **Content-first blocking** – new `ContentPending` action serves a holding page until Crawl4AI captures the base URL and the LLM worker produces a content-verified verdict. Operators can monitor or unblock via the pending-sites UI/CLI.
+- **Content-first blocking** – `ContentPending` serves a holding page until Crawl4AI captures homepage HTML context and the LLM worker produces a canonical-taxonomy verdict. The fetch path is strict Crawl4AI-only (no HTTP fallback), and non-canonical LLM outputs are retried before persistence.
 
 ## Quick Start (Docker Compose)
 
@@ -176,6 +176,7 @@ flowchart LR
 | Performance | `k6 run tests/perf/k6-traffic.js` | Load test for `/api/v1/reporting/traffic` & `/api/v1/policies`. |
 | Security authZ smoke | `tests/security/authz-smoke.sh` | Confirms 401 for unauthenticated requests and payload validation. |
 | Security prompt-injection | `tests/security/llm-prompt-smoke.sh` | Enqueues malicious payload and verifies llm-worker ignores injection instructions. |
+| Security Facebook E2E smoke | `tests/security/facebook-e2e-smoke.sh` | End-to-end CONNECT path validation for pending -> Crawl4AI -> canonical classification -> final enforce. |
 | Hybrid failover smoke | `tests/perf/llm-failover.sh` | Stops LM Studio container to ensure fallback provider handles jobs. |
 
 ### Content-first Blocking Smoke

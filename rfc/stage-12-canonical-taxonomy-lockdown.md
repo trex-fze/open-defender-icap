@@ -2,7 +2,7 @@
 
 **Parent references**: `docs/engine-adaptor-spec.md` sections 9, 13, 14, 27  
 **Related docs**: `docs/user-guide.md`, `docs/api-catalog.md`, `docs/architecture.md`, `rfc/stage-09-content-aware-classification.md`  
-**Status**: Proposed
+**Status**: Implemented (with 2026-03 canonical prompt hardening)
 
 ## 1) Problem Statement
 
@@ -160,3 +160,9 @@ Error payload for blocked structure mutation attempts:
 5. Taxonomy page lists the entire canonical taxonomy with checkbox controls and no structure CRUD actions.
 6. Save/Reset workflow persists activation profile and survives page reload / service restart.
 7. Tests cover validation, fallback, read-only structure behavior, checkbox enforcement, and activation save flow (including unknown toggle behavior).
+
+## 9) Post-Implementation Hardening (2026-03)
+
+- LLM content-aware prompts now embed canonical taxonomy IDs directly (not just post-hoc mapping).
+- Non-canonical model responses are logged and retried before persistence.
+- Alias coverage extended for social-media variants (`social networking`, `social network`, `general social networking`) to reduce unnecessary fallback events.

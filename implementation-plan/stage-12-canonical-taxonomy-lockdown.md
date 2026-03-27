@@ -14,6 +14,7 @@ Stage 12 delivery items are now satisfied:
 
 1. Fallback/activation monitoring plus rollout + rollback notes captured in `docs/runbooks/stage10-web-admin-operator-runbook.md`.
 2. Backend integration coverage added for taxonomy mutation lock, canonical persistence (LLM + policy), and activation profile save/reload in the respective test modules.
+3. Canonical classification hardening completed for content-aware jobs: canonical taxonomy IDs are injected into prompts, non-canonical responses are retried, and taxonomy aliases were expanded for social-media variants.
 
 No additional tasks remain in the Stage 12 scope.
 
