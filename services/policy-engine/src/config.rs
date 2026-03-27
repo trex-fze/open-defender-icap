@@ -9,6 +9,8 @@ pub struct PolicyConfig {
     #[serde(default)]
     pub database_url: Option<String>,
     #[serde(default)]
+    pub activation_database_url: Option<String>,
+    #[serde(default)]
     pub admin_token: Option<String>,
     #[serde(default)]
     pub auth: Option<AuthSettings>,

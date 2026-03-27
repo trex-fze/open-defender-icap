@@ -14,7 +14,8 @@ use tracing::{error, info, instrument, warn, Level};
 
 use cache::CacheClient;
 use common_types::{
-    normalizer::normalize_target, EntityLevel, PageFetchJob, PolicyAction, PolicyDecisionRequest,
+    normalizer::normalize_target, EntityLevel, NormalizedTarget, PageFetchJob, PolicyAction,
+    PolicyDecision, PolicyDecisionRequest,
 };
 use jobs::{ClassificationJob, JobPublisher, PageFetchPublisher};
 use policy_client::PolicyClient;
@@ -116,43 +117,28 @@ async fn handle_connection(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("HTTP path missing"))?;
     let normalized = normalize_target(http_host, http_path, icap_req.http_scheme.as_deref())?;
-    let is_connect = icap_req
-        .http_method
-        .as_deref()
-        .map(|m| m.eq_ignore_ascii_case("CONNECT"))
-        .unwrap_or(false);
-
     if let Some(trace_id) = &icap_req.trace_id {
         tracing::Span::current().record("trace_id", &tracing::field::display(trace_id));
     }
 
     let identity = extract_identity(&icap_req.headers);
 
-    if let Some(decision) = cache.get(&normalized.normalized_key).await? {
-        if is_connect
-            && cfg.require_content
-            && matches!(decision.action, PolicyAction::Allow | PolicyAction::Monitor)
-        {
-            info!(
-                target = "svc-icap",
-                normalized_key = %normalized.normalized_key,
-                action = ?decision.action,
-                "ignoring cached allow/monitor for CONNECT; forcing pending classification"
-            );
-        } else {
-            metrics::record_cache_hit();
-            info!(
-                target = "svc-icap",
-                normalized_key = %normalized.normalized_key,
-                action = ?decision.action,
-                "cache decision"
-            );
-            let response = icap_response(&decision.action);
-            socket.write_all(response.as_bytes()).await?;
-            socket.shutdown().await?;
-            metrics::observe_squid_roundtrip(roundtrip_start.elapsed().as_secs_f64());
-            return Ok(());
-        }
+    if let Some((decision, source)) =
+        resolve_cached_decision(&cache, &normalized.normalized_key, &normalized).await?
+    {
+        metrics::record_cache_hit();
+        info!(
+            target = "svc-icap",
+            normalized_key = %normalized.normalized_key,
+            action = ?decision.action,
+            decision_source = source,
+            "cache decision"
+        );
+        let response = icap_response(&decision.action);
+        socket.write_all(response.as_bytes()).await?;
+        socket.shutdown().await?;
+        metrics::observe_squid_roundtrip(roundtrip_start.elapsed().as_secs_f64());
+        return Ok(());
     }
 
     metrics::record_cache_miss();
@@ -412,6 +398,44 @@ fn fallback_base_url(hostname: &str) -> String {
     format!("https://{hostname}/")
 }
 
+async fn resolve_cached_decision(
+    cache: &CacheClient,
+    normalized_key: &str,
+    normalized: &NormalizedTarget,
+) -> Result<Option<(PolicyDecision, &'static str)>> {
+    if let Some(decision) = cache.get(normalized_key).await? {
+        return Ok(Some((decision, "exact")));
+    }
+
+    let Some(ancestor_key) = ancestor_domain_key(normalized) else {
+        return Ok(None);
+    };
+    if let Some(decision) = cache.get(&ancestor_key).await? {
+        if is_inheritable_ancestor_action(&decision.action) {
+            return Ok(Some((decision, "ancestor")));
+        }
+    }
+
+    Ok(None)
+}
+
+fn ancestor_domain_key(normalized: &NormalizedTarget) -> Option<String> {
+    if normalized.entity_level != EntityLevel::Subdomain {
+        return None;
+    }
+    if normalized.registered_domain == normalized.hostname {
+        return None;
+    }
+    Some(format!("domain:{}", normalized.registered_domain))
+}
+
+fn is_inheritable_ancestor_action(action: &PolicyAction) -> bool {
+    matches!(
+        action,
+        PolicyAction::Allow | PolicyAction::Monitor | PolicyAction::Block
+    )
+}
+
 static PENDING_HTML: Lazy<String> = Lazy::new(|| {
     let template = r#"<html><head><meta charset="utf-8" /><title>Site Under Classification</title>
 <style>body{font-family:sans-serif;background:#0b1221;color:#f4f7ff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;} .card{background:#141d33;border:1px solid #1f2a48;border-radius:12px;padding:32px;max-width:460px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.4);} h1{font-size:1.5rem;margin-bottom:12px;} p{line-height:1.5;color:#c6d4f5;} .hint{margin-top:20px;font-size:0.9rem;color:#8ea0ce;}</style>
@@ -437,5 +461,38 @@ mod icap_response_tests {
         let response = icap_response(&PolicyAction::Block);
         assert!(response.contains("HTTP/1.1 403 Forbidden"));
         assert!(response.contains("Request blocked."));
+    }
+
+    #[test]
+    fn ancestor_key_generated_for_subdomain() {
+        let normalized = NormalizedTarget {
+            entity_level: EntityLevel::Subdomain,
+            normalized_key: "subdomain:www.google.com".into(),
+            hostname: "www.google.com".into(),
+            registered_domain: "google.com".into(),
+            full_url: "https://www.google.com/".into(),
+        };
+        assert_eq!(ancestor_domain_key(&normalized), Some("domain:google.com".into()));
+    }
+
+    #[test]
+    fn ancestor_key_not_generated_for_domain_level() {
+        let normalized = NormalizedTarget {
+            entity_level: EntityLevel::Domain,
+            normalized_key: "domain:google.com".into(),
+            hostname: "google.com".into(),
+            registered_domain: "google.com".into(),
+            full_url: "https://google.com/".into(),
+        };
+        assert!(ancestor_domain_key(&normalized).is_none());
+    }
+
+    #[test]
+    fn ancestor_inheritance_allows_monitor_and_blocks_block() {
+        assert!(is_inheritable_ancestor_action(&PolicyAction::Allow));
+        assert!(is_inheritable_ancestor_action(&PolicyAction::Monitor));
+        assert!(is_inheritable_ancestor_action(&PolicyAction::Block));
+        assert!(!is_inheritable_ancestor_action(&PolicyAction::Warn));
+        assert!(!is_inheritable_ancestor_action(&PolicyAction::ContentPending));
     }
 }

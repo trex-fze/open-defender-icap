@@ -66,6 +66,12 @@ async fn main() -> Result<()> {
         .clone()
         .or_else(|| env::var("OD_POLICY_DATABASE_URL").ok())
         .or_else(|| env::var("DATABASE_URL").ok());
+    let activation_db_url = cfg
+        .activation_database_url
+        .clone()
+        .or_else(|| env::var("OD_TAXONOMY_DATABASE_URL").ok())
+        .or_else(|| env::var("OD_ADMIN_DATABASE_URL").ok())
+        .or_else(|| db_url.clone());
     let taxonomy =
         Arc::new(TaxonomyStore::load_default().context("failed to load canonical taxonomy")?);
     let mut audit_logger = None;
@@ -76,21 +82,28 @@ async fn main() -> Result<()> {
             .connect(&db_url)
             .await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
+        let activation_pool = if activation_db_url.as_deref() == Some(db_url.as_str()) {
+            pool.clone()
+        } else if let Some(url) = activation_db_url.as_deref() {
+            PgPoolOptions::new().max_connections(5).connect(url).await?
+        } else {
+            pool.clone()
+        };
         let (activation_state, activation_refresh_enabled) =
-            match ActivationState::load(&pool).await {
+            match ActivationState::load(&activation_pool).await {
                 Ok(state) => (state, true),
                 Err(err) => {
                     tracing::warn!(
                         target = "svc-policy",
                         %err,
-                        "failed to load taxonomy activation profile; defaulting to allow-all"
+                        "failed to load taxonomy activation profile; defaulting to fail-closed activation"
                     );
-                    (ActivationState::allow_all(), false)
+                    (ActivationState::deny_all(), false)
                 }
             };
         let activation = Arc::new(activation_state);
         if activation_refresh_enabled {
-            ActivationState::spawn_refresh_task(Arc::clone(&activation), pool.clone());
+            ActivationState::spawn_refresh_task(Arc::clone(&activation), activation_pool.clone());
         }
         let store = match PolicyStore::load_from_db(&pool, Arc::clone(&taxonomy)).await? {
             Some(store) => store,

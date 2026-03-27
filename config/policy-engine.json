@@ -3,6 +3,7 @@
   "api_port": 19010,
   "policy_file": "config/policies.json",
   "database_url": null,
+  "activation_database_url": null,
   "admin_token": null,
   "auth": {
     "static_roles": ["policy-admin", "policy-editor", "policy-viewer"]

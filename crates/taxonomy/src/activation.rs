@@ -61,6 +61,12 @@ impl ActivationState {
         }
     }
 
+    pub fn deny_all() -> Self {
+        Self {
+            inner: RwLock::new(ActivationProfile::deny_all()),
+        }
+    }
+
     pub fn from_maps(
         category_states: HashMap<String, bool>,
         subcategory_states: HashMap<String, HashMap<String, bool>>,
@@ -188,6 +194,17 @@ impl ActivationProfile {
             category_states: HashMap::new(),
             subcategory_states: HashMap::new(),
             default_enabled: true,
+        }
+    }
+
+    fn deny_all() -> Self {
+        Self {
+            id: Uuid::nil(),
+            version: "deny-all".into(),
+            updated_at: Utc::now(),
+            category_states: HashMap::new(),
+            subcategory_states: HashMap::new(),
+            default_enabled: false,
         }
     }
 }

@@ -7,7 +7,7 @@
   "metrics_host": "0.0.0.0",
   "metrics_port": 19005,
   "cache_channel": "od:cache:invalidate",
-  "require_content": false,
+  "require_content": true,
   "pending_cache_ttl_seconds": 60,
   "job_queue": {
     "redis_url": "redis://redis:6379",
