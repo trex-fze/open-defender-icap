@@ -179,7 +179,7 @@ async fn handle_connection(
 
     let classification_required = cfg.require_content
         && matches!(decision.action, PolicyAction::Allow | PolicyAction::Monitor);
-    let requires_pending = is_connect || classification_required;
+    let requires_pending = classification_required;
     let base_url = derive_base_url(&normalized.full_url)
         .or_else(|| Some(fallback_base_url(&normalized.hostname)));
 
