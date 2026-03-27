@@ -116,6 +116,11 @@ async fn handle_connection(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("HTTP path missing"))?;
     let normalized = normalize_target(http_host, http_path, icap_req.http_scheme.as_deref())?;
+    let is_connect = icap_req
+        .http_method
+        .as_deref()
+        .map(|m| m.eq_ignore_ascii_case("CONNECT"))
+        .unwrap_or(false);
 
     if let Some(trace_id) = &icap_req.trace_id {
         tracing::Span::current().record("trace_id", &tracing::field::display(trace_id));
@@ -162,11 +167,12 @@ async fn handle_connection(
 
     let classification_required = cfg.require_content
         && matches!(decision.action, PolicyAction::Allow | PolicyAction::Monitor);
+    let requires_pending = is_connect || classification_required;
     let base_url = derive_base_url(&normalized.full_url)
         .or_else(|| Some(fallback_base_url(&normalized.hostname)));
 
     let mut response_decision = decision.clone();
-    if classification_required {
+    if requires_pending {
         response_decision.action = PolicyAction::ContentPending;
         response_decision.verdict = None;
         cache
@@ -186,7 +192,7 @@ async fn handle_connection(
             .await?;
     }
 
-    if classification_required {
+    if requires_pending {
         if let Some(publisher) = &page_fetch_publisher {
             let job = PageFetchJob {
                 normalized_key: normalized.normalized_key.clone(),
@@ -204,7 +210,7 @@ async fn handle_connection(
     }
 
     if let Some(publisher) = &job_publisher {
-        let enqueue = classification_required
+        let enqueue = requires_pending
             || action_requires_follow_up(&decision.action, decision.verdict.is_none());
         if enqueue {
             if let Err(err) = publisher
@@ -214,7 +220,7 @@ async fn handle_connection(
                     hostname: &normalized.hostname,
                     full_url: &normalized.full_url,
                     trace_id: icap_req.trace_id.as_deref().unwrap_or(""),
-                    requires_content: classification_required,
+                    requires_content: requires_pending,
                     base_url: base_url.as_deref(),
                     content_excerpt: None,
                     content_hash: None,
