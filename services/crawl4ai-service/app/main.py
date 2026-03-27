@@ -1,9 +1,7 @@
-import asyncio
+import logging
 import os
 from functools import lru_cache
 from typing import Optional
-
-import requests
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl, Field
@@ -45,7 +43,10 @@ def browser_config() -> BrowserConfig:
     return BrowserConfig(
         headless=bool_env("CRAWL4AI_HEADLESS", "true"),
         browser_type=os.getenv("CRAWL4AI_BROWSER", "chromium"),
-        user_agent=os.getenv("CRAWL4AI_USER_AGENT"),
+        user_agent=os.getenv(
+            "CRAWL4AI_USER_AGENT",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        ),
         verbose=bool_env("CRAWL4AI_VERBOSE", "false"),
     )
 
@@ -61,6 +62,7 @@ def crawler_run_config() -> CrawlerRunConfig:
 
 
 app = FastAPI(title="Crawl4AI Service", version="0.1.0")
+logger = logging.getLogger("crawl4ai-service")
 
 
 @app.get("/healthz")
@@ -70,11 +72,21 @@ async def health_check():
 
 @app.post("/crawl", response_model=CrawlResponse)
 async def crawl_endpoint(request: CrawlRequest):
+    logger.warning(
+        "crawl request received normalized_key=%s url=%s",
+        request.normalized_key,
+        request.url,
+    )
     try:
         crawl_result = await run_crawl(request)
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - defensive
+        logger.exception(
+            "crawl request failed normalized_key=%s url=%s",
+            request.normalized_key,
+            request.url,
+        )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return crawl_result
 
@@ -86,11 +98,14 @@ async def run_crawl(request: CrawlRequest) -> CrawlResponse:
         async with AsyncWebCrawler(config=cfg) as crawler:
             result = await crawler.arun(url=str(request.url), config=crawl_cfg)
     except Exception as exc:  # pragma: no cover - defensive fallback
-        return await fallback_fetch(request, exc)
+        raise HTTPException(
+            status_code=502, detail=f"crawl4ai execution failed: {exc}"
+        ) from exc
 
     if not result.success:
-        return await fallback_fetch(
-            request, RuntimeError(result.error_message or "crawl failed")
+        raise HTTPException(
+            status_code=502,
+            detail=f"crawl4ai returned unsuccessful result: {result.error_message or 'crawl failed'}",
         )
 
     cleaned_text = extract_text(result) or ""
@@ -110,12 +125,8 @@ async def run_crawl(request: CrawlRequest) -> CrawlResponse:
         else "text/html"
     )
     metadata = {
-        "dispatch": result.dispatch_result.model_dump()
-        if result.dispatch_result
-        else None,
-        "cache_status": result.cache_status,
-        "redirected_url": result.redirected_url,
-        "crawl_stats": result.crawl_stats,
+        "cache_status": to_string_or_none(result.cache_status),
+        "redirected_url": to_string_or_none(result.redirected_url),
     }
 
     return CrawlResponse(
@@ -125,59 +136,10 @@ async def run_crawl(request: CrawlRequest) -> CrawlResponse:
         cleaned_text=cleaned_text,
         raw_html=raw_html,
         content_type=content_type or "text/html",
-        language=(result.metadata or {}).get("language"),
-        title=(result.metadata or {}).get("title"),
+        language=to_string_or_none((result.metadata or {}).get("language")),
+        title=to_string_or_none((result.metadata or {}).get("title")),
         status_code=result.status_code,
         metadata={k: v for k, v in metadata.items() if v is not None},
-    )
-
-
-async def fallback_fetch(
-    request: CrawlRequest, original_exc: Exception
-) -> CrawlResponse:
-    """Best-effort backup using simple HTTP request when browser automation fails."""
-
-    def fetch() -> requests.Response:
-        headers = {
-            "User-Agent": os.getenv("CRAWL4AI_FALLBACK_UA", "OpenDefenderSmoke/1.0")
-        }
-        return requests.get(str(request.url), headers=headers, timeout=10)
-
-    try:
-        response = await asyncio.to_thread(fetch)
-        response.raise_for_status()
-    except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(
-            status_code=502,
-            detail=f"crawl fallback failed: {exc}; original error: {original_exc}",
-        ) from exc
-
-    raw_html = response.text or ""
-    cleaned_text = raw_html.strip()
-    if len(cleaned_text) > request.max_text_chars:
-        cleaned_text = cleaned_text[: request.max_text_chars]
-
-    encoded = raw_html.encode("utf-8")
-    if len(encoded) > request.max_html_bytes:
-        raw_html = encoded[: request.max_html_bytes].decode("utf-8", errors="ignore")
-
-    metadata = {
-        "fallback": "requests",
-        "status_code": response.status_code,
-        "original_error": str(original_exc),
-    }
-
-    return CrawlResponse(
-        normalized_key=request.normalized_key,
-        url=request.url,
-        status="ok",
-        cleaned_text=cleaned_text,
-        raw_html=raw_html,
-        content_type=response.headers.get("content-type", "text/html"),
-        language=None,
-        title=None,
-        status_code=response.status_code,
-        metadata=metadata,
     )
 
 
@@ -187,6 +149,13 @@ def extract_text(result) -> str:
     if result.cleaned_html:
         return result.cleaned_html
     return result.html or ""
+
+
+def to_string_or_none(value) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 if __name__ == "__main__":  # pragma: no cover

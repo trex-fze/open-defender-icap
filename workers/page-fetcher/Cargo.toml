@@ -24,3 +24,4 @@ sha2 = "0.10"
 url = { workspace = true }
 axum = { version = "0.7" }
 common-types = { path = "../../crates/common-types" }
+regex = "1"

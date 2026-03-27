@@ -6,9 +6,10 @@ use config_core::load_config;
 use metrics::MetricsServer;
 use redis::streams::{StreamReadOptions, StreamReadReply};
 use redis::AsyncCommands;
+use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use tokio::signal;
 use tokio::time::Instant;
@@ -22,6 +23,8 @@ struct WorkerConfig {
     pub queue_name: String,
     #[serde(default = "default_stream")]
     pub stream: String,
+    #[serde(default = "default_stream_start_id")]
+    pub stream_start_id: String,
     pub redis_url: String,
     pub crawl_service_url: String,
     pub database_url: String,
@@ -31,6 +34,8 @@ struct WorkerConfig {
     pub metrics_port: u16,
     #[serde(default = "default_max_excerpt")]
     pub max_excerpt_chars: usize,
+    #[serde(default = "default_max_html_context_chars")]
+    pub max_html_context_chars: usize,
     #[serde(default = "default_max_html_bytes")]
     pub max_html_bytes: usize,
     #[serde(default = "default_ttl_seconds")]
@@ -49,6 +54,10 @@ fn default_stream() -> String {
     "page-fetch-jobs".into()
 }
 
+fn default_stream_start_id() -> String {
+    "$".into()
+}
+
 fn default_metrics_host() -> String {
     "0.0.0.0".into()
 }
@@ -59,6 +68,10 @@ fn default_metrics_port() -> u16 {
 
 const fn default_max_excerpt() -> usize {
     4_000
+}
+
+const fn default_max_html_context_chars() -> usize {
+    120_000
 }
 
 const fn default_max_html_bytes() -> usize {
@@ -78,6 +91,7 @@ const fn default_pool_size() -> u32 {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct CrawlApiResponse {
     status: String,
     cleaned_text: String,
@@ -175,7 +189,7 @@ impl PageFetcher {
         let redis = redis::Client::open(self.cfg.redis_url.clone())?;
         let mut conn = redis.get_async_connection().await?;
         let options = StreamReadOptions::default().block(5000).count(10);
-        let mut last_id = "0-0".to_string();
+        let mut last_id = self.cfg.stream_start_id.clone();
         loop {
             let reply: StreamReadReply = conn
                 .xread_options(&[&self.cfg.stream], &[last_id.as_str()], &options)
@@ -183,10 +197,16 @@ impl PageFetcher {
             for stream in &reply.keys {
                 for entry in &stream.ids {
                     last_id = entry.id.clone();
+                    if entry_too_old(&entry.id, 300_000) {
+                        continue;
+                    }
                     if let Some(payload) = entry.get::<String>("payload") {
                         if let Err(err) = self.process_job(&payload).await {
                             self.metrics.record_job_failed();
-                            error!(target = "svc-page-fetcher", %err, "job failed");
+                            let key = serde_json::from_str::<PageFetchJob>(&payload)
+                                .map(|job| job.normalized_key)
+                                .unwrap_or_else(|_| "unknown".into());
+                            error!(target = "svc-page-fetcher", %err, key, "job failed");
                         } else {
                             self.metrics.record_job_completed();
                         }
@@ -218,6 +238,11 @@ impl PageFetcher {
             .observe_fetch_latency(start.elapsed().as_secs_f64());
         self.store_content(&job, ttl_seconds, &crawl_response)
             .await?;
+        info!(
+            target = "svc-page-fetcher",
+            key = job.normalized_key,
+            "stored crawl content"
+        );
         Ok(())
     }
 
@@ -251,88 +276,17 @@ impl PageFetcher {
             .context("crawl service request failed")?;
 
         if !response.status().is_success() {
-            let status = response.status();
             let body = response.text().await.unwrap_or_else(|_| "<empty>".into());
-            if let Ok(fallback) = self.fetch_via_http(job, url).await {
-                info!(
-                    target = "svc-page-fetcher",
-                    key = job.normalized_key,
-                    status = ?status,
-                    "crawl service error ({body}); switching to HTTP fallback"
-                );
-                return Ok(fallback);
-            }
             self.metrics.record_crawl_failure();
             return Err(anyhow!("crawl service error: {}", body));
         }
 
         let parsed: CrawlApiResponse = response.json().await.context("invalid crawl payload")?;
         if parsed.status != "ok" {
-            if let Ok(fallback) = self.fetch_via_http(job, url).await {
-                info!(
-                    target = "svc-page-fetcher",
-                    key = job.normalized_key,
-                    status = %parsed.status,
-                    "crawl status not ok; using HTTP fallback"
-                );
-                return Ok(fallback);
-            }
             self.metrics.record_crawl_failure();
             return Err(anyhow!("crawl service returned status {}", parsed.status));
         }
         Ok(parsed)
-    }
-
-    async fn fetch_via_http(&self, _job: &PageFetchJob, url: &Url) -> Result<CrawlApiResponse> {
-        let response = self
-            .client
-            .get(url.as_ref())
-            .header("User-Agent", "OpenDefenderFallback/1.0")
-            .send()
-            .await
-            .context("fallback request failed")?;
-
-        let status = response.status();
-        let content_type = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("text/html")
-            .to_string();
-
-        if !status.is_success() {
-            return Err(anyhow!("fallback request failed with status {}", status));
-        }
-
-        let mut raw_html = response.text().await.unwrap_or_default();
-        let mut cleaned_text = raw_html.trim().to_string();
-        if cleaned_text.chars().count() > self.cfg.max_excerpt_chars {
-            cleaned_text = cleaned_text
-                .chars()
-                .take(self.cfg.max_excerpt_chars)
-                .collect();
-        }
-
-        let mut raw_bytes = raw_html.into_bytes();
-        if raw_bytes.len() > self.cfg.max_html_bytes {
-            raw_bytes.truncate(self.cfg.max_html_bytes);
-        }
-        raw_html = String::from_utf8(raw_bytes).unwrap_or_default();
-
-        let metadata = json!({
-            "fallback": "reqwest",
-            "status_code": status.as_u16(),
-        });
-
-        Ok(CrawlApiResponse {
-            status: "ok".into(),
-            cleaned_text,
-            raw_html,
-            content_type,
-            language: None,
-            title: None,
-            metadata: Some(metadata),
-        })
     }
 
     async fn store_content(
@@ -344,8 +298,8 @@ impl PageFetcher {
         use sha2::{Digest, Sha256};
 
         let raw_bytes = crawl.raw_html.as_bytes();
-        let text_excerpt = crawl.cleaned_text.trim();
-        let hash = Sha256::digest(crawl.cleaned_text.as_bytes());
+        let text_excerpt = build_html_context(&crawl.raw_html, self.cfg.max_html_context_chars);
+        let hash = Sha256::digest(text_excerpt.as_bytes());
         let hash_hex = format!("{:x}", hash);
         let version = self.next_version(&job.normalized_key).await?;
 
@@ -362,7 +316,7 @@ impl PageFetcher {
         .bind(&crawl.content_type)
         .bind(&hash_hex)
         .bind(raw_bytes)
-        .bind(text_excerpt)
+        .bind(&text_excerpt)
         .bind(text_excerpt.chars().count() as i32)
         .bind(raw_bytes.len() as i32)
         .bind(&job.hostname)
@@ -380,5 +334,87 @@ impl PageFetcher {
         .fetch_one(&self.pool)
         .await?;
         Ok(current.unwrap_or(0) as i64 + 1)
+    }
+}
+
+fn build_html_context(raw_html: &str, max_chars: usize) -> String {
+    let head = extract_html_section(raw_html, "head").unwrap_or_default();
+    let title = extract_html_section(raw_html, "title").unwrap_or_default();
+    let body = extract_html_section(raw_html, "body").unwrap_or_else(|| raw_html.to_string());
+
+    let title_budget = max_chars.min(2_000);
+    let head_budget = max_chars.saturating_sub(title_budget).min(30_000);
+    let used_title = truncate_chars(&title, title_budget);
+    let used_head = truncate_chars(&head, head_budget);
+    let remaining = max_chars
+        .saturating_sub(used_title.chars().count())
+        .saturating_sub(used_head.chars().count());
+    let used_body = truncate_chars(&body, remaining);
+
+    format!(
+        "[HEAD]\n{}\n[/HEAD]\n[TITLE]\n{}\n[/TITLE]\n[BODY]\n{}\n[/BODY]",
+        used_head, used_title, used_body
+    )
+}
+
+fn extract_html_section(raw_html: &str, tag: &str) -> Option<String> {
+    let pattern = format!(r"(?is)<{tag}\b[^>]*>(.*?)</{tag}>");
+    let regex = Regex::new(&pattern).ok()?;
+    let captures = regex.captures(raw_html)?;
+    captures
+        .get(1)
+        .map(|m| m.as_str().trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn truncate_chars(value: &str, limit: usize) -> String {
+    if limit == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    for ch in value.chars().take(limit) {
+        out.push(ch);
+    }
+    out
+}
+
+fn entry_too_old(entry_id: &str, max_age_ms: u64) -> bool {
+    let Some((millis, _)) = entry_id.split_once('-') else {
+        return false;
+    };
+    let Ok(ts_ms) = millis.parse::<u64>() else {
+        return false;
+    };
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(ts_ms);
+    now_ms.saturating_sub(ts_ms) > max_age_ms
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_html_context_extracts_head_title_body() {
+        let html = r#"<html><head><meta charset=\"utf-8\"><title>Example</title></head><body><h1>Hello</h1></body></html>"#;
+        let context = build_html_context(html, 10_000);
+        assert!(context.contains("[HEAD]"));
+        assert!(context.contains("meta charset"));
+        assert!(context.contains("[TITLE]"));
+        assert!(context.contains("Example"));
+        assert!(context.contains("[BODY]"));
+        assert!(context.contains("<h1>Hello</h1>"));
+    }
+
+    #[test]
+    fn build_html_context_respects_limit() {
+        let html = format!(
+            "<html><head><title>T</title></head><body>{}</body></html>",
+            "a".repeat(5_000)
+        );
+        let context = build_html_context(&html, 1_000);
+        assert!(context.chars().count() <= 1_100);
     }
 }

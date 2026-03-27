@@ -2,7 +2,7 @@ mod metrics;
 mod schema;
 
 use anyhow::{anyhow, Context, Result};
-use common_types::{ClassificationVerdict, PolicyAction, PolicyDecision};
+use common_types::{ClassificationVerdict, PageFetchJob, PolicyAction, PolicyDecision};
 use redis::streams::{StreamReadOptions, StreamReadReply};
 use redis::AsyncCommands;
 use reqwest::{Client, RequestBuilder};
@@ -24,6 +24,8 @@ struct WorkerConfig {
     pub cache_channel: String,
     #[serde(default = "default_stream")]
     pub stream: String,
+    #[serde(default = "default_page_fetch_stream")]
+    pub page_fetch_stream: String,
     pub database_url: String,
     #[serde(default)]
     pub llm_endpoint: Option<String>,
@@ -231,6 +233,10 @@ fn default_stream() -> String {
     "classification-jobs".into()
 }
 
+fn default_page_fetch_stream() -> String {
+    "page-fetch-jobs".into()
+}
+
 fn default_metrics_host() -> String {
     "0.0.0.0".into()
 }
@@ -240,12 +246,13 @@ fn default_metrics_port() -> u16 {
 }
 
 const SYSTEM_PROMPT: &str = "You are an AI analyst classifying web traffic for a trust and safety team. Respond ONLY with JSON matching the schema and avoid prose.";
-const PROMPT_EXCERPT_LIMIT: usize = 1_200;
+const PROMPT_HTML_CONTEXT_LIMIT: usize = 120_000;
 const OPENAI_DEFAULT_MODEL: &str = "gpt-4o-mini";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const CONTENT_WAIT_ATTEMPTS: usize = 40;
 const CONTENT_WAIT_DELAY_SECS: u64 = 3;
 const CACHE_TTL_SECONDS: u64 = 3600;
+const NON_CANONICAL_RETRY_ATTEMPTS: usize = 3;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -363,10 +370,12 @@ impl DecisionCachePublisher {
 struct JobConsumer {
     redis_url: String,
     stream: String,
+    page_fetch_stream: String,
     pool: PgPool,
     router: ProviderRouter,
     cache_publisher: DecisionCachePublisher,
     taxonomy: Arc<TaxonomyStore>,
+    taxonomy_prompt: String,
     activation: Arc<ActivationState>,
 }
 
@@ -380,13 +389,16 @@ impl JobConsumer {
     ) -> Result<Self> {
         let cache_publisher =
             DecisionCachePublisher::new(&cfg.redis_url, &cfg.cache_channel).await?;
+        let taxonomy_prompt = build_taxonomy_prompt(taxonomy.as_ref());
         Ok(Self {
             redis_url: cfg.redis_url.clone(),
             stream: cfg.stream.clone(),
+            page_fetch_stream: cfg.page_fetch_stream.clone(),
             pool,
             router,
             cache_publisher,
             taxonomy,
+            taxonomy_prompt,
             activation,
         })
     }
@@ -404,7 +416,7 @@ impl JobConsumer {
         let client = redis::Client::open(self.redis_url.clone())?;
         let mut conn = client.get_async_connection().await?;
         let options = StreamReadOptions::default().block(5000).count(10);
-        let mut last_id = "0-0".to_string();
+        let mut last_id = "$".to_string();
         loop {
             let reply: StreamReadReply = conn
                 .xread_options(&[&self.stream], &[last_id.as_str()], &options)
@@ -412,6 +424,9 @@ impl JobConsumer {
             for stream in reply.keys {
                 for entry in stream.ids {
                     last_id = entry.id.clone();
+                    if entry_too_old(&entry.id, 300_000) {
+                        continue;
+                    }
                     if let Some(payload) = entry.get::<String>("payload") {
                         if let Err(err) = self.process_job(&payload).await {
                             error!(target = "svc-llm-worker", %err, "failed to process job");
@@ -428,10 +443,13 @@ impl JobConsumer {
         match &result {
             Ok(_) => metrics::record_job_completed(),
             Err(err) => {
-                if err.downcast_ref::<ContentNotReady>().is_some() {
+                let requires_content = serde_json::from_str::<ClassificationJobPayload>(payload)
+                    .map(|job| job.requires_content)
+                    .unwrap_or(false);
+                if err.downcast_ref::<ContentNotReady>().is_some() || requires_content {
                     warn!(
                         target = "svc-llm-worker",
-                        "page content not ready; requeuing"
+                        requires_content, "classification job will be requeued"
                     );
                     if let Err(requeue_err) = self.requeue(payload).await {
                         error!(
@@ -457,7 +475,30 @@ impl JobConsumer {
             .arg("payload")
             .arg(payload)
             .query_async::<_, ()>(&mut conn)
-            .await
+            .await?;
+
+        if let Ok(job) = serde_json::from_str::<ClassificationJobPayload>(payload) {
+            if job.requires_content {
+                let fetch_job = PageFetchJob {
+                    normalized_key: job.normalized_key,
+                    url: job.full_url,
+                    hostname: job.hostname,
+                    trace_id: Some(job.trace_id),
+                    ttl_seconds: None,
+                };
+                if let Ok(fetch_payload) = serde_json::to_string(&fetch_job) {
+                    let _ = redis::cmd("XADD")
+                        .arg(&self.page_fetch_stream)
+                        .arg("*")
+                        .arg("payload")
+                        .arg(fetch_payload)
+                        .query_async::<_, ()>(&mut conn)
+                        .await;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     async fn handle_job(&self, payload: &str) -> Result<(), anyhow::Error> {
@@ -466,22 +507,55 @@ impl JobConsumer {
             self.mark_pending(&job, "waiting_content", None).await?;
         }
         self.enrich_job_with_content(&mut job).await?;
-        let (verdict, provider_name) = self.invoke_with_fallback(&job).await?;
-        let raw_category = verdict.primary_category.clone();
-        let raw_subcategory = verdict.subcategory.clone();
-        let (mut verdict, fallback_reason) = self.apply_taxonomy(verdict);
-        if let Some(reason) = fallback_reason {
-            metrics::record_taxonomy_fallback(reason.as_str());
-            warn!(
-                target = "svc-llm-worker",
-                reason = reason.as_str(),
-                original_category = %raw_category,
-                original_subcategory = %raw_subcategory,
-                canonical_category = %verdict.primary_category,
-                canonical_subcategory = %verdict.subcategory,
-                "non-canonical taxonomy labels remapped"
-            );
+        let mut provider_name = String::new();
+        let mut selected_verdict: Option<LlmResponse> = None;
+        let mut selected_fallback_reason = None;
+
+        for attempt in 1..=NON_CANONICAL_RETRY_ATTEMPTS {
+            let retry_instruction = if attempt > 1 {
+                Some("Previous response used non-canonical taxonomy labels. Retry and return ONLY canonical IDs listed in Allowed Taxonomy IDs.")
+            } else {
+                None
+            };
+            let prompt = build_prompt(&job, &self.taxonomy_prompt, retry_instruction);
+            let (raw_verdict, provider) = self.invoke_with_fallback(&job, &prompt).await?;
+            provider_name = provider;
+
+            let raw_category = raw_verdict.primary_category.clone();
+            let raw_subcategory = raw_verdict.subcategory.clone();
+            let (canonical_verdict, fallback_reason) = self.apply_taxonomy(raw_verdict);
+
+            if let Some(reason) = fallback_reason {
+                metrics::record_taxonomy_fallback(reason.as_str());
+                warn!(
+                    target = "svc-llm-worker",
+                    attempt,
+                    max_attempts = NON_CANONICAL_RETRY_ATTEMPTS,
+                    reason = reason.as_str(),
+                    provider = %provider_name,
+                    normalized_key = %job.normalized_key,
+                    original_category = %raw_category,
+                    original_subcategory = %raw_subcategory,
+                    canonical_category = %canonical_verdict.primary_category,
+                    canonical_subcategory = %canonical_verdict.subcategory,
+                    "non-canonical taxonomy labels detected"
+                );
+                selected_verdict = Some(canonical_verdict);
+                selected_fallback_reason = Some(reason);
+                if attempt < NON_CANONICAL_RETRY_ATTEMPTS {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    continue;
+                }
+            } else {
+                selected_verdict = Some(canonical_verdict);
+                selected_fallback_reason = None;
+            }
+            break;
         }
+
+        let mut verdict =
+            selected_verdict.ok_or_else(|| anyhow!("missing classification verdict"))?;
+        let fallback_reason = selected_fallback_reason;
         let recommended_action = parse_policy_action(&verdict.recommended_action)?;
         let activation_allowed = self
             .activation
@@ -609,10 +683,11 @@ impl JobConsumer {
     async fn invoke_with_fallback(
         &self,
         job: &ClassificationJobPayload,
+        prompt: &str,
     ) -> Result<(LlmResponse, String)> {
         let mut last_err: Option<anyhow::Error> = None;
         for provider in self.router.providers() {
-            match invoke_llm(provider, job).await {
+            match invoke_llm(provider, job, prompt).await {
                 Ok(response) => return Ok((response, provider.name.clone())),
                 Err(err) => {
                     error!(target = "svc-llm-worker", provider = provider.name, %err, "llm invocation failed");
@@ -700,6 +775,20 @@ impl JobConsumer {
         }
         Err(ContentNotReady.into())
     }
+}
+
+fn entry_too_old(entry_id: &str, max_age_ms: u64) -> bool {
+    let Some((millis, _)) = entry_id.split_once('-') else {
+        return false;
+    };
+    let Ok(ts_ms) = millis.parse::<u64>() else {
+        return false;
+    };
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(ts_ms);
+    now_ms.saturating_sub(ts_ms) > max_age_ms
 }
 
 impl CacheListener {
@@ -882,17 +971,33 @@ async fn store_classification(
 async fn invoke_llm(
     provider: &ResolvedProvider,
     job: &ClassificationJobPayload,
+    prompt: &str,
 ) -> Result<LlmResponse> {
+    let (head_chars, title_chars, body_chars, total_chars) = html_context_lengths(job_excerpt(job));
+    info!(
+        target = "svc-llm-worker",
+        normalized_key = %job.normalized_key,
+        provider = %provider.name,
+        requires_content = job.requires_content,
+        html_context_present = total_chars > 0,
+        head_chars,
+        title_chars,
+        body_chars,
+        html_context_chars = total_chars,
+        content_hash = ?job.content_hash,
+        content_version = ?job.content_version,
+        "invoking llm provider"
+    );
     metrics::record_llm_invocation();
     metrics::record_provider_invocation(&provider.name);
     let start = Instant::now();
     let result = match provider.kind {
-        ProviderKind::Ollama => invoke_ollama(provider, job).await,
-        ProviderKind::LmStudio => invoke_lmstudio_chat(provider, job).await,
+        ProviderKind::Ollama => invoke_ollama(provider, prompt).await,
+        ProviderKind::LmStudio => invoke_lmstudio_chat(provider, prompt).await,
         ProviderKind::Openai | ProviderKind::Vllm | ProviderKind::OpenaiCompatible => {
-            invoke_openai_chat(provider, job).await
+            invoke_openai_chat(provider, prompt).await
         }
-        ProviderKind::Anthropic => invoke_anthropic(provider, job).await,
+        ProviderKind::Anthropic => invoke_anthropic(provider, prompt).await,
         ProviderKind::CustomJson => invoke_custom_json(provider, job).await,
     };
 
@@ -952,10 +1057,7 @@ async fn invoke_custom_json(
     })
 }
 
-async fn invoke_openai_chat(
-    provider: &ResolvedProvider,
-    job: &ClassificationJobPayload,
-) -> Result<LlmResponse> {
+async fn invoke_openai_chat(provider: &ResolvedProvider, prompt: &str) -> Result<LlmResponse> {
     let client = Client::new();
     let model = provider.model.as_deref().unwrap_or(OPENAI_DEFAULT_MODEL);
     let body = json!({
@@ -965,7 +1067,7 @@ async fn invoke_openai_chat(
         "max_tokens": 256,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_prompt(job)}
+            {"role": "user", "content": prompt}
         ]
     });
 
@@ -991,10 +1093,7 @@ async fn invoke_openai_chat(
     parse_llm_json_text(&content)
 }
 
-async fn invoke_lmstudio_chat(
-    provider: &ResolvedProvider,
-    job: &ClassificationJobPayload,
-) -> Result<LlmResponse> {
+async fn invoke_lmstudio_chat(provider: &ResolvedProvider, prompt: &str) -> Result<LlmResponse> {
     let client = Client::new();
     let model = provider.model.as_deref().unwrap_or("lmstudio-model");
     let body = json!({
@@ -1004,7 +1103,7 @@ async fn invoke_lmstudio_chat(
         "max_tokens": 256,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_prompt(job)}
+            {"role": "user", "content": prompt}
         ]
     });
 
@@ -1030,10 +1129,7 @@ async fn invoke_lmstudio_chat(
     parse_llm_json_text(&content)
 }
 
-async fn invoke_anthropic(
-    provider: &ResolvedProvider,
-    job: &ClassificationJobPayload,
-) -> Result<LlmResponse> {
+async fn invoke_anthropic(provider: &ResolvedProvider, prompt: &str) -> Result<LlmResponse> {
     let client = Client::new();
     let model = provider
         .model
@@ -1048,7 +1144,7 @@ async fn invoke_anthropic(
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": build_prompt(job)}
+                    {"type": "text", "text": prompt}
                 ]
             }
         ]
@@ -1074,13 +1170,10 @@ async fn invoke_anthropic(
     parse_llm_json_text(&text)
 }
 
-async fn invoke_ollama(
-    provider: &ResolvedProvider,
-    job: &ClassificationJobPayload,
-) -> Result<LlmResponse> {
+async fn invoke_ollama(provider: &ResolvedProvider, prompt: &str) -> Result<LlmResponse> {
     let client = Client::new();
     let model = provider.model.as_deref().unwrap_or("llama3");
-    let prompt = format!("{}\n\n{}", SYSTEM_PROMPT, build_prompt(job));
+    let prompt = format!("{}\n\n{}", SYSTEM_PROMPT, prompt);
     let body = json!({
         "model": model,
         "prompt": prompt,
@@ -1098,23 +1191,34 @@ async fn invoke_ollama(
     parse_llm_json_text(payload.response.trim())
 }
 
-fn build_prompt(job: &ClassificationJobPayload) -> String {
+fn build_prompt(
+    job: &ClassificationJobPayload,
+    taxonomy_prompt: &str,
+    retry_instruction: Option<&str>,
+) -> String {
     let mut sections = vec![format!(
-        "Classify the following web request. Return JSON with fields: primary_category, subcategory, risk_level, confidence (0-1), recommended_action (Allow|Block|Warn|Monitor|Review|RequireApproval).\\nNormalized Key: {}\\nHostname: {}\\nURL: {}\\nEntity Level: {}\\nTrace ID: {}",
+        "Classify the following web request. Return JSON with fields: primary_category, subcategory, risk_level, confidence (0-1), recommended_action (Allow|Block|Warn|Monitor|Review|RequireApproval). Use ONLY canonical taxonomy IDs for primary_category and subcategory.\\nNormalized Key: {}\\nHostname: {}\\nURL: {}\\nEntity Level: {}\\nTrace ID: {}",
         job.normalized_key, job.hostname, job.full_url, job.entity_level, job.trace_id
     )];
+    sections.push(format!("Allowed Taxonomy IDs:\n{}", taxonomy_prompt));
+
+    if let Some(instruction) = retry_instruction {
+        sections.push(format!("Retry Instruction: {instruction}"));
+    }
 
     if let Some(excerpt) = job_excerpt(job) {
-        let (formatted_excerpt, truncated) = format_excerpt(excerpt);
+        let (formatted_excerpt, truncated) = format_html_context(excerpt);
         sections.push(format!(
-            "Page Excerpt (first {} chars{}):\\n\"{}\"",
+            "Homepage HTML Context (head + title + body, {} chars{}):\\n{}",
             formatted_excerpt.chars().count(),
             if truncated { ", truncated" } else { "" },
             formatted_excerpt
         ));
     } else {
-        sections
-            .push("Page Excerpt: unavailable (content fetch pending, failed, or disabled).".into());
+        sections.push(
+            "Homepage HTML Context: unavailable (content fetch pending, failed, or disabled)."
+                .into(),
+        );
     }
 
     if let Some(hash) = job.content_hash.as_deref() {
@@ -1131,14 +1235,9 @@ fn build_prompt(job: &ClassificationJobPayload) -> String {
 }
 
 fn format_excerpt(excerpt: &str) -> (String, bool) {
-    let cleaned = excerpt
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let cleaned = excerpt.trim();
     let mut buffer = String::new();
-    for ch in cleaned.chars().take(PROMPT_EXCERPT_LIMIT) {
+    for ch in cleaned.chars().take(PROMPT_HTML_CONTEXT_LIMIT) {
         buffer.push(ch);
     }
     let total_chars = cleaned.chars().count();
@@ -1147,6 +1246,49 @@ fn format_excerpt(excerpt: &str) -> (String, bool) {
         buffer.push('…');
     }
     (buffer, truncated)
+}
+
+fn format_html_context(html_context: &str) -> (String, bool) {
+    format_excerpt(html_context)
+}
+
+fn build_taxonomy_prompt(store: &TaxonomyStore) -> String {
+    let taxonomy = store.taxonomy();
+    let mut lines = Vec::new();
+    lines.push(format!("taxonomy_version: {}", taxonomy.version));
+    for category in &taxonomy.categories {
+        lines.push(format!("- {} ({})", category.id, category.name));
+        let sub_ids = category
+            .subcategories
+            .iter()
+            .map(|sub| format!("{} ({})", sub.id, sub.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!("  subcategories: {sub_ids}"));
+    }
+    lines.join("\n")
+}
+
+fn html_context_lengths(value: Option<&str>) -> (usize, usize, usize, usize) {
+    let Some(text) = value else {
+        return (0, 0, 0, 0);
+    };
+    let head = section_length(text, "[HEAD]", "[/HEAD]");
+    let title = section_length(text, "[TITLE]", "[/TITLE]");
+    let body = section_length(text, "[BODY]", "[/BODY]");
+    let total = text.chars().count();
+    (head, title, body, total)
+}
+
+fn section_length(text: &str, start: &str, end: &str) -> usize {
+    let Some(start_idx) = text.find(start) else {
+        return 0;
+    };
+    let content_start = start_idx + start.len();
+    let Some(end_rel) = text[content_start..].find(end) else {
+        return 0;
+    };
+    text[content_start..content_start + end_rel].chars().count()
 }
 
 fn job_excerpt(job: &ClassificationJobPayload) -> Option<&str> {
@@ -1177,14 +1319,77 @@ fn parse_llm_json_text(text: &str) -> Result<LlmResponse> {
     if let Some(stripped) = cleaned.strip_suffix("```") {
         cleaned = stripped.trim();
     }
-    let parsed = serde_json::from_str::<LlmResponse>(cleaned).map_err(|err| {
-        metrics::record_invalid_response();
-        err
-    })?;
-    parsed.normalize().map_err(|err| {
-        metrics::record_invalid_response();
-        err
-    })
+
+    if let Ok(parsed) = serde_json::from_str::<LlmResponse>(cleaned) {
+        return parsed.normalize().map_err(|err| {
+            metrics::record_invalid_response();
+            err
+        });
+    }
+
+    if let Some(candidate) = extract_balanced_json_object(cleaned) {
+        let parsed = serde_json::from_str::<LlmResponse>(&candidate).map_err(|err| {
+            metrics::record_invalid_response();
+            err
+        })?;
+        return parsed.normalize().map_err(|err| {
+            metrics::record_invalid_response();
+            err
+        });
+    }
+
+    metrics::record_invalid_response();
+    Err(anyhow!("llm response did not contain valid JSON object"))
+}
+
+fn extract_balanced_json_object(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut start = None;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (idx, &b) in bytes.iter().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match b {
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match b {
+            b'"' => in_string = true,
+            b'{' => {
+                if depth == 0 {
+                    start = Some(idx);
+                }
+                depth += 1;
+            }
+            b'}' => {
+                if depth == 0 {
+                    continue;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    if let Some(begin) = start {
+                        let candidate = &text[begin..=idx];
+                        if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
+                            return Some(candidate.to_string());
+                        }
+                    }
+                    start = None;
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn apply_provider_headers(
@@ -1284,6 +1489,8 @@ mod tests {
 
     #[test]
     fn build_prompt_includes_excerpt() {
+        let taxonomy = TaxonomyStore::load_default().expect("taxonomy");
+        let taxonomy_prompt = build_taxonomy_prompt(&taxonomy);
         let job = ClassificationJobPayload {
             normalized_key: "url:https://example.com/".into(),
             entity_level: "url".into(),
@@ -1297,7 +1504,10 @@ mod tests {
             content_version: Some(2),
             content_language: Some("en".into()),
         };
-        let prompt = build_prompt(&job);
+        let prompt = build_prompt(&job, &taxonomy_prompt, None);
+        assert!(prompt.contains("Allowed Taxonomy IDs"));
+        assert!(prompt.contains("social-media"));
+        assert!(prompt.contains("Homepage HTML Context"));
         assert!(prompt.contains("captured page excerpt"));
         assert!(prompt.contains("Content Hash: abc123"));
         assert!(prompt.contains("Content Version: 2"));
@@ -1305,6 +1515,8 @@ mod tests {
 
     #[test]
     fn build_prompt_handles_missing_excerpt() {
+        let taxonomy = TaxonomyStore::load_default().expect("taxonomy");
+        let taxonomy_prompt = build_taxonomy_prompt(&taxonomy);
         let job = ClassificationJobPayload {
             normalized_key: "url:https://empty.example".into(),
             entity_level: "url".into(),
@@ -1318,8 +1530,29 @@ mod tests {
             content_version: None,
             content_language: None,
         };
-        let prompt = build_prompt(&job);
-        assert!(prompt.contains("Page Excerpt: unavailable"));
+        let prompt = build_prompt(&job, &taxonomy_prompt, None);
+        assert!(prompt.contains("Homepage HTML Context: unavailable"));
+    }
+
+    #[test]
+    fn parse_llm_json_text_handles_reasoning_wrappers() {
+        let payload = r#"<|channel|>analysis<|message|>internal reasoning<|end|><|start|>assistant<|channel|>final<|message|>{
+  "primary_category": "Social Media",
+  "subcategory": "Photo/Video Sharing",
+  "risk_level": "Low",
+  "confidence": 0.99,
+  "recommended_action": "Allow"
+}"#;
+        let parsed = parse_llm_json_text(payload).expect("parses wrapped json");
+        assert_eq!(parsed.risk_level, "low");
+        assert_eq!(parsed.recommended_action, "Allow");
+    }
+
+    #[test]
+    fn extract_balanced_json_object_handles_braces_in_strings() {
+        let payload = r#"noise {"note":"a } brace","value":1} trailing"#;
+        let extracted = extract_balanced_json_object(payload).expect("extracts object");
+        assert!(extracted.contains("\"value\":1"));
     }
 
     #[tokio::test]
@@ -1344,6 +1577,7 @@ mod tests {
             redis_url: redis_url.clone(),
             cache_channel: "od:cache:invalidate".into(),
             stream: "classification-jobs".into(),
+            page_fetch_stream: "page-fetch-jobs".into(),
             database_url: database_url.clone(),
             llm_endpoint: Some(llm_endpoint.clone()),
             llm_api_key: Some("test-key".into()),
@@ -1428,6 +1662,7 @@ mod tests {
             redis_url: redis_url.clone(),
             cache_channel: "od:cache:invalidate".into(),
             stream: "classification-jobs".into(),
+            page_fetch_stream: "page-fetch-jobs".into(),
             database_url: database_url.clone(),
             llm_endpoint: Some(llm_endpoint.clone()),
             llm_api_key: Some("test-key".into()),
@@ -1507,6 +1742,7 @@ mod tests {
             redis_url: redis_url.clone(),
             cache_channel: "od:cache:invalidate".into(),
             stream: "classification-jobs".into(),
+            page_fetch_stream: "page-fetch-jobs".into(),
             database_url: database_url.clone(),
             llm_endpoint: Some(llm_endpoint.clone()),
             llm_api_key: Some("test-key".into()),

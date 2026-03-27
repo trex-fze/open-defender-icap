@@ -430,6 +430,13 @@ const CATEGORY_ALIAS_PAIRS: &[(&str, &str)] = &[
 
 const SUBCATEGORY_ALIAS_PAIRS: &[(&str, &str, &str)] = &[
     ("social-media", "short form video", "short-video-platforms"),
+    ("social-media", "social networking", "social-networks"),
+    ("social-media", "social network", "social-networks"),
+    (
+        "social-media",
+        "general social networking",
+        "social-networks",
+    ),
     ("news-media", "general", "general-news"),
     ("shopping-e-commerce", "retail", "general-retail"),
     (
@@ -498,6 +505,27 @@ mod tests {
         assert_eq!(result.category.id, "social-media");
         assert_eq!(result.subcategory.id, "short-video-platforms");
         assert!(result.fallback_reason.is_none());
+    }
+
+    #[test]
+    fn resolves_social_networking_alias_variants() {
+        let taxonomy = CanonicalTaxonomy::load(&canonical_path())
+            .expect("canonical taxonomy should parse")
+            .into_arc();
+        let store = TaxonomyStore::new(taxonomy);
+        for input in [
+            "Social Networking",
+            "social network",
+            "General Social Networking",
+        ] {
+            let result = store.validate_labels("social-media", Some(input));
+            assert_eq!(result.category.id, "social-media");
+            assert_eq!(result.subcategory.id, "social-networks");
+            assert!(
+                result.fallback_reason.is_none(),
+                "alias should resolve: {input}"
+            );
+        }
     }
 
     #[test]
