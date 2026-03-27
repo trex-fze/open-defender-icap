@@ -1,0 +1,140 @@
+{
+  "run_id": "20260327-161146",
+  "target": "www.facebook.com",
+  "proxy_url": "http://localhost:3128",
+  "artifact_root": "tests/artifacts/facebook-e2e/20260327-161146",
+  "started_at": "2026-03-27T16:11:46+04:00",
+  "finished_at": "2026-03-27T16:18:33+04:00",
+  "stages": [
+    {
+      "id": "S00",
+      "label": "Preflight",
+      "status": "PASS",
+      "description": "Services healthy; category disabled; LLM ready via local",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/00-preflight-ps.txt",
+        "tests/artifacts/facebook-e2e/20260327-161146/00-taxonomy.json",
+        "tests/artifacts/facebook-e2e/20260327-161146/00-llm-health.txt",
+        "tests/artifacts/facebook-e2e/20260327-161146/00-cleanup.txt"
+      ],
+      "duration_ms": 536
+    },
+    {
+      "id": "S01",
+      "label": "Client Initial Request",
+      "status": "PASS",
+      "description": "Initial request blocked with HTTP 000 (curl exit 7)",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/01-client-initial-headers.txt",
+        "tests/artifacts/facebook-e2e/20260327-161146/01-client-initial-body.bin",
+        "tests/artifacts/facebook-e2e/20260327-161146/01-client-initial-status.txt"
+      ],
+      "duration_ms": 41
+    },
+    {
+      "id": "S02",
+      "label": "Squid Logs",
+      "status": "FAIL",
+      "description": "CONNECT www.facebook.com missing in squid logs and ICAP fallback",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/02-squid.log",
+        "tests/artifacts/facebook-e2e/20260327-161146/02-squid-fallback-icap.log"
+      ],
+      "duration_ms": 146
+    },
+    {
+      "id": "S03",
+      "label": "ICAP Logs",
+      "status": "FAIL",
+      "description": "ICAP log missing subdomain:www.facebook.com",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/03-icap.log"
+      ],
+      "duration_ms": 80
+    },
+    {
+      "id": "S04",
+      "label": "Policy Engine Decision",
+      "status": "PASS",
+      "description": "Policy decision endpoint returned action",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/04-policy-decision.json"
+      ],
+      "duration_ms": 45
+    },
+    {
+      "id": "S05",
+      "label": "Redis Streams",
+      "status": "PASS",
+      "description": "Redis streams contain subdomain:www.facebook.com",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/05-classification-stream.txt",
+        "tests/artifacts/facebook-e2e/20260327-161146/05-pagefetch-stream.txt"
+      ],
+      "duration_ms": 238
+    },
+    {
+      "id": "S06",
+      "label": "Page Fetcher Logs",
+      "status": "FAIL",
+      "description": "Page fetch logs missing subdomain:www.facebook.com",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/06-page-fetcher.log"
+      ],
+      "duration_ms": 89797
+    },
+    {
+      "id": "S07",
+      "label": "Crawl4AI Logs",
+      "status": "FAIL",
+      "description": "Crawl4AI logs missing facebook.com",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/07-crawl4ai.log"
+      ],
+      "duration_ms": 89843
+    },
+    {
+      "id": "S08",
+      "label": "LLM Worker Logs",
+      "status": "FAIL",
+      "description": "LLM logs missing subdomain:www.facebook.com",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/08-llm.log"
+      ],
+      "duration_ms": 89859
+    },
+    {
+      "id": "S09",
+      "label": "Database State",
+      "status": "FAIL",
+      "description": "No DB rows for facebook.com",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/09-db-classifications.txt",
+        "tests/artifacts/facebook-e2e/20260327-161146/09-db-pending.txt"
+      ],
+      "duration_ms": 91338
+    },
+    {
+      "id": "S10",
+      "label": "Client Follow-up Request",
+      "status": "PASS",
+      "description": "Follow-up request blocked with HTTP 000 (curl exit 7)",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/10-client-follow-headers.txt",
+        "tests/artifacts/facebook-e2e/20260327-161146/10-client-follow-body.bin",
+        "tests/artifacts/facebook-e2e/20260327-161146/10-client-follow-status.txt"
+      ],
+      "duration_ms": 57
+    },
+    {
+      "id": "S11",
+      "label": "ICAP Final Decision",
+      "status": "FAIL",
+      "description": "No ICAP final decision log found for follow-up",
+      "artifacts": [
+        "tests/artifacts/facebook-e2e/20260327-161146/11-icap-final.log"
+      ],
+      "duration_ms": 83
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+S00	Preflight	PASS	Services healthy; category disabled; LLM ready via local	tests/artifacts/facebook-e2e/20260327-152922/00-preflight-ps.txt,tests/artifacts/facebook-e2e/20260327-152922/00-taxonomy.json,tests/artifacts/facebook-e2e/20260327-152922/00-llm-health.txt,tests/artifacts/facebook-e2e/20260327-152922/00-cleanup.txt	465
+S01	Client Initial Request	PASS	Initial request blocked with HTTP 000 (curl exit 56)	tests/artifacts/facebook-e2e/20260327-152922/01-client-initial-headers.txt,tests/artifacts/facebook-e2e/20260327-152922/01-client-initial-body.bin,tests/artifacts/facebook-e2e/20260327-152922/01-client-initial-status.txt	42
+S02	Squid Logs	FAIL	CONNECT www.facebook.com missing in squid logs	tests/artifacts/facebook-e2e/20260327-152922/02-squid.log	78
+S03	ICAP Logs	PASS	ICAP handled subdomain:www.facebook.com	tests/artifacts/facebook-e2e/20260327-152922/03-icap.log	76
+S04	Policy Engine Decision	PASS	Policy decision endpoint returned action	tests/artifacts/facebook-e2e/20260327-152922/04-policy-decision.json	46
+S05	Redis Streams	PASS	Redis streams contain subdomain:www.facebook.com	tests/artifacts/facebook-e2e/20260327-152922/05-classification-stream.txt,tests/artifacts/facebook-e2e/20260327-152922/05-pagefetch-stream.txt	212
+S06	Page Fetcher Logs	FAIL	Page fetch logs missing subdomain:www.facebook.com	tests/artifacts/facebook-e2e/20260327-152922/06-page-fetcher.log	79
+S07	Crawl4AI Logs	WARN	Crawl4AI logs missing facebook.com	tests/artifacts/facebook-e2e/20260327-152922/07-crawl4ai.log	81
+S08	LLM Worker Logs	FAIL	LLM logs missing subdomain:www.facebook.com	tests/artifacts/facebook-e2e/20260327-152922/08-llm.log	78
+S09	Database State	FAIL	No DB rows for facebook.com	tests/artifacts/facebook-e2e/20260327-152922/09-db-classifications.txt,tests/artifacts/facebook-e2e/20260327-152922/09-db-pending.txt	213
+S10	Client Follow-up Request	PASS	Follow-up request blocked with HTTP 000 (curl exit 56)	tests/artifacts/facebook-e2e/20260327-152922/10-client-follow-headers.txt,tests/artifacts/facebook-e2e/20260327-152922/10-client-follow-body.bin,tests/artifacts/facebook-e2e/20260327-152922/10-client-follow-status.txt	52
+S11	ICAP Final Decision	PASS	ICAP cache decision emitted	tests/artifacts/facebook-e2e/20260327-152922/11-icap-final.log	82
+S12	Report Generation	PASS	Reports generated	tests/artifacts/facebook-e2e/20260327-152922/report.json,tests/artifacts/facebook-e2e/20260327-152922/report.md,tests/artifacts/facebook-e2e/20260327-152922/stage-metadata.tsv	37

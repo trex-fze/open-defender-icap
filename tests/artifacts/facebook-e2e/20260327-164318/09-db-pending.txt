@@ -1,0 +1,1 @@
+time="2026-03-27T16:46:53+04:00" level=warning msg="/Users/aruljane/opensource/open-defender-icap/deploy/docker/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"

@@ -1,0 +1,10 @@
+NAME                     IMAGE                         COMMAND                  SERVICE         CREATED             STATUS                       PORTS
+docker-admin-api-1       docker-admin-api              "admin-api"              admin-api       13 minutes ago      Up 13 minutes                0.0.0.0:19000->19000/tcp, [::]:19000->19000/tcp
+docker-crawl4ai-1        docker-crawl4ai               "uvicorn app.main:ap…"   crawl4ai        6 minutes ago       Up 6 minutes (healthy)       0.0.0.0:8085->8085/tcp, [::]:8085->8085/tcp
+docker-icap-adaptor-1    docker-icap-adaptor           "icap-adaptor"           icap-adaptor    About an hour ago   Up About an hour             0.0.0.0:1344->1344/tcp, [::]:1344->1344/tcp, 0.0.0.0:19005->19005/tcp, [::]:19005->19005/tcp
+docker-llm-worker-1      docker-llm-worker             "llm-worker"             llm-worker      13 minutes ago      Up 13 minutes                0.0.0.0:19015->19015/tcp, [::]:19015->19015/tcp
+docker-page-fetcher-1    docker-page-fetcher           "page-fetcher"           page-fetcher    11 seconds ago      Up 9 seconds                 
+docker-policy-engine-1   docker-policy-engine          "policy-engine"          policy-engine   About an hour ago   Up About an hour             0.0.0.0:19010->19010/tcp, [::]:19010->19010/tcp
+docker-postgres-1        postgres:15-alpine            "docker-entrypoint.s…"   postgres        About an hour ago   Up About an hour (healthy)   0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+docker-redis-1           redis:7-alpine                "docker-entrypoint.s…"   redis           About an hour ago   Up About an hour (healthy)   0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+docker-squid-1           ubuntu/squid:5.2-22.04_edge   "entrypoint.sh -f /e…"   squid           About an hour ago   Up About an hour             0.0.0.0:3128->3128/tcp

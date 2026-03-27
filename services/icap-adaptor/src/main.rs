@@ -129,18 +129,30 @@ async fn handle_connection(
     let identity = extract_identity(&icap_req.headers);
 
     if let Some(decision) = cache.get(&normalized.normalized_key).await? {
-        metrics::record_cache_hit();
-        info!(
-            target = "svc-icap",
-            normalized_key = %normalized.normalized_key,
-            action = ?decision.action,
-            "cache decision"
-        );
-        let response = icap_response(&decision.action);
-        socket.write_all(response.as_bytes()).await?;
-        socket.shutdown().await?;
-        metrics::observe_squid_roundtrip(roundtrip_start.elapsed().as_secs_f64());
-        return Ok(());
+        if is_connect
+            && cfg.require_content
+            && matches!(decision.action, PolicyAction::Allow | PolicyAction::Monitor)
+        {
+            info!(
+                target = "svc-icap",
+                normalized_key = %normalized.normalized_key,
+                action = ?decision.action,
+                "ignoring cached allow/monitor for CONNECT; forcing pending classification"
+            );
+        } else {
+            metrics::record_cache_hit();
+            info!(
+                target = "svc-icap",
+                normalized_key = %normalized.normalized_key,
+                action = ?decision.action,
+                "cache decision"
+            );
+            let response = icap_response(&decision.action);
+            socket.write_all(response.as_bytes()).await?;
+            socket.shutdown().await?;
+            metrics::observe_squid_roundtrip(roundtrip_start.elapsed().as_secs_f64());
+            return Ok(());
+        }
     }
 
     metrics::record_cache_miss();
@@ -378,11 +390,14 @@ fn build_http_block_response(status_line: &str, content_type: &str, body: &[u8])
         body.len()
     );
     let header_len = http_header.as_bytes().len();
+    let chunk_prefix = format!("{:X}\r\n", body.len());
     let mut icap = format!(
         "ICAP/1.0 200 OK\r\nEncapsulated: res-hdr=0, res-body={}\r\n\r\n{}",
         header_len, http_header
     );
+    icap.push_str(&chunk_prefix);
     icap.push_str(&String::from_utf8_lossy(body));
+    icap.push_str("\r\n0\r\n\r\n");
     icap
 }
 

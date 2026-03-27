@@ -1,0 +1,21 @@
+NAME                      IMAGE                                                  COMMAND                  SERVICE          CREATED             STATUS                 PORTS
+docker-admin-api-1        docker-admin-api                                       "admin-api"              admin-api        20 seconds ago      Up 15 seconds          0.0.0.0:19000->19000/tcp, [::]:19000->19000/tcp
+docker-crawl4ai-1         docker-crawl4ai                                        "uvicorn app.main:ap…"   crawl4ai         2 hours ago         Up 2 hours (healthy)   0.0.0.0:8085->8085/tcp, [::]:8085->8085/tcp
+docker-elasticsearch-1    docker.elastic.co/elasticsearch/elasticsearch:8.12.1   "/bin/tini -- /usr/l…"   elasticsearch    2 hours ago         Up 2 hours (healthy)   0.0.0.0:9200->9200/tcp, [::]:9200->9200/tcp
+docker-event-ingester-1   docker-event-ingester                                  "event-ingester"         event-ingester   2 hours ago         Up 2 hours             0.0.0.0:19100->19100/tcp, [::]:19100->19100/tcp
+docker-filebeat-1         docker.elastic.co/beats/filebeat:8.12.1                "/usr/bin/tini -- /u…"   filebeat         2 hours ago         Up 2 hours             
+docker-icap-adaptor-1     docker-icap-adaptor                                    "icap-adaptor"           icap-adaptor     About an hour ago   Up About an hour       0.0.0.0:1344->1344/tcp, [::]:1344->1344/tcp, 0.0.0.0:19005->19005/tcp, [::]:19005->19005/tcp
+docker-kibana-1           docker.elastic.co/kibana/kibana:8.12.1                 "/bin/tini -- /usr/l…"   kibana           2 hours ago         Up 2 hours             0.0.0.0:5601->5601/tcp, [::]:5601->5601/tcp
+docker-llm-worker-1       docker-llm-worker                                      "llm-worker"             llm-worker       18 seconds ago      Up 15 seconds          0.0.0.0:19015->19015/tcp, [::]:19015->19015/tcp
+docker-logstash-1         docker.elastic.co/logstash/logstash:8.12.1             "/usr/local/bin/dock…"   logstash         2 hours ago         Up 2 hours             5044/tcp, 9600/tcp
+docker-mock-openai-1      docker-mock-openai                                     "python app.py"          mock-openai      2 hours ago         Up 2 hours             8080/tcp
+docker-odctl-runner-1     docker-odctl-runner                                    "sleep infinity"         odctl-runner     2 hours ago         Up 2 hours             
+docker-page-fetcher-1     docker-page-fetcher                                    "page-fetcher"           page-fetcher     5 seconds ago       Up 3 seconds           
+docker-policy-engine-1    docker-policy-engine                                   "policy-engine"          policy-engine    About an hour ago   Up About an hour       0.0.0.0:19010->19010/tcp, [::]:19010->19010/tcp
+docker-postgres-1         postgres:15-alpine                                     "docker-entrypoint.s…"   postgres         2 hours ago         Up 2 hours (healthy)   0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+docker-prometheus-1       prom/prometheus:latest                                 "/bin/prometheus --c…"   prometheus       2 hours ago         Up 2 hours             0.0.0.0:9090->9090/tcp, [::]:9090->9090/tcp
+docker-reclass-worker-1   docker-reclass-worker                                  "reclass-worker"         reclass-worker   2 hours ago         Up 2 hours             
+docker-redis-1            redis:7-alpine                                         "docker-entrypoint.s…"   redis            2 hours ago         Up 2 hours (healthy)   0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+docker-smoke-origin-1     nginx:1.25-alpine                                      "/docker-entrypoint.…"   smoke-origin     2 hours ago         Up 2 hours             0.0.0.0:18080->80/tcp, [::]:18080->80/tcp
+docker-squid-1            ubuntu/squid:5.2-22.04_edge                            "entrypoint.sh -f /e…"   squid            2 hours ago         Up 2 hours             0.0.0.0:3128->3128/tcp
+docker-web-admin-1        node:20                                                "docker-entrypoint.s…"   web-admin        2 hours ago         Up 2 hours             0.0.0.0:19001->19001/tcp, [::]:19001->19001/tcp

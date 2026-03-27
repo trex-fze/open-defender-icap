@@ -1,0 +1,9 @@
+HTTP/1.1 403 Forbidden
+Content-Type: text/html; charset=utf-8
+Content-Length: 818
+Date: Fri, 27 Mar 2026 10:36:26 GMT
+X-Cache: MISS from squid
+X-Cache-Lookup: NONE from squid:3128
+Via: 1.1 squid (squid/5.9)
+Connection: keep-alive
+

@@ -1,0 +1,11 @@
+time="2026-03-27T17:55:12+04:00" level=warning msg="/Users/aruljane/opensource/open-defender-icap/deploy/docker/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+1
+time="2026-03-27T17:55:12+04:00" level=warning msg="/Users/aruljane/opensource/open-defender-icap/deploy/docker/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+2
+time="2026-03-27T17:55:12+04:00" level=warning msg="/Users/aruljane/opensource/open-defender-icap/deploy/docker/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+2
+time="2026-03-27T17:55:13+04:00" level=warning msg="/Users/aruljane/opensource/open-defender-icap/deploy/docker/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+DELETE 1
+DELETE 1
+DELETE 0
+DELETE 1
