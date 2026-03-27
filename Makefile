@@ -1,7 +1,16 @@
 COMPOSE_DIR := deploy/docker
 COMPOSE ?= docker compose
 
-.PHONY: compose-up compose-down compose-smoke compose-test compose-logs gen-certs
+.PHONY: start build-start stop compose-up compose-down compose-smoke compose-test compose-logs gen-certs
+
+start:
+	cd $(COMPOSE_DIR) && $(COMPOSE) up -d
+
+build-start:
+	cd $(COMPOSE_DIR) && $(COMPOSE) up --build
+
+stop:
+	cd $(COMPOSE_DIR) && $(COMPOSE) down
 
 compose-up:
 	cd $(COMPOSE_DIR) && $(COMPOSE) up --build
