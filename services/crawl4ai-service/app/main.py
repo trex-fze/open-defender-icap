@@ -18,6 +18,22 @@ def int_env(key: str, default: int) -> int:
         return default
 
 
+def str_env(key: str, default: str) -> str:
+    value = os.getenv(key)
+    if value is None:
+        return default
+    value = value.strip()
+    return value or default
+
+
+def optional_env(key: str) -> Optional[str]:
+    value = os.getenv(key)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
 class CrawlRequest(BaseModel):
     url: HttpUrl
     normalized_key: str = Field(..., min_length=1)
@@ -40,13 +56,19 @@ class CrawlResponse(BaseModel):
 
 @lru_cache(maxsize=1)
 def browser_config() -> BrowserConfig:
+    user_agent = str_env(
+        "CRAWL4AI_USER_AGENT",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    )
+    accept_language = str_env("CRAWL4AI_ACCEPT_LANGUAGE", "en-US,en;q=0.9")
     return BrowserConfig(
         headless=bool_env("CRAWL4AI_HEADLESS", "true"),
         browser_type=os.getenv("CRAWL4AI_BROWSER", "chromium"),
-        user_agent=os.getenv(
-            "CRAWL4AI_USER_AGENT",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        ),
+        user_agent=user_agent,
+        viewport_width=int_env("CRAWL4AI_VIEWPORT_WIDTH", 1512),
+        viewport_height=int_env("CRAWL4AI_VIEWPORT_HEIGHT", 982),
+        headers={"Accept-Language": accept_language},
+        enable_stealth=bool_env("CRAWL4AI_ENABLE_STEALTH", "true"),
         verbose=bool_env("CRAWL4AI_VERBOSE", "false"),
     )
 
@@ -58,11 +80,36 @@ def crawler_run_config() -> CrawlerRunConfig:
         process_iframes=True,
         wait_until="networkidle",
         delay_before_return_html=0.2,
+        locale=str_env("CRAWL4AI_LOCALE", "en-US"),
+        timezone_id=optional_env("CRAWL4AI_TIMEZONE"),
+        simulate_user=bool_env("CRAWL4AI_SIMULATE_USER", "true"),
+        override_navigator=bool_env("CRAWL4AI_OVERRIDE_NAVIGATOR", "true"),
     )
 
 
 app = FastAPI(title="Crawl4AI Service", version="0.1.0")
 logger = logging.getLogger("crawl4ai-service")
+
+
+@app.on_event("startup")
+async def log_browser_profile() -> None:
+    cfg = browser_config()
+    run_cfg = crawler_run_config()
+    ua = to_string_or_none(getattr(cfg, "user_agent", None)) or "unset"
+    if len(ua) > 160:
+        ua = ua[:160]
+    logger.warning(
+        "crawl browser profile browser=%s headless=%s viewport=%sx%s locale=%s timezone=%s accept_language=%s ua=%s",
+        to_string_or_none(getattr(cfg, "browser_type", None)) or "chromium",
+        to_string_or_none(getattr(cfg, "headless", None)) or "true",
+        to_string_or_none(getattr(cfg, "viewport_width", None)) or "?",
+        to_string_or_none(getattr(cfg, "viewport_height", None)) or "?",
+        to_string_or_none(getattr(run_cfg, "locale", None)) or "unset",
+        to_string_or_none(getattr(run_cfg, "timezone_id", None)) or "unset",
+        to_string_or_none((getattr(cfg, "headers", {}) or {}).get("Accept-Language"))
+        or "unset",
+        ua,
+    )
 
 
 @app.get("/healthz")
