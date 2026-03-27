@@ -11,7 +11,9 @@ pub fn normalize_target(host: &str, path: &str, scheme: Option<&str>) -> Result<
         return Err(anyhow!("host required for normalization"));
     }
 
-    let ascii_host = domain_to_ascii(host.trim())
+    let host_no_port = sanitize_host(host);
+
+    let ascii_host = domain_to_ascii(host_no_port.trim())
         .map_err(|err| anyhow!("invalid host {host}: {err:?}"))?
         .to_lowercase();
 
@@ -21,12 +23,15 @@ pub fn normalize_target(host: &str, path: &str, scheme: Option<&str>) -> Result<
         format!("/{}", path)
     };
 
-    let full_url = format!("{}://{}{}", scheme, ascii_host, normalized_path);
-    let parsed = Url::parse(&full_url).context("failed to parse normalized url")?;
-    let hostname = parsed
-        .host_str()
-        .ok_or_else(|| anyhow!("normalized url missing host"))?
-        .to_string();
+    let host_for_url = if ascii_host.contains(':') {
+        format!("[{}]", ascii_host)
+    } else {
+        ascii_host.clone()
+    };
+
+    let full_url = format!("{}://{}{}", scheme, host_for_url, normalized_path);
+    Url::parse(&full_url).context("failed to parse normalized url")?;
+    let hostname = ascii_host.clone();
 
     let registered_domain = derive_registered_domain(&hostname);
     let entity_level = if hostname != registered_domain {
@@ -61,6 +66,21 @@ fn derive_registered_domain(hostname: &str) -> String {
     }
 }
 
+fn sanitize_host(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.starts_with('[') {
+        if let Some(end) = trimmed.find(']') {
+            return trimmed[1..end].to_string();
+        }
+    }
+    if let Some((host_part, port_part)) = trimmed.rsplit_once(':') {
+        if port_part.chars().all(|c| c.is_ascii_digit()) {
+            return host_part.to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,5 +111,19 @@ mod tests {
     fn missing_host_errors() {
         let err = normalize_target("   ", "/", None).unwrap_err();
         assert!(err.to_string().contains("host"));
+    }
+
+    #[test]
+    fn strips_port_from_host() {
+        let result =
+            normalize_target("Example.com:443", "/", Some("https")).expect("normalize with port");
+        assert_eq!(result.hostname, "example.com");
+    }
+
+    #[test]
+    fn strips_port_from_ipv6_with_brackets() {
+        let result = normalize_target("[2001:db8::1]:443", "/", Some("https"))
+            .expect("normalize ipv6 with port");
+        assert_eq!(result.hostname, "2001:db8::1");
     }
 }

@@ -81,7 +81,11 @@ fn parse_http_block(block: &str) -> Result<(String, String, Option<String>, Stri
     let mut http_host = String::new();
     let mut http_path = target.to_string();
 
-    if target.starts_with("http://") || target.starts_with("https://") {
+    if method.eq_ignore_ascii_case("CONNECT") {
+        http_scheme = Some("https".to_string());
+        http_host = clean_host_value(target);
+        http_path = "/".to_string();
+    } else if target.starts_with("http://") || target.starts_with("https://") {
         let url =
             url::Url::parse(target).context("failed to parse absolute URL in HTTP request")?;
         http_scheme = Some(url.scheme().to_string());
@@ -92,15 +96,22 @@ fn parse_http_block(block: &str) -> Result<(String, String, Option<String>, Stri
         http_path = url.path().to_string();
     }
 
+    let mut host_header: Option<String> = None;
     for line in lines {
         if line.trim().is_empty() {
             break;
         }
         if let Some((name, value)) = line.split_once(':') {
             if name.eq_ignore_ascii_case("host") {
-                http_host = value.trim().to_lowercase();
+                host_header = Some(value.trim().to_string());
                 break;
             }
+        }
+    }
+
+    if let Some(host_value) = host_header {
+        if http_host.is_empty() || method.eq_ignore_ascii_case("CONNECT") {
+            http_host = clean_host_value(&host_value);
         }
     }
 
@@ -109,6 +120,21 @@ fn parse_http_block(block: &str) -> Result<(String, String, Option<String>, Stri
     }
 
     Ok((method, http_path, http_scheme, http_host))
+}
+
+fn clean_host_value(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.starts_with('[') {
+        if let Some(end) = trimmed.find(']') {
+            return trimmed[1..end].to_lowercase();
+        }
+    }
+    if let Some((host_part, port_part)) = trimmed.rsplit_once(':') {
+        if port_part.chars().all(|c| c.is_ascii_digit()) {
+            return host_part.to_lowercase();
+        }
+    }
+    trimmed.to_lowercase()
 }
 
 #[cfg(test)]
@@ -142,5 +168,24 @@ mod tests {
         let raw = "REQMOD icap://icap/req ICAP/1.0\r\nHost: icap\r\n\r\nGET /foo HTTP/1.1\r\n\r\n";
         let err = IcapRequest::parse(raw).unwrap_err();
         assert!(err.to_string().contains("HTTP host"));
+    }
+
+    #[test]
+    fn parses_connect_with_port() {
+        let raw = "REQMOD icap://icap/req ICAP/1.0\r\nHost: icap\r\n\r\nCONNECT Facebook.com:443 HTTP/1.1\r\nHost: Facebook.com:443\r\n\r\n";
+        let req = IcapRequest::parse(raw).unwrap();
+        assert_eq!(req.http_method, "CONNECT");
+        assert_eq!(req.http_host, "facebook.com");
+        assert_eq!(req.http_scheme.as_deref(), Some("https"));
+        assert_eq!(req.http_path, "/");
+    }
+
+    #[test]
+    fn parses_connect_with_ipv6_host() {
+        let raw = "REQMOD icap://icap/req ICAP/1.0\r\nHost: icap\r\n\r\nCONNECT [2001:db8::1]:443 HTTP/1.1\r\nHost: [2001:db8::1]:443\r\n\r\n";
+        let req = IcapRequest::parse(raw).unwrap();
+        assert_eq!(req.http_host, "2001:db8::1");
+        assert_eq!(req.http_scheme.as_deref(), Some("https"));
+        assert_eq!(req.http_path, "/");
     }
 }
