@@ -83,10 +83,14 @@ export const adminPostJson = async <TResponse, TBody = unknown>(
   init?: RequestInit,
 ): Promise<TResponse> => {
   ensureCallable(ctx);
+  const headers = withHeaders(ctx.headers, init);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   const resp = await fetch(buildUrl(ctx.baseUrl, path), {
     ...init,
     method: 'POST',
-    headers: withHeaders(ctx.headers, init),
+    headers,
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
@@ -102,10 +106,14 @@ export const adminPutJson = async <TResponse, TBody = unknown>(
   init?: RequestInit,
 ): Promise<TResponse> => {
   ensureCallable(ctx);
+  const headers = withHeaders(ctx.headers, init);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   const resp = await fetch(buildUrl(ctx.baseUrl, path), {
     ...init,
     method: 'PUT',
-    headers: withHeaders(ctx.headers, init),
+    headers,
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
