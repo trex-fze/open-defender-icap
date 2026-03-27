@@ -344,14 +344,16 @@ fn icap_response(action: &PolicyAction) -> String {
     use PolicyAction::*;
     match action {
         Allow | Monitor => "ICAP/1.0 204 No Content\r\n\r\n".to_string(),
-        ContentPending => build_block_response(PENDING_HTML.as_bytes()),
-        _ => {
-            let body = "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 18\r\n\r\nRequest blocked.";
-            format!(
-                "ICAP/1.0 200 OK\r\nEncapsulated: res-body=0\r\n\r\n{}",
-                body
-            )
-        }
+        ContentPending => build_http_block_response(
+            "403 Forbidden",
+            "text/html; charset=utf-8",
+            PENDING_HTML.as_bytes(),
+        ),
+        _ => build_http_block_response(
+            "403 Forbidden",
+            "text/plain; charset=utf-8",
+            b"Request blocked.",
+        ),
     }
 }
 
@@ -370,6 +372,20 @@ fn icap_options_response(preview_size: usize) -> String {
     )
 }
 
+fn build_http_block_response(status_line: &str, content_type: &str, body: &[u8]) -> String {
+    let http_header = format!(
+        "HTTP/1.1 {status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let header_len = http_header.as_bytes().len();
+    let mut icap = format!(
+        "ICAP/1.0 200 OK\r\nEncapsulated: res-hdr=0, res-body={}\r\n\r\n{}",
+        header_len, http_header
+    );
+    icap.push_str(&String::from_utf8_lossy(body));
+    icap
+}
+
 fn derive_base_url(full_url: &str) -> Option<String> {
     let parsed = Url::parse(full_url).ok()?;
     let host = parsed.host_str()?;
@@ -381,21 +397,30 @@ fn fallback_base_url(hostname: &str) -> String {
     format!("https://{hostname}/")
 }
 
-fn build_block_response(body: &[u8]) -> String {
-    let header = format!(
-        "HTTP/1.1 403 Forbidden\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\r\n",
-        body.len()
-    );
-    format!(
-        "ICAP/1.0 200 OK\r\nEncapsulated: res-body=0\r\n\r\n{}{}",
-        header,
-        String::from_utf8_lossy(body)
-    )
-}
-
 static PENDING_HTML: Lazy<String> = Lazy::new(|| {
     let template = r#"<html><head><meta charset="utf-8" /><title>Site Under Classification</title>
 <style>body{font-family:sans-serif;background:#0b1221;color:#f4f7ff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;} .card{background:#141d33;border:1px solid #1f2a48;border-radius:12px;padding:32px;max-width:460px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.4);} h1{font-size:1.5rem;margin-bottom:12px;} p{line-height:1.5;color:#c6d4f5;} .hint{margin-top:20px;font-size:0.9rem;color:#8ea0ce;}</style>
 </head><body><div class="card"><h1>Site Under Classification</h1><p>Security is verifying this destination with full page content. Access will be restored automatically once the scan completes.</p><p class="hint">Please retry in a moment or contact Security if this persists.</p></div></body></html>"#;
     template.to_string()
 });
+
+#[cfg(test)]
+mod icap_response_tests {
+    use super::*;
+
+    #[test]
+    fn content_pending_response_contains_http_block() {
+        let response = icap_response(&PolicyAction::ContentPending);
+        assert!(response.contains("ICAP/1.0 200 OK"));
+        assert!(response.contains("Encapsulated: res-hdr=0, res-body="));
+        assert!(response.contains("HTTP/1.1 403 Forbidden"));
+        assert!(response.contains("Site Under Classification"));
+    }
+
+    #[test]
+    fn block_response_contains_text_body() {
+        let response = icap_response(&PolicyAction::Block);
+        assert!(response.contains("HTTP/1.1 403 Forbidden"));
+        assert!(response.contains("Request blocked."));
+    }
+}
