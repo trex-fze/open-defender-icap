@@ -356,7 +356,11 @@ fn build_markdown_excerpt(
     for line in base.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
-            if !normalized_lines.last().map(|l: &String| l.is_empty()).unwrap_or(false) {
+            if !normalized_lines
+                .last()
+                .map(|l: &String| l.is_empty())
+                .unwrap_or(false)
+            {
                 normalized_lines.push(String::new());
             }
             continue;

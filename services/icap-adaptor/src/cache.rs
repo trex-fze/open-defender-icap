@@ -200,7 +200,10 @@ impl CacheClient {
         let mut store = memory.write().await;
         let removed = store.len();
         store.clear();
-        info!(target = "svc-icap", removed, "invalidated cache entries for policy refresh");
+        info!(
+            target = "svc-icap",
+            removed, "invalidated cache entries for policy refresh"
+        );
         Ok(())
     }
 
@@ -389,6 +392,10 @@ mod tests {
             .await
             .unwrap();
         assert!(cache.get("domain:example.com").await.unwrap().is_none());
-        assert!(cache.get("subdomain:www.example.com").await.unwrap().is_none());
+        assert!(cache
+            .get("subdomain:www.example.com")
+            .await
+            .unwrap()
+            .is_none());
     }
 }

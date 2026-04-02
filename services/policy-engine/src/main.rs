@@ -188,18 +188,21 @@ async fn main() -> Result<()> {
         } else {
             pool.clone()
         };
-        let (activation_state, activation_refresh_enabled) =
-            match ActivationState::load(&activation_pool).await {
-                Ok(state) => (state, true),
-                Err(err) => {
-                    tracing::warn!(
-                        target = "svc-policy",
-                        %err,
-                        "failed to load taxonomy activation profile; defaulting to fail-closed activation"
-                    );
-                    (ActivationState::deny_all(), false)
-                }
-            };
+        let (activation_state, activation_refresh_enabled) = match ActivationState::load(
+            &activation_pool,
+        )
+        .await
+        {
+            Ok(state) => (state, true),
+            Err(err) => {
+                tracing::warn!(
+                    target = "svc-policy",
+                    %err,
+                    "failed to load taxonomy activation profile; defaulting to fail-closed activation"
+                );
+                (ActivationState::deny_all(), false)
+            }
+        };
         let activation = Arc::new(activation_state);
         if activation_refresh_enabled {
             ActivationState::spawn_refresh_task(Arc::clone(&activation), activation_pool.clone());
@@ -216,7 +219,12 @@ async fn main() -> Result<()> {
         };
         audit_logger = Some(PolicyAuditLogger::new(pool.clone()));
         (
-            PolicyEvaluator::from_database(store, pool.clone(), Some(cfg.policy_file.clone()), activation),
+            PolicyEvaluator::from_database(
+                store,
+                pool.clone(),
+                Some(cfg.policy_file.clone()),
+                activation,
+            ),
             Some(activation_pool.clone()),
         )
     } else {

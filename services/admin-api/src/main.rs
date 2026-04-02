@@ -2,8 +2,8 @@ mod audit;
 mod auth;
 mod cache;
 mod cache_entries_api;
-mod classifications;
 mod classification_requests;
+mod classifications;
 mod cli_logs;
 mod iam;
 mod metrics;
@@ -200,7 +200,10 @@ impl AppState {
                 body
             ));
         }
-        info!(target = "svc-admin", endpoint, "policy-engine reload triggered");
+        info!(
+            target = "svc-admin",
+            endpoint, "policy-engine reload triggered"
+        );
         Ok(())
     }
 
@@ -1179,7 +1182,6 @@ mod tests {
         let result = validate_override_payload(payload).unwrap();
         assert_eq!(result.scope_value, "*.example.com");
     }
-
 }
 
 fn map_override_row(row: &PgRow) -> sqlx::Result<OverrideRecord> {

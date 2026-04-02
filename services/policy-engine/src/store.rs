@@ -114,12 +114,9 @@ impl PolicyStore {
     }
 
     pub fn simulate(&self, request: &DecisionRequest) -> SimulationResult {
-        let canonical_category = request
-            .category_hint
-            .as_deref()
-            .and_then(|hint| {
-                self.canonicalize_request_category(hint, request.subcategory_hint.as_deref())
-            });
+        let canonical_category = request.category_hint.as_deref().and_then(|hint| {
+            self.canonicalize_request_category(hint, request.subcategory_hint.as_deref())
+        });
         let rules = self.inner.read();
         for rule in rules.iter() {
             if self.matches_conditions(&rule.conditions, canonical_category.as_deref(), request) {
@@ -159,7 +156,11 @@ impl PolicyStore {
         Arc::clone(&self.taxonomy)
     }
 
-    fn canonicalize_request_category(&self, hint: &str, subcategory_hint: Option<&str>) -> Option<String> {
+    fn canonicalize_request_category(
+        &self,
+        hint: &str,
+        subcategory_hint: Option<&str>,
+    ) -> Option<String> {
         let validated = self.taxonomy.validate_labels(hint, subcategory_hint);
         if let Some(reason) = validated.fallback_reason {
             warn!(

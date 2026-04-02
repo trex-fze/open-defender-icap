@@ -99,25 +99,27 @@ pub async fn list(
         .await
         .map_err(db_error)?;
 
-        out.extend(rows.into_iter().map(|row| ClassificationListRecord {
-            normalized_key: row.get("normalized_key"),
-            state: "classified".to_string(),
-            primary_category: row.get("primary_category"),
-            subcategory: row.get("subcategory"),
-            risk_level: row.get("risk_level"),
-            recommended_action: row
-                .try_get::<Option<String>, _>("recommended_action")
-                .ok()
-                .flatten()
-                .as_deref()
-                .and_then(parse_policy_action),
-            confidence: row
-                .try_get::<Option<f64>, _>("confidence")
-                .ok()
-                .flatten()
-                .map(|v| v as f32),
-            status: row.get("status"),
-            updated_at: row.get("updated_at"),
+        out.extend(rows.into_iter().map(|row| {
+            ClassificationListRecord {
+                normalized_key: row.get("normalized_key"),
+                state: "classified".to_string(),
+                primary_category: row.get("primary_category"),
+                subcategory: row.get("subcategory"),
+                risk_level: row.get("risk_level"),
+                recommended_action: row
+                    .try_get::<Option<String>, _>("recommended_action")
+                    .ok()
+                    .flatten()
+                    .as_deref()
+                    .and_then(parse_policy_action),
+                confidence: row
+                    .try_get::<Option<f64>, _>("confidence")
+                    .ok()
+                    .flatten()
+                    .map(|v| v as f32),
+                status: row.get("status"),
+                updated_at: row.get("updated_at"),
+            }
         }));
     }
 
@@ -305,8 +307,10 @@ pub async fn update(
         primary_category: row.get("primary_category"),
         subcategory: row.get("subcategory"),
         risk_level: row.get("risk_level"),
-        recommended_action: parse_policy_action(row.get::<String, _>("recommended_action").as_str())
-            .unwrap_or(PolicyAction::Monitor),
+        recommended_action: parse_policy_action(
+            row.get::<String, _>("recommended_action").as_str(),
+        )
+        .unwrap_or(PolicyAction::Monitor),
         confidence: row.get::<f64, _>("confidence") as f32,
         updated_at: row.get("updated_at"),
     }))
@@ -397,7 +401,10 @@ mod tests {
         assert_eq!(parse_policy_action("Allow"), Some(PolicyAction::Allow));
         assert_eq!(parse_policy_action("Block"), Some(PolicyAction::Block));
         assert_eq!(parse_policy_action("Warn"), Some(PolicyAction::Warn));
-        assert_eq!(parse_policy_action("ContentPending"), Some(PolicyAction::ContentPending));
+        assert_eq!(
+            parse_policy_action("ContentPending"),
+            Some(PolicyAction::ContentPending)
+        );
         assert_eq!(parse_policy_action("nope"), None);
     }
 

@@ -490,7 +490,10 @@ fn should_require_content_pending(
     verdict: Option<&ClassificationVerdict>,
 ) -> bool {
     let has_unknown_fallback = verdict
-        .map(|v| v.primary_category.eq_ignore_ascii_case("unknown-unclassified"))
+        .map(|v| {
+            v.primary_category
+                .eq_ignore_ascii_case("unknown-unclassified")
+        })
         .unwrap_or(false);
     require_content
         && (verdict.is_none() || has_unknown_fallback)
@@ -533,7 +536,10 @@ mod icap_response_tests {
             registered_domain: "google.com".into(),
             full_url: "https://www.google.com/".into(),
         };
-        assert_eq!(ancestor_domain_key(&normalized), Some("domain:google.com".into()));
+        assert_eq!(
+            ancestor_domain_key(&normalized),
+            Some("domain:google.com".into())
+        );
     }
 
     #[test]
@@ -554,7 +560,9 @@ mod icap_response_tests {
         assert!(is_inheritable_ancestor_action(&PolicyAction::Monitor));
         assert!(is_inheritable_ancestor_action(&PolicyAction::Block));
         assert!(!is_inheritable_ancestor_action(&PolicyAction::Warn));
-        assert!(!is_inheritable_ancestor_action(&PolicyAction::ContentPending));
+        assert!(!is_inheritable_ancestor_action(
+            &PolicyAction::ContentPending
+        ));
     }
 
     #[test]
@@ -574,7 +582,11 @@ mod icap_response_tests {
             recommended_action: PolicyAction::Allow,
         };
 
-        assert!(should_require_content_pending(true, &PolicyAction::Allow, None));
+        assert!(should_require_content_pending(
+            true,
+            &PolicyAction::Allow,
+            None
+        ));
         assert!(should_require_content_pending(
             true,
             &PolicyAction::Allow,
@@ -585,7 +597,15 @@ mod icap_response_tests {
             &PolicyAction::Allow,
             Some(&social_verdict)
         ));
-        assert!(!should_require_content_pending(true, &PolicyAction::Block, None));
-        assert!(!should_require_content_pending(false, &PolicyAction::Allow, None));
+        assert!(!should_require_content_pending(
+            true,
+            &PolicyAction::Block,
+            None
+        ));
+        assert!(!should_require_content_pending(
+            false,
+            &PolicyAction::Allow,
+            None
+        ));
     }
 }
