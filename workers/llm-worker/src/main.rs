@@ -10,11 +10,19 @@ use schema::{LlmResponse, PromptPayload};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use std::{collections::HashMap, env, fmt, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    env, fmt,
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 use taxonomy::{ActivationState, FallbackReason, TaxonomyStore};
+use tokio::sync::Mutex;
 use tokio::{signal, time::Instant};
 use tokio_stream::StreamExt;
-use tracing::{error, info, warn, Level};
+use tracing::{error, info, warn};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -94,6 +102,18 @@ struct RoutingConfig {
     pub fallback: Option<String>,
     #[serde(default)]
     pub policy: Option<String>,
+    #[serde(default)]
+    pub primary_retry_max: Option<usize>,
+    #[serde(default)]
+    pub primary_retry_backoff_ms: Option<u64>,
+    #[serde(default)]
+    pub primary_retry_max_backoff_ms: Option<u64>,
+    #[serde(default)]
+    pub retryable_status_codes: Vec<u16>,
+    #[serde(default)]
+    pub fallback_cooldown_secs: Option<u64>,
+    #[serde(default)]
+    pub fallback_max_per_min: Option<usize>,
 }
 
 impl WorkerConfig {
@@ -196,12 +216,12 @@ struct ProviderRouter {
 }
 
 impl ProviderRouter {
-    fn providers(&self) -> Vec<&ResolvedProvider> {
-        let mut list = vec![&self.primary];
-        if let Some(fallback) = &self.fallback {
-            list.push(fallback);
-        }
-        list
+    fn primary(&self) -> &ResolvedProvider {
+        &self.primary
+    }
+
+    fn fallback(&self) -> Option<&ResolvedProvider> {
+        self.fallback.as_ref()
     }
 
     fn catalog(&self) -> Arc<Vec<metrics::ProviderSummary>> {
@@ -253,21 +273,232 @@ const CONTENT_WAIT_ATTEMPTS: usize = 40;
 const CONTENT_WAIT_DELAY_SECS: u64 = 3;
 const CACHE_TTL_SECONDS: u64 = 3600;
 const NON_CANONICAL_RETRY_ATTEMPTS: usize = 3;
+const DEFAULT_FAILOVER_POLICY: &str = "aggressive";
+const DEFAULT_PRIMARY_RETRY_MAX: usize = 3;
+const DEFAULT_PRIMARY_RETRY_BACKOFF_MS: u64 = 500;
+const DEFAULT_PRIMARY_RETRY_MAX_BACKOFF_MS: u64 = 5000;
+const DEFAULT_RETRYABLE_STATUS_CODES: &[u16] = &[408, 429, 500, 502, 503, 504];
+const DEFAULT_FALLBACK_COOLDOWN_SECS: u64 = 30;
+const DEFAULT_FALLBACK_MAX_PER_MIN: usize = 30;
+
+#[derive(Debug, Clone, Copy)]
+enum FailoverPolicy {
+    Aggressive,
+    Safe,
+    Disabled,
+}
+
+impl FailoverPolicy {
+    fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "safe" => Self::Safe,
+            "disabled" => Self::Disabled,
+            _ => Self::Aggressive,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Aggressive => "aggressive",
+            Self::Safe => "safe",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InvocationFailureClass {
+    Retryable,
+    NonRetryable,
+}
+
+#[derive(Debug, Clone)]
+struct InvocationFailure {
+    class: InvocationFailureClass,
+    status: Option<u16>,
+    reason: String,
+}
+
+#[derive(Debug, Clone)]
+struct FailoverRuntime {
+    policy: FailoverPolicy,
+    primary_retry_max: usize,
+    primary_retry_backoff_ms: u64,
+    primary_retry_max_backoff_ms: u64,
+    retryable_status_codes: HashSet<u16>,
+    fallback_cooldown_secs: u64,
+    fallback_max_per_min: usize,
+}
+
+impl FailoverRuntime {
+    fn from_routing(routing: &RoutingConfig) -> Self {
+        let policy_raw = env::var("OD_LLM_FAILOVER_POLICY")
+            .ok()
+            .or_else(|| routing.policy.clone())
+            .unwrap_or_else(|| DEFAULT_FAILOVER_POLICY.to_string());
+        let policy = FailoverPolicy::parse(&policy_raw);
+
+        let primary_retry_max = env_usize("OD_LLM_PRIMARY_RETRY_MAX")
+            .or(routing.primary_retry_max)
+            .unwrap_or(DEFAULT_PRIMARY_RETRY_MAX);
+        let primary_retry_backoff_ms = env_u64("OD_LLM_PRIMARY_RETRY_BACKOFF_MS")
+            .or(routing.primary_retry_backoff_ms)
+            .unwrap_or(DEFAULT_PRIMARY_RETRY_BACKOFF_MS);
+        let primary_retry_max_backoff_ms = env_u64("OD_LLM_PRIMARY_RETRY_MAX_BACKOFF_MS")
+            .or(routing.primary_retry_max_backoff_ms)
+            .unwrap_or(DEFAULT_PRIMARY_RETRY_MAX_BACKOFF_MS);
+        let fallback_cooldown_secs = env_u64("OD_LLM_FALLBACK_COOLDOWN_SECS")
+            .or(routing.fallback_cooldown_secs)
+            .unwrap_or(DEFAULT_FALLBACK_COOLDOWN_SECS);
+        let fallback_max_per_min = env_usize("OD_LLM_FALLBACK_MAX_PER_MIN")
+            .or(routing.fallback_max_per_min)
+            .unwrap_or(DEFAULT_FALLBACK_MAX_PER_MIN);
+
+        let retryable_status_codes = env_csv_u16("OD_LLM_RETRYABLE_STATUS_CODES")
+            .unwrap_or_else(|| {
+                if routing.retryable_status_codes.is_empty() {
+                    DEFAULT_RETRYABLE_STATUS_CODES.to_vec()
+                } else {
+                    routing.retryable_status_codes.clone()
+                }
+            })
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        Self {
+            policy,
+            primary_retry_max,
+            primary_retry_backoff_ms,
+            primary_retry_max_backoff_ms,
+            retryable_status_codes,
+            fallback_cooldown_secs,
+            fallback_max_per_min,
+        }
+    }
+
+    fn is_retryable_status(&self, status: u16) -> bool {
+        self.retryable_status_codes.contains(&status)
+    }
+}
+
+#[derive(Debug)]
+struct FallbackBudgetState {
+    opened_until: Option<Instant>,
+    window_start: Instant,
+    window_events: VecDeque<Instant>,
+}
+
+impl FallbackBudgetState {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            opened_until: None,
+            window_start: now,
+            window_events: VecDeque::new(),
+        }
+    }
+
+    fn allow_and_record(&mut self, cfg: &FailoverRuntime) -> Result<(), &'static str> {
+        let now = Instant::now();
+        if let Some(until) = self.opened_until {
+            if now < until {
+                return Err("cooldown_active");
+            }
+            self.opened_until = None;
+        }
+
+        if now.duration_since(self.window_start).as_secs() >= 60 {
+            self.window_start = now;
+            self.window_events.clear();
+        }
+        while let Some(ts) = self.window_events.front() {
+            if now.duration_since(*ts).as_secs() >= 60 {
+                self.window_events.pop_front();
+            } else {
+                break;
+            }
+        }
+        if self.window_events.len() >= cfg.fallback_max_per_min {
+            return Err("budget_exhausted");
+        }
+
+        self.window_events.push_back(now);
+        Ok(())
+    }
+
+    fn trip_cooldown(&mut self, cfg: &FailoverRuntime) {
+        self.opened_until = Some(Instant::now() + Duration::from_secs(cfg.fallback_cooldown_secs));
+    }
+}
+
+#[derive(Debug)]
+struct RetryableJobError {
+    reason: String,
+}
+
+impl fmt::Display for RetryableJobError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.reason)
+    }
+}
+
+impl std::error::Error for RetryableJobError {}
+
+#[derive(Debug)]
+struct NonRetryableJobError {
+    reason: String,
+}
+
+impl fmt::Display for NonRetryableJobError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.reason)
+    }
+}
+
+impl std::error::Error for NonRetryableJobError {}
+
+fn env_u64(key: &str) -> Option<u64> {
+    env::var(key).ok()?.trim().parse::<u64>().ok()
+}
+
+fn env_usize(key: &str) -> Option<usize> {
+    env::var(key).ok()?.trim().parse::<usize>().ok()
+}
+
+fn env_csv_u16(key: &str) -> Option<Vec<u16>> {
+    let raw = env::var(key).ok()?;
+    let mut values = Vec::new();
+    for token in raw.split(',') {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(v) = trimmed.parse::<u16>() {
+            values.push(v);
+        }
+    }
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .json()
-        .init();
+    init_tracing()?;
 
     let cfg: WorkerConfig = config_core::load_config("config/llm-worker.json")?;
+    let failover = FailoverRuntime::from_routing(&cfg.routing);
     info!(
         target = "svc-llm-worker",
         queue = %cfg.queue_name,
         channel = %cfg.cache_channel,
         stream = %cfg.stream,
+        failover_policy = failover.policy.as_str(),
+        primary_retry_max = failover.primary_retry_max,
+        fallback_cooldown_secs = failover.fallback_cooldown_secs,
+        fallback_max_per_min = failover.fallback_max_per_min,
         "LLM worker initialized"
     );
 
@@ -318,10 +549,40 @@ async fn main() -> Result<()> {
     tokio::spawn(cache_listener.run());
 
     let job_consumer =
-        JobConsumer::new(&cfg, router, pool.clone(), taxonomy.clone(), activation).await?;
+        JobConsumer::new(&cfg, router, pool.clone(), taxonomy.clone(), activation, failover).await?;
     tokio::spawn(job_consumer.run());
 
     signal::ctrl_c().await?;
+    Ok(())
+}
+
+fn init_tracing() -> Result<()> {
+    let root = env::var("OD_LOG_DIR").unwrap_or_else(|_| "logs".to_string());
+    let log_dir = PathBuf::from(root).join("llm-worker");
+    std::fs::create_dir_all(&log_dir)
+        .with_context(|| format!("failed to create log directory {}", log_dir.display()))?;
+
+    let file_path = log_dir.join("llm-worker.log");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file_path)
+        .with_context(|| format!("failed to open log file {}", file_path.display()))?;
+
+    let stdout_layer = tracing_subscriber::fmt::layer().json();
+    let file_layer = tracing_subscriber::fmt::layer()
+        .json()
+        .with_ansi(false)
+        .with_writer(move || {
+            file.try_clone()
+                .expect("failed to clone llm-worker log file handle")
+        });
+    tracing_subscriber::registry()
+        .with(EnvFilter::from_default_env())
+        .with(stdout_layer)
+        .with(file_layer)
+        .init();
+    info!(target = "svc-llm-worker", path = %file_path.display(), "file logging enabled");
     Ok(())
 }
 
@@ -377,6 +638,8 @@ struct JobConsumer {
     taxonomy: Arc<TaxonomyStore>,
     taxonomy_prompt: String,
     activation: Arc<ActivationState>,
+    failover: FailoverRuntime,
+    fallback_budget: Mutex<FallbackBudgetState>,
 }
 
 impl JobConsumer {
@@ -386,6 +649,7 @@ impl JobConsumer {
         pool: PgPool,
         taxonomy: Arc<TaxonomyStore>,
         activation: Arc<ActivationState>,
+        failover: FailoverRuntime,
     ) -> Result<Self> {
         let cache_publisher =
             DecisionCachePublisher::new(&cfg.redis_url, &cfg.cache_channel).await?;
@@ -400,6 +664,8 @@ impl JobConsumer {
             taxonomy,
             taxonomy_prompt,
             activation,
+            failover,
+            fallback_budget: Mutex::new(FallbackBudgetState::new()),
         })
     }
 
@@ -439,17 +705,27 @@ impl JobConsumer {
 
     async fn process_job(&self, payload: &str) -> Result<(), anyhow::Error> {
         metrics::record_job_started();
+        let job_hint = serde_json::from_str::<ClassificationJobPayload>(payload).ok();
         let result = self.handle_job(payload).await;
         match &result {
             Ok(_) => metrics::record_job_completed(),
             Err(err) => {
-                let requires_content = serde_json::from_str::<ClassificationJobPayload>(payload)
+                let requires_content = job_hint
+                    .as_ref()
                     .map(|job| job.requires_content)
                     .unwrap_or(false);
-                if err.downcast_ref::<ContentNotReady>().is_some() || requires_content {
+                let should_requeue = err.downcast_ref::<ContentNotReady>().is_some()
+                    || err.downcast_ref::<RetryableJobError>().is_some();
+                if should_requeue {
                     warn!(
                         target = "svc-llm-worker",
-                        requires_content, "classification job will be requeued"
+                        requires_content,
+                        normalized_key = job_hint
+                            .as_ref()
+                            .map(|job| job.normalized_key.as_str())
+                            .unwrap_or("unknown"),
+                        err = %err,
+                        "classification job will be requeued"
                     );
                     if let Err(requeue_err) = self.requeue(payload).await {
                         error!(
@@ -459,6 +735,20 @@ impl JobConsumer {
                         );
                     }
                 } else {
+                    if let Some(job) = job_hint.as_ref() {
+                        let _ = self
+                            .mark_pending(job, "failed", Some(&err.to_string()))
+                            .await;
+                    }
+                    warn!(
+                        target = "svc-llm-worker",
+                        normalized_key = job_hint
+                            .as_ref()
+                            .map(|job| job.normalized_key.as_str())
+                            .unwrap_or("unknown"),
+                        err = %err,
+                        "classification job failed without requeue"
+                    );
                     metrics::record_job_failed();
                 }
             }
@@ -685,18 +975,177 @@ impl JobConsumer {
         job: &ClassificationJobPayload,
         prompt: &str,
     ) -> Result<(LlmResponse, String)> {
-        let mut last_err: Option<anyhow::Error> = None;
-        for provider in self.router.providers() {
-            match invoke_llm(provider, job, prompt).await {
-                Ok(response) => return Ok((response, provider.name.clone())),
-                Err(err) => {
-                    error!(target = "svc-llm-worker", provider = provider.name, %err, "llm invocation failed");
-                    last_err = Some(err);
-                    continue;
+        let primary = self.router.primary();
+        let primary_failure = self.invoke_primary_with_retry(primary, job, prompt).await;
+        match primary_failure {
+            Ok(response) => return Ok((response, primary.name.clone())),
+            Err(err) => {
+                error!(
+                    target = "svc-llm-worker",
+                    normalized_key = %job.normalized_key,
+                    provider = %primary.name,
+                    class = ?err.class,
+                    status = ?err.status,
+                    reason = %err.reason,
+                    policy = self.failover.policy.as_str(),
+                    "primary provider failed"
+                );
+
+                if !self.should_attempt_fallback(&err) {
+                    metrics::record_fallback_skipped("policy_or_error_class");
+                    let reason = format!(
+                        "primary provider failed and fallback skipped: {}",
+                        err.reason
+                    );
+                    return match err.class {
+                        InvocationFailureClass::Retryable => {
+                            Err(RetryableJobError { reason }.into())
+                        }
+                        InvocationFailureClass::NonRetryable => {
+                            Err(NonRetryableJobError { reason }.into())
+                        }
+                    };
+                }
+
+                let fallback = if let Some(provider) = self.router.fallback() {
+                    provider
+                } else {
+                    metrics::record_fallback_skipped("fallback_not_configured");
+                    let reason = format!("primary failed and fallback not configured: {}", err.reason);
+                    return Err(RetryableJobError { reason }.into());
+                };
+
+                {
+                    let mut budget = self.fallback_budget.lock().await;
+                    if let Err(blocked_reason) = budget.allow_and_record(&self.failover) {
+                        metrics::record_fallback_skipped(blocked_reason);
+                        let reason = format!(
+                            "fallback blocked by {} after primary failure: {}",
+                            blocked_reason, err.reason
+                        );
+                        return Err(RetryableJobError { reason }.into());
+                    }
+                }
+
+                metrics::record_fallback_attempt(&primary.name, &fallback.name, "primary_failed");
+                info!(
+                    target = "svc-llm-worker",
+                    normalized_key = %job.normalized_key,
+                    from_provider = %primary.name,
+                    to_provider = %fallback.name,
+                    reason = %err.reason,
+                    "attempting provider fallback"
+                );
+
+                match invoke_llm(fallback, job, prompt).await {
+                    Ok(response) => {
+                        info!(
+                            target = "svc-llm-worker",
+                            normalized_key = %job.normalized_key,
+                            provider = %fallback.name,
+                            "fallback provider succeeded"
+                        );
+                        Ok((response, fallback.name.clone()))
+                    }
+                    Err(fallback_err) => {
+                        let classified = classify_invocation_failure(&fallback_err, &self.failover);
+                        error!(
+                            target = "svc-llm-worker",
+                            normalized_key = %job.normalized_key,
+                            provider = %fallback.name,
+                            class = ?classified.class,
+                            status = ?classified.status,
+                            reason = %classified.reason,
+                            "fallback provider failed"
+                        );
+                        let mut budget = self.fallback_budget.lock().await;
+                        budget.trip_cooldown(&self.failover);
+                        let reason = format!(
+                            "fallback provider failed after primary error: {}",
+                            classified.reason
+                        );
+                        match classified.class {
+                            InvocationFailureClass::Retryable => {
+                                Err(RetryableJobError { reason }.into())
+                            }
+                            InvocationFailureClass::NonRetryable => {
+                                Err(NonRetryableJobError { reason }.into())
+                            }
+                        }
+                    }
                 }
             }
         }
-        Err(last_err.unwrap_or_else(|| anyhow!("no provider available")))
+    }
+
+    async fn invoke_primary_with_retry(
+        &self,
+        provider: &ResolvedProvider,
+        job: &ClassificationJobPayload,
+        prompt: &str,
+    ) -> Result<LlmResponse, InvocationFailure> {
+        let max_attempts = self.failover.primary_retry_max.max(1);
+        let mut attempt = 1usize;
+        loop {
+            match invoke_llm(provider, job, prompt).await {
+                Ok(response) => {
+                    if attempt > 1 {
+                        info!(
+                            target = "svc-llm-worker",
+                            normalized_key = %job.normalized_key,
+                            provider = %provider.name,
+                            attempt,
+                            "primary provider succeeded after retry"
+                        );
+                    }
+                    return Ok(response);
+                }
+                Err(err) => {
+                    let failure = classify_invocation_failure(&err, &self.failover);
+                    error!(
+                        target = "svc-llm-worker",
+                        normalized_key = %job.normalized_key,
+                        provider = %provider.name,
+                        attempt,
+                        max_attempts,
+                        class = ?failure.class,
+                        status = ?failure.status,
+                        reason = %failure.reason,
+                        "llm invocation failed"
+                    );
+
+                    if attempt >= max_attempts || failure.class == InvocationFailureClass::NonRetryable
+                    {
+                        if attempt >= max_attempts {
+                            metrics::record_primary_retry_exhausted(&provider.name, "attempt_limit");
+                        }
+                        return Err(failure);
+                    }
+
+                    let backoff = calculate_retry_backoff_ms(&self.failover, attempt);
+                    metrics::record_primary_retry(&provider.name, "retryable_error");
+                    warn!(
+                        target = "svc-llm-worker",
+                        normalized_key = %job.normalized_key,
+                        provider = %provider.name,
+                        attempt,
+                        next_attempt = attempt + 1,
+                        backoff_ms = backoff,
+                        "scheduling primary provider retry"
+                    );
+                    tokio::time::sleep(Duration::from_millis(backoff)).await;
+                    attempt += 1;
+                }
+            }
+        }
+    }
+
+    fn should_attempt_fallback(&self, failure: &InvocationFailure) -> bool {
+        match self.failover.policy {
+            FailoverPolicy::Disabled => false,
+            FailoverPolicy::Aggressive => true,
+            FailoverPolicy::Safe => failure.class == InvocationFailureClass::Retryable,
+        }
     }
 
     async fn enrich_job_with_content(&self, job: &mut ClassificationJobPayload) -> Result<()> {
@@ -1022,6 +1471,54 @@ async fn invoke_llm(
             Err(err)
         }
     }
+}
+
+fn classify_invocation_failure(err: &anyhow::Error, failover: &FailoverRuntime) -> InvocationFailure {
+    if let Some(req_err) = err.downcast_ref::<reqwest::Error>() {
+        if req_err.is_timeout() || req_err.is_connect() || req_err.is_request() {
+            return InvocationFailure {
+                class: InvocationFailureClass::Retryable,
+                status: None,
+                reason: req_err.to_string(),
+            };
+        }
+        if let Some(status) = req_err.status() {
+            let status_u16 = status.as_u16();
+            let class = if failover.is_retryable_status(status_u16) {
+                InvocationFailureClass::Retryable
+            } else {
+                InvocationFailureClass::NonRetryable
+            };
+            return InvocationFailure {
+                class,
+                status: Some(status_u16),
+                reason: req_err.to_string(),
+            };
+        }
+    }
+
+    let msg = err.to_string();
+    let lowered = msg.to_ascii_lowercase();
+    let class = if lowered.contains("timed out")
+        || lowered.contains("connection refused")
+        || lowered.contains("temporarily unavailable")
+    {
+        InvocationFailureClass::Retryable
+    } else {
+        InvocationFailureClass::NonRetryable
+    };
+    InvocationFailure {
+        class,
+        status: None,
+        reason: msg,
+    }
+}
+
+fn calculate_retry_backoff_ms(cfg: &FailoverRuntime, attempt: usize) -> u64 {
+    let base = cfg.primary_retry_backoff_ms.max(1);
+    let exp = 2u64.saturating_pow((attempt.saturating_sub(1)).min(10) as u32);
+    let raw = base.saturating_mul(exp);
+    raw.min(cfg.primary_retry_max_backoff_ms.max(base))
 }
 
 async fn invoke_custom_json(
@@ -1590,7 +2087,8 @@ mod tests {
         let router = cfg.resolve_router().unwrap();
         let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
         let activation = Arc::new(ActivationState::allow_all());
-        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation)
+        let failover = FailoverRuntime::from_routing(&cfg.routing);
+        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation, failover)
             .await
             .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
@@ -1675,7 +2173,8 @@ mod tests {
         let router = cfg.resolve_router().unwrap();
         let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
         let activation = Arc::new(ActivationState::allow_all());
-        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation)
+        let failover = FailoverRuntime::from_routing(&cfg.routing);
+        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation, failover)
             .await
             .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
@@ -1755,7 +2254,8 @@ mod tests {
         let router = cfg.resolve_router().unwrap();
         let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
         let activation = Arc::new(ActivationState::allow_all());
-        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation)
+        let failover = FailoverRuntime::from_routing(&cfg.routing);
+        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation, failover)
             .await
             .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });

@@ -64,6 +64,42 @@ static LLM_PROVIDER_FAILURES: Lazy<IntCounterVec> = Lazy::new(|| {
     .unwrap()
 });
 
+static LLM_FALLBACK_ATTEMPTS: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_fallback_attempts_total",
+        "Number of provider fallback attempts",
+        &["from_provider", "to_provider", "reason"]
+    )
+    .unwrap()
+});
+
+static LLM_FALLBACK_SKIPPED: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_fallback_skipped_total",
+        "Number of times provider fallback was skipped",
+        &["reason"]
+    )
+    .unwrap()
+});
+
+static LLM_PRIMARY_RETRIES: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_primary_retries_total",
+        "Number of retries on primary provider",
+        &["provider", "reason"]
+    )
+    .unwrap()
+});
+
+static LLM_PRIMARY_RETRY_EXHAUSTED: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_primary_retry_exhausted_total",
+        "Number of primary provider requests that exhausted retries",
+        &["provider", "reason"]
+    )
+    .unwrap()
+});
+
 static LLM_TIMEOUTS: Lazy<IntCounter> = Lazy::new(|| {
     prometheus::register_int_counter!("llm_timeouts_total", "LLM invocations that timed out")
         .unwrap()
@@ -149,6 +185,28 @@ pub fn record_llm_failure() {
 
 pub fn record_provider_failure(provider: &str) {
     LLM_PROVIDER_FAILURES.with_label_values(&[provider]).inc();
+}
+
+pub fn record_fallback_attempt(from_provider: &str, to_provider: &str, reason: &str) {
+    LLM_FALLBACK_ATTEMPTS
+        .with_label_values(&[from_provider, to_provider, reason])
+        .inc();
+}
+
+pub fn record_fallback_skipped(reason: &str) {
+    LLM_FALLBACK_SKIPPED.with_label_values(&[reason]).inc();
+}
+
+pub fn record_primary_retry(provider: &str, reason: &str) {
+    LLM_PRIMARY_RETRIES
+        .with_label_values(&[provider, reason])
+        .inc();
+}
+
+pub fn record_primary_retry_exhausted(provider: &str, reason: &str) {
+    LLM_PRIMARY_RETRY_EXHAUSTED
+        .with_label_values(&[provider, reason])
+        .inc();
 }
 
 pub fn record_llm_timeout() {

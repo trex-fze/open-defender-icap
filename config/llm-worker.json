@@ -24,7 +24,13 @@
   "routing": {
     "default": "local-lmstudio",
     "fallback": "openai-fallback",
-    "policy": "failover"
+    "policy": "safe",
+    "primary_retry_max": 3,
+    "primary_retry_backoff_ms": 500,
+    "primary_retry_max_backoff_ms": 5000,
+    "retryable_status_codes": [408, 429, 500, 502, 503, 504],
+    "fallback_cooldown_secs": 30,
+    "fallback_max_per_min": 30
   },
   "metrics_host": "0.0.0.0",
   "metrics_port": 19015
