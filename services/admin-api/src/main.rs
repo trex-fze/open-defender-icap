@@ -262,6 +262,10 @@ impl AppState {
         self.reporting_client.as_ref()
     }
 
+    pub fn cache_invalidator(&self) -> Option<&CacheInvalidator> {
+        self.cache_invalidator.as_deref()
+    }
+
     pub async fn log_iam_event<T>(
         &self,
         action: &str,

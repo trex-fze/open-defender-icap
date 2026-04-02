@@ -30,6 +30,9 @@ export const DiagnosticsCachePage = () => {
           <span style={{ display: 'block', marginBottom: '0.35rem' }}>Cache key</span>
           <input className="search-input" value={key} onChange={(event) => setKey(event.target.value)} />
         </label>
+        <p style={{ marginTop: '0.5rem', marginBottom: 0, color: 'var(--muted)' }}>
+          Use normalized keys such as <code>subdomain:www.instagram.com</code> or <code>domain:example.com</code>.
+        </p>
         <div style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
           <button className="cta-button" disabled={loading || !canCallApi || !key.trim()}>
             {loading ? 'Loading...' : 'Lookup'}

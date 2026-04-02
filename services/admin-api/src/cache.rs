@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use redis::AsyncCommands;
 use serde::Serialize;
+use serde_json::Value;
 use tracing::warn;
 
 const DEFAULT_CHANNEL: &str = "od:cache:invalidate";
@@ -44,6 +46,27 @@ impl CacheInvalidator {
 
     pub async fn invalidate_key(&self, key: &str) -> Result<()> {
         self.delete_key(key).await
+    }
+
+    pub async fn inspect_key(&self, key: &str) -> Result<Option<(Value, Option<DateTime<Utc>>)>> {
+        if key.trim().is_empty() {
+            return Ok(None);
+        }
+
+        let mut conn = self.client.get_async_connection().await?;
+        let raw: Option<String> = conn.get(key).await?;
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+
+        let ttl_seconds: i64 = redis::cmd("TTL").arg(key).query_async(&mut conn).await?;
+        let expires_at = if ttl_seconds > 0 {
+            Some(Utc::now() + ChronoDuration::seconds(ttl_seconds))
+        } else {
+            None
+        };
+        let value = serde_json::from_str::<Value>(&raw).unwrap_or(Value::String(raw));
+        Ok(Some((value, expires_at)))
     }
 
     async fn delete_scope(&self, scope_type: &str, scope_value: &str) -> Result<()> {
