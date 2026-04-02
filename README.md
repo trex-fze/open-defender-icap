@@ -64,7 +64,7 @@ flowchart LR
     EI -->|Page fetch job| PSTREAM
     PSTREAM --> PF
     PF -->|HTTP crawl| CRAWL --> PF
-    PF -->|Store HTML context [HEAD/TITLE/BODY]| PAGE
+    PF -->|Store HTML context HEAD TITLE BODY| PAGE
 
     TAX --> AA
     TAX --> PE

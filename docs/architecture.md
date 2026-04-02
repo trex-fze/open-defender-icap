@@ -86,7 +86,7 @@ flowchart LR
 
     EI -->|Page fetch job| PSTREAM
     PSTREAM --> PF -->|HTTP crawl| CRAWL --> PF
-    PF -->|Store [HEAD]/[TITLE]/[BODY] context| PAGE
+    PF -->|Store HEAD TITLE BODY context| PAGE
 
     TAX -->|Canonical IDs + aliases| I
     TAX -->|Canonical IDs + aliases| D
