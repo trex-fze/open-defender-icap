@@ -22,6 +22,8 @@ pub struct IcapConfig {
     pub job_queue: Option<JobQueueConfig>,
     #[serde(default)]
     pub page_fetch_queue: Option<PageFetchQueueConfig>,
+    #[serde(default)]
+    pub admin_api: Option<AdminApiConfig>,
 }
 
 pub fn load() -> anyhow::Result<IcapConfig> {
@@ -79,4 +81,11 @@ fn default_page_fetch_stream() -> String {
 
 const fn default_page_fetch_ttl() -> i32 {
     21_600
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct AdminApiConfig {
+    pub base_url: String,
+    #[serde(default)]
+    pub admin_token: Option<String>,
 }

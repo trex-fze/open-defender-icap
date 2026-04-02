@@ -3,6 +3,7 @@ mod config;
 mod icap;
 mod jobs;
 mod metrics;
+mod pending_client;
 mod policy_client;
 
 use anyhow::Result;
@@ -14,10 +15,11 @@ use tracing::{error, info, instrument, warn, Level};
 
 use cache::CacheClient;
 use common_types::{
-    normalizer::normalize_target, EntityLevel, NormalizedTarget, PageFetchJob, PolicyAction,
-    PolicyDecision, PolicyDecisionRequest,
+    normalizer::normalize_target, ClassificationVerdict, EntityLevel, NormalizedTarget,
+    PageFetchJob, PolicyAction, PolicyDecision, PolicyDecisionRequest,
 };
 use jobs::{ClassificationJob, JobPublisher, PageFetchPublisher};
+use pending_client::PendingClient;
 use policy_client::PolicyClient;
 use url::Url;
 
@@ -53,6 +55,12 @@ async fn main() -> Result<()> {
         })
         .transpose()?;
 
+    let pending_client = cfg
+        .admin_api
+        .as_ref()
+        .map(|admin| PendingClient::new(admin.base_url.clone(), admin.admin_token.clone()))
+        .transpose()?;
+
     let metrics_host = cfg.metrics_host.clone();
     let metrics_port = cfg.metrics_port;
     tokio::spawn(async move {
@@ -68,6 +76,7 @@ async fn main() -> Result<()> {
         let policy_client = Arc::clone(&policy_client);
         let job_publisher = job_publisher.clone();
         let page_fetch_publisher = page_fetch_publisher.clone();
+        let pending_client = pending_client.clone();
         info!(target = "svc-icap", ?peer, "accepted connection");
         tokio::spawn(async move {
             if let Err(err) = handle_connection(
@@ -77,6 +86,7 @@ async fn main() -> Result<()> {
                 policy_client,
                 job_publisher,
                 page_fetch_publisher,
+                pending_client,
             )
             .await
             {
@@ -94,6 +104,7 @@ async fn handle_connection(
     policy_client: Arc<PolicyClient>,
     job_publisher: Option<JobPublisher>,
     page_fetch_publisher: Option<PageFetchPublisher>,
+    pending_client: Option<PendingClient>,
 ) -> Result<()> {
     let roundtrip_start = tokio::time::Instant::now();
     let mut buf = vec![0u8; cfg.preview_size.max(1024)];
@@ -166,7 +177,7 @@ async fn handle_connection(
     let classification_required = should_require_content_pending(
         cfg.require_content,
         &decision.action,
-        decision.verdict.is_some(),
+        decision.verdict.as_ref(),
     );
     let requires_pending = classification_required;
     let base_url = derive_base_url(&normalized.full_url)
@@ -194,6 +205,19 @@ async fn handle_connection(
     }
 
     if requires_pending {
+        if let Some(client) = &pending_client {
+            if let Err(err) = client
+                .upsert_pending(&normalized.normalized_key, base_url.as_deref())
+                .await
+            {
+                warn!(
+                    target = "svc-icap",
+                    %err,
+                    normalized_key = %normalized.normalized_key,
+                    "failed to upsert pending classification request"
+                );
+            }
+        }
         if let Some(publisher) = &page_fetch_publisher {
             let job = PageFetchJob {
                 normalized_key: normalized.normalized_key.clone(),
@@ -442,10 +466,13 @@ fn is_inheritable_ancestor_action(action: &PolicyAction) -> bool {
 fn should_require_content_pending(
     require_content: bool,
     action: &PolicyAction,
-    has_verdict: bool,
+    verdict: Option<&ClassificationVerdict>,
 ) -> bool {
+    let has_unknown_fallback = verdict
+        .map(|v| v.primary_category.eq_ignore_ascii_case("unknown-unclassified"))
+        .unwrap_or(false);
     require_content
-        && !has_verdict
+        && (verdict.is_none() || has_unknown_fallback)
         && matches!(action, PolicyAction::Allow | PolicyAction::Monitor)
 }
 
@@ -511,11 +538,33 @@ mod icap_response_tests {
 
     #[test]
     fn pending_required_only_when_verdict_missing() {
-        assert!(should_require_content_pending(true, &PolicyAction::Allow, false));
-        assert!(should_require_content_pending(true, &PolicyAction::Monitor, false));
-        assert!(!should_require_content_pending(true, &PolicyAction::Allow, true));
-        assert!(!should_require_content_pending(true, &PolicyAction::Monitor, true));
-        assert!(!should_require_content_pending(true, &PolicyAction::Block, false));
-        assert!(!should_require_content_pending(false, &PolicyAction::Allow, false));
+        let social_verdict = ClassificationVerdict {
+            primary_category: "social-media".into(),
+            subcategory: "photo-sharing".into(),
+            risk_level: "medium".into(),
+            confidence: 0.8,
+            recommended_action: PolicyAction::Monitor,
+        };
+        let unknown_verdict = ClassificationVerdict {
+            primary_category: "unknown-unclassified".into(),
+            subcategory: "Allow everything else".into(),
+            risk_level: "medium".into(),
+            confidence: 0.5,
+            recommended_action: PolicyAction::Allow,
+        };
+
+        assert!(should_require_content_pending(true, &PolicyAction::Allow, None));
+        assert!(should_require_content_pending(
+            true,
+            &PolicyAction::Allow,
+            Some(&unknown_verdict)
+        ));
+        assert!(!should_require_content_pending(
+            true,
+            &PolicyAction::Allow,
+            Some(&social_verdict)
+        ));
+        assert!(!should_require_content_pending(true, &PolicyAction::Block, None));
+        assert!(!should_require_content_pending(false, &PolicyAction::Allow, None));
     }
 }

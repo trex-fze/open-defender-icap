@@ -17,5 +17,9 @@
     "redis_url": "redis://redis:6379",
     "stream": "page-fetch-jobs",
     "ttl_seconds": 21600
+  },
+  "admin_api": {
+    "base_url": "http://admin-api:19000",
+    "admin_token": "changeme-admin"
   }
 }

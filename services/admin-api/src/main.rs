@@ -2,6 +2,7 @@ mod audit;
 mod auth;
 mod cache;
 mod cache_entries_api;
+mod classifications;
 mod classification_requests;
 mod cli_logs;
 mod iam;
@@ -28,7 +29,7 @@ use axum::{
     Extension, Json, Router,
 };
 use iam::IamService;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{self, Value};
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::{
@@ -201,6 +202,36 @@ impl AppState {
         }
         info!(target = "svc-admin", endpoint, "policy-engine reload triggered");
         Ok(())
+    }
+
+    pub async fn evaluate_policy_decision<T, R>(&self, payload: &T) -> Result<R>
+    where
+        T: Serialize + ?Sized,
+        R: DeserializeOwned,
+    {
+        let endpoint = format!("{}/api/v1/decision", self.policy_engine_url);
+        let mut request = self.http_client.post(&endpoint).json(payload);
+        if let Some(token) = self.policy_engine_admin_token.as_deref() {
+            request = request.header("X-Admin-Token", token);
+        }
+        let response = request
+            .send()
+            .await
+            .with_context(|| format!("failed to call policy-engine decision at {}", endpoint))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "policy-engine decision failed with status {} body={}",
+                status,
+                body
+            ));
+        }
+        let parsed = response
+            .json::<R>()
+            .await
+            .context("failed to decode policy decision response")?;
+        Ok(parsed)
     }
 
     pub async fn invalidate_cache_key(&self, cache_key: &str) {
@@ -498,9 +529,22 @@ async fn main() -> Result<()> {
             "/api/v1/classifications/pending",
             get(classification_requests::list_pending),
         )
+        .route("/api/v1/classifications", get(classifications::list))
+        .route(
+            "/api/v1/classifications/:normalized_key",
+            delete(classifications::delete).patch(classifications::update),
+        )
         .route(
             "/api/v1/classifications/:normalized_key/unblock",
             post(classification_requests::manual_unblock),
+        )
+        .route(
+            "/api/v1/classifications/:normalized_key/manual-classify",
+            post(classification_requests::manual_classify),
+        )
+        .route(
+            "/api/v1/classifications/:normalized_key/pending",
+            post(classification_requests::upsert_pending),
         )
         .route(
             "/api/v1/iam/users",
@@ -628,7 +672,7 @@ fn apply_cors_headers(
             .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
         response.headers_mut().insert(
             header::ACCESS_CONTROL_ALLOW_METHODS,
-            HeaderValue::from_static("GET,POST,PUT,DELETE,OPTIONS"),
+            HeaderValue::from_static("GET,POST,PUT,PATCH,DELETE,OPTIONS"),
         );
         response.headers_mut().insert(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
