@@ -16,7 +16,7 @@ export const DiagnosticsPageContentPage = () => {
       <div className="page-header">
         <div>
           <p className="section-title">Diagnostics</p>
-          <h2 style={{ margin: 0 }}>Page Content Inspector</h2>
+          <h2 style={{ margin: 0 }}>Page Content Inspector (Markdown)</h2>
         </div>
       </div>
 
@@ -25,6 +25,9 @@ export const DiagnosticsPageContentPage = () => {
           <span style={{ display: 'block', marginBottom: '0.35rem' }}>Normalized key</span>
           <input className="search-input" value={key} onChange={(event) => setKey(event.target.value)} />
         </label>
+        <p style={{ marginTop: '0.5rem', marginBottom: 0, color: 'var(--muted)' }}>
+          This view shows Markdown/plain-text excerpt stored for LLM classification.
+        </p>
         <div style={{ marginTop: '1rem' }}>
           <button className="cta-button" disabled={!canCallApi || !key.trim() || loading}>
             {loading ? 'Loading...' : 'Lookup'}
@@ -55,6 +58,12 @@ export const DiagnosticsPageContentPage = () => {
           </p>
           <p style={{ margin: '0.3rem 0' }}>
             <strong>Chars:</strong> {record.char_count ?? 0}
+          </p>
+          <p style={{ margin: '0.3rem 0' }}>
+            <strong>Content Type:</strong> {record.content_type ?? 'text/markdown'}
+          </p>
+          <p style={{ margin: '0.3rem 0' }}>
+            <strong>Excerpt Format:</strong> {record.excerpt_format ?? 'unknown'}
           </p>
 
           <pre

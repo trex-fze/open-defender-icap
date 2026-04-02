@@ -16,6 +16,7 @@ export type PageContentRecord = {
   expires_at: string;
   excerpt?: string;
   excerpt_truncated: boolean;
+  excerpt_format?: string;
 };
 
 export type PageContentSummary = {
@@ -60,7 +61,7 @@ export const usePageContentInspector = () => {
       setHistory(versions);
     } catch (err) {
       if (err instanceof AdminApiError && err.status === 404) {
-        setError('No fetched page content exists yet for this key. Trigger traffic first and retry.');
+        setError('No fetched markdown content exists yet for this key. Trigger traffic first and retry.');
       } else {
         setError(err instanceof Error ? err.message : 'Failed to fetch page content');
       }

@@ -45,6 +45,7 @@ pub struct PageContentRecord {
     pub expires_at: DateTime<Utc>,
     pub excerpt: Option<String>,
     pub excerpt_truncated: bool,
+    pub excerpt_format: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -158,6 +159,12 @@ fn map_content_row(row: PgRow, excerpt_limit: usize) -> Result<PageContentRecord
         .map(|(value, truncated)| (Some(value), truncated))
         .unwrap_or((None, false));
 
+    let excerpt_format = if excerpt.is_some() {
+        Some("markdown".to_string())
+    } else {
+        None
+    };
+
     Ok(PageContentRecord {
         normalized_key: row.try_get("normalized_key")?,
         fetch_version: row.try_get("fetch_version")?,
@@ -172,6 +179,7 @@ fn map_content_row(row: PgRow, excerpt_limit: usize) -> Result<PageContentRecord
         expires_at: row.try_get("expires_at")?,
         excerpt,
         excerpt_truncated,
+        excerpt_format,
     })
 }
 

@@ -1706,14 +1706,14 @@ fn build_prompt(
     if let Some(excerpt) = job_excerpt(job) {
         let (formatted_excerpt, truncated) = format_html_context(excerpt);
         sections.push(format!(
-            "Homepage HTML Context (head + title + body, {} chars{}):\\n{}",
+            "Homepage Content Excerpt (markdown/plain text, {} chars{}):\\n{}",
             formatted_excerpt.chars().count(),
             if truncated { ", truncated" } else { "" },
             formatted_excerpt
         ));
     } else {
         sections.push(
-            "Homepage HTML Context: unavailable (content fetch pending, failed, or disabled)."
+            "Homepage Content Excerpt: unavailable (content fetch pending, failed, or disabled)."
                 .into(),
         );
     }
@@ -2004,7 +2004,7 @@ mod tests {
         let prompt = build_prompt(&job, &taxonomy_prompt, None);
         assert!(prompt.contains("Allowed Taxonomy IDs"));
         assert!(prompt.contains("social-media"));
-        assert!(prompt.contains("Homepage HTML Context"));
+        assert!(prompt.contains("Homepage Content Excerpt"));
         assert!(prompt.contains("captured page excerpt"));
         assert!(prompt.contains("Content Hash: abc123"));
         assert!(prompt.contains("Content Version: 2"));
@@ -2028,7 +2028,7 @@ mod tests {
             content_language: None,
         };
         let prompt = build_prompt(&job, &taxonomy_prompt, None);
-        assert!(prompt.contains("Homepage HTML Context: unavailable"));
+        assert!(prompt.contains("Homepage Content Excerpt: unavailable"));
     }
 
     #[test]

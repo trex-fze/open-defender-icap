@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from functools import lru_cache
 from typing import Optional
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
@@ -45,8 +46,8 @@ class CrawlResponse(BaseModel):
     normalized_key: str
     url: HttpUrl
     status: str
+    markdown_text: str
     cleaned_text: str
-    raw_html: str
     content_type: str
     language: Optional[str]
     title: Optional[str]
@@ -155,16 +156,9 @@ async def run_crawl(request: CrawlRequest) -> CrawlResponse:
             detail=f"crawl4ai returned unsuccessful result: {result.error_message or 'crawl failed'}",
         )
 
-    cleaned_text = extract_text(result) or ""
-    cleaned_text = cleaned_text.strip()
-    if len(cleaned_text) > request.max_text_chars:
-        cleaned_text = cleaned_text[: request.max_text_chars]
-
-    raw_html = result.cleaned_html or result.html or ""
-    if len(raw_html.encode("utf-8")) > request.max_html_bytes:
-        raw_html = raw_html.encode("utf-8")[: request.max_html_bytes].decode(
-            "utf-8", errors="ignore"
-        )
+    markdown_text = extract_markdown_text(result).strip()
+    if len(markdown_text) > request.max_text_chars:
+        markdown_text = markdown_text[: request.max_text_chars]
 
     content_type = (
         result.response_headers.get("content-type")
@@ -180,8 +174,8 @@ async def run_crawl(request: CrawlRequest) -> CrawlResponse:
         normalized_key=request.normalized_key,
         url=request.url,
         status="ok",
-        cleaned_text=cleaned_text,
-        raw_html=raw_html,
+        markdown_text=markdown_text,
+        cleaned_text=markdown_text,
         content_type=content_type or "text/html",
         language=to_string_or_none((result.metadata or {}).get("language")),
         title=to_string_or_none((result.metadata or {}).get("title")),
@@ -190,12 +184,17 @@ async def run_crawl(request: CrawlRequest) -> CrawlResponse:
     )
 
 
-def extract_text(result) -> str:
+def extract_markdown_text(result) -> str:
     if result.markdown is not None:
-        return result.markdown.raw_markdown
-    if result.cleaned_html:
-        return result.cleaned_html
-    return result.html or ""
+        raw_markdown = to_string_or_none(getattr(result.markdown, "raw_markdown", None))
+        if raw_markdown:
+            return raw_markdown
+    html_source = result.cleaned_html or result.html or ""
+    if not html_source:
+        return ""
+    without_tags = re.sub(r"(?is)<[^>]+>", " ", html_source)
+    normalized = re.sub(r"\s+", " ", without_tags)
+    return normalized.strip()
 
 
 def to_string_or_none(value) -> Optional[str]:

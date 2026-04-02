@@ -6,7 +6,6 @@ use config_core::load_config;
 use metrics::MetricsServer;
 use redis::streams::{StreamReadOptions, StreamReadReply};
 use redis::AsyncCommands;
-use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -94,8 +93,8 @@ const fn default_pool_size() -> u32 {
 #[allow(dead_code)]
 struct CrawlApiResponse {
     status: String,
+    markdown_text: String,
     cleaned_text: String,
-    raw_html: String,
     content_type: String,
     language: Option<String>,
     title: Option<String>,
@@ -297,28 +296,32 @@ impl PageFetcher {
     ) -> Result<()> {
         use sha2::{Digest, Sha256};
 
-        let raw_bytes = crawl.raw_html.as_bytes();
-        let text_excerpt = build_html_context(&crawl.raw_html, self.cfg.max_html_context_chars);
+        let text_excerpt = build_markdown_excerpt(
+            &crawl.markdown_text,
+            &crawl.cleaned_text,
+            crawl.title.as_deref(),
+            self.cfg.max_html_context_chars,
+        );
+        let excerpt_bytes = text_excerpt.as_bytes();
         let hash = Sha256::digest(text_excerpt.as_bytes());
         let hash_hex = format!("{:x}", hash);
         let version = self.next_version(&job.normalized_key).await?;
 
         sqlx::query(
             r#"INSERT INTO page_contents
-                (id, normalized_key, fetch_version, content_type, content_hash, raw_bytes,
+                (id, normalized_key, fetch_version, content_type, content_hash,
                  text_excerpt, char_count, byte_count, fetch_status, fetch_reason,
                  ttl_seconds, fetched_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'ok', $10, $11, NOW())"#,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ok', $9, $10, NOW())"#,
         )
         .bind(Uuid::new_v4())
         .bind(&job.normalized_key)
         .bind(version)
         .bind(&crawl.content_type)
         .bind(&hash_hex)
-        .bind(raw_bytes)
         .bind(&text_excerpt)
         .bind(text_excerpt.chars().count() as i32)
-        .bind(raw_bytes.len() as i32)
+        .bind(excerpt_bytes.len() as i32)
         .bind(&job.hostname)
         .bind(ttl_seconds)
         .execute(&self.pool)
@@ -337,34 +340,39 @@ impl PageFetcher {
     }
 }
 
-fn build_html_context(raw_html: &str, max_chars: usize) -> String {
-    let head = extract_html_section(raw_html, "head").unwrap_or_default();
-    let title = extract_html_section(raw_html, "title").unwrap_or_default();
-    let body = extract_html_section(raw_html, "body").unwrap_or_else(|| raw_html.to_string());
+fn build_markdown_excerpt(
+    markdown_text: &str,
+    cleaned_text: &str,
+    title: Option<&str>,
+    max_chars: usize,
+) -> String {
+    let base = if !markdown_text.trim().is_empty() {
+        markdown_text
+    } else {
+        cleaned_text
+    };
 
-    let title_budget = max_chars.min(2_000);
-    let head_budget = max_chars.saturating_sub(title_budget).min(30_000);
-    let used_title = truncate_chars(&title, title_budget);
-    let used_head = truncate_chars(&head, head_budget);
-    let remaining = max_chars
-        .saturating_sub(used_title.chars().count())
-        .saturating_sub(used_head.chars().count());
-    let used_body = truncate_chars(&body, remaining);
+    let mut normalized_lines = Vec::new();
+    for line in base.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !normalized_lines.last().map(|l: &String| l.is_empty()).unwrap_or(false) {
+                normalized_lines.push(String::new());
+            }
+            continue;
+        }
+        normalized_lines.push(trimmed.to_string());
+    }
+    let mut excerpt = normalized_lines.join("\n").trim().to_string();
+    if excerpt.is_empty() {
+        excerpt = base.trim().to_string();
+    }
 
-    format!(
-        "[HEAD]\n{}\n[/HEAD]\n[TITLE]\n{}\n[/TITLE]\n[BODY]\n{}\n[/BODY]",
-        used_head, used_title, used_body
-    )
-}
+    if let Some(title) = title.map(str::trim).filter(|value| !value.is_empty()) {
+        excerpt = format!("# {}\n\n{}", title, excerpt);
+    }
 
-fn extract_html_section(raw_html: &str, tag: &str) -> Option<String> {
-    let pattern = format!(r"(?is)<{tag}\b[^>]*>(.*?)</{tag}>");
-    let regex = Regex::new(&pattern).ok()?;
-    let captures = regex.captures(raw_html)?;
-    captures
-        .get(1)
-        .map(|m| m.as_str().trim().to_string())
-        .filter(|s| !s.is_empty())
+    truncate_chars(&excerpt, max_chars)
 }
 
 fn truncate_chars(value: &str, limit: usize) -> String {
@@ -397,24 +405,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_html_context_extracts_head_title_body() {
-        let html = r#"<html><head><meta charset=\"utf-8\"><title>Example</title></head><body><h1>Hello</h1></body></html>"#;
-        let context = build_html_context(html, 10_000);
-        assert!(context.contains("[HEAD]"));
-        assert!(context.contains("meta charset"));
-        assert!(context.contains("[TITLE]"));
-        assert!(context.contains("Example"));
-        assert!(context.contains("[BODY]"));
-        assert!(context.contains("<h1>Hello</h1>"));
+    fn build_markdown_excerpt_prefers_markdown_and_title() {
+        let excerpt = build_markdown_excerpt(
+            "## Welcome\n\nThis is **content**",
+            "fallback text",
+            Some("Example"),
+            10_000,
+        );
+        assert!(excerpt.contains("# Example"));
+        assert!(excerpt.contains("## Welcome"));
+        assert!(excerpt.contains("**content**"));
     }
 
     #[test]
-    fn build_html_context_respects_limit() {
-        let html = format!(
-            "<html><head><title>T</title></head><body>{}</body></html>",
-            "a".repeat(5_000)
-        );
-        let context = build_html_context(&html, 1_000);
-        assert!(context.chars().count() <= 1_100);
+    fn build_markdown_excerpt_respects_limit() {
+        let markdown = format!("{}", "a".repeat(5_000));
+        let excerpt = build_markdown_excerpt(&markdown, "", None, 1_000);
+        assert!(excerpt.chars().count() <= 1_000);
     }
 }
