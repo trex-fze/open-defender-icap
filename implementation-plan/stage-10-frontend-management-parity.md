@@ -26,7 +26,7 @@ Implement in five phases to reduce risk and keep a continuously usable UI:
 | S10-T4 | Fix route inconsistencies and placeholders (for example `/policies/new`) | FE Routing | S10-T1 | clean route map and nav gating |
 | S10-T5 | Policy create/update/validate/publish flows | Policies | S10-T2 | full policy lifecycle UI |
 | S10-T6 | Override CRUD plus filters/search | Overrides | S10-T2 | create/edit/delete workflows |
-| S10-T7 | Review queue resolve actions plus notes and filters | Review | S10-T2 | resolve workflows |
+| S10-T7 | Domain Allow / Deny workflow hardening | Overrides | S10-T2 | constrained domain-only allow/block operations |
 | S10-T8 | Taxonomy category/subcategory CRUD | Taxonomy | S10-T2 | live taxonomy management |
 | S10-T9 | Pending queue hardening plus richer actions UX | Pending | S10-T2 | robust unblock/retry experience |
 | S10-T10 | Page content inspector (latest plus history) | Diagnostics | S10-T2 | new diagnostics page |
@@ -52,7 +52,7 @@ Implement in five phases to reduce risk and keep a continuously usable UI:
 
 - Scope: S10-T5, S10-T6, S10-T7, S10-T8
 - Exit criteria:
-  - policy/override/review/taxonomy fully manageable via UI
+  - policy/domain allow-deny/taxonomy fully manageable via UI
   - mutation auditability observable through backend data
 
 ### Phase C - Diagnostics Parity (Sprint 3)
@@ -78,7 +78,6 @@ Implement in five phases to reduce risk and keep a continuously usable UI:
 
 - [ ] `GET/POST/PUT /api/v1/policies`, `POST /api/v1/policies/validate`, `POST /api/v1/policies/:id/publish`
 - [ ] `GET/POST/PUT/DELETE /api/v1/overrides`
-- [ ] `GET /api/v1/review-queue`, `POST /api/v1/review-queue/:id/resolve`
 - [ ] `GET/POST/PUT/DELETE /api/v1/taxonomy/categories`
 - [ ] `GET/POST/PUT/DELETE /api/v1/taxonomy/subcategories`
 - [ ] `GET /api/v1/classifications/pending`, `POST /api/v1/classifications/:normalized_key/unblock`
@@ -99,7 +98,7 @@ Implement in five phases to reduce risk and keep a continuously usable UI:
 
 - Policy draft create/edit/validate/publish.
 - Override create/update/delete.
-- Review resolve.
+- Domain allow/deny create/update/delete.
 - Taxonomy create/update/delete.
 - Pending unblock.
 - Page content lookup + history.

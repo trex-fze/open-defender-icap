@@ -3,8 +3,8 @@
 **Parent Sections**: `docs/engine-adaptor-spec.md` §§13, 14, 18, 19, 23.
 
 ## Objectives
-1. Expand Admin API with policy, override, review, reporting, cache inspection endpoints.
-2. Build React admin UI routes (dashboards, investigations, policy mgmt, review queue, health).
+1. Expand Admin API with policy, override, reporting, cache inspection endpoints.
+2. Build React admin UI routes (dashboards, investigations, policy mgmt, allow/deny list, health).
 3. Implement CLI (`odctl`) commands for env validation, policy/override import-export, cache ops, smoke tests.
 4. Enforce RBAC/SSO (OIDC) across API/UI/CLI.
 
@@ -13,7 +13,7 @@
 - [x] React UI navigation + role-aware views per Spec §18 (live hooks w/ mock fallback, role-aware routing, gradients/typography implemented).
 - [x] CLI command tree per Spec §19 with table/json output (clap-based `odctl` covering policy, override, review, cache, reporting, logs, smoke).
 - [x] Auth integration (OIDC flows, token storage) – Spec §§18–19 (Admin API enforcing HS256 JWTs, React AuthProvider storing access tokens, `odctl auth login` implementing OIDC device flow with refreshable sessions).
-- [x] Unit + e2e tests (React Testing Library, Cypress, CLI integration) – Spec §25 (Vitest suites cover auth/context/hooks, odctl integration tests mock Admin API, and Cypress runs login/dashboard/investigations/policies/overrides/review queue/reports with axe serious+critical.)
+- [x] Unit + e2e tests (React Testing Library, Cypress, CLI integration) – Spec §25 (Vitest suites cover auth/context/hooks, odctl integration tests mock Admin API, and Cypress runs login/dashboard/investigations/policies/overrides/reports with axe serious+critical.)
 - [x] Accessibility + UX guidelines (fonts, gradients, responsive) – Spec §18 instructions (contrast polish applied, focus styles for scrollable tables, typography/color tokens match RFC, axe suite passing).
 
 ## Admin API Contract (Spec §23)
@@ -26,8 +26,6 @@
 | Policies | POST | `/api/v1/policies/:id/publish` | Promote draft to active, snapshot into `classification_versions`, invalidate cache. | `policy-admin` |
 | Policies | POST | `/api/v1/policies/:id/validate` | Dry-run compile DSL against sample traffic; returns lint + impact stats. | `policy-editor`, `policy-admin` |
 | Overrides | GET/POST/PUT/DELETE | `/api/v1/overrides` | Existing endpoints plus filters (`scope_type`, `status`, `creator`, `expires_before`) and `DELETE /api/v1/overrides/bulk` for CSV payloads. | Override roles (unchanged) |
-| Reviews | GET | `/api/v1/review-queue` | Adds pagination, SLA columns, `?status=open|snoozed|resolved`, `expand=classification`. | `policy-viewer`, `policy-admin`, `review-approver` |
-| Reviews | POST | `/api/v1/review-queue/:id/resolve` | Accept/deny recommended action, captures reviewer comment + follow-up TTL, invalidates cache. | `review-approver`, `policy-admin` |
 | Taxonomy | GET/POST/PUT/DELETE | `/api/v1/taxonomy/categories`, `/api/v1/taxonomy/subcategories` | CRUD wrappers around taxonomy tables from migration `0004`. | `policy-editor`, `policy-admin` |
 | Cache | GET | `/api/v1/cache-entries/:key` | Inspect cache entry (value, expires_at, source). | `policy-viewer`, `auditor` |
 | Cache | DELETE | `/api/v1/cache-entries/:key` | Purge cache entry + emit invalidation to Redis stream. | `policy-admin` |
@@ -47,7 +45,6 @@ Shared behaviors:
   - `policy-admin`: publish policies, delete overrides, manage RBAC + tokens.
   - `policy-editor`: edit drafts, taxonomy, overrides, run validations.
   - `policy-viewer`: read-only dashboards, cache inspect, reporting.
-  - `review-approver`: resolve review queue items.
   - `auditor`: read reporting, CLI logs, audit trails.
 - Admin API middleware validates issuer/audience/exp and extracts roles from `roles` array or space-delimited `scope` claim. Expired/invalid tokens return `401`.
 - Browser UI uses Authorization Code + PKCE; CLI uses Device Code with fallback API token. Tokens cached securely (macOS Keychain, Windows Credential Manager, SecretService) along with refresh token expiry so background refresh can occur.
@@ -61,8 +58,7 @@ Shared behaviors:
 | `/dashboard` | KPI tiles (blocked URLs, review SLA, LLM latency) + trend charts bound to reporting aggregates. | `KpiGrid`, `TrendChart`, `SlaGauge` |
 | `/investigations` | Search normalized keys/domains, show classification history, cache entry details, reclassification job status. | `SearchBar`, `Timeline`, `CacheCard` |
 | `/policies`, `/policies/:id` | List view + editor with YAML diff, validation, publish workflow, change log. | `PolicyTable`, `PolicyEditor`, `PublishModal` |
-| `/review-queue` | SLA-colored queue, bulk resolve, context drawer with classification + override info. | `ReviewTable`, `ResolveDrawer`, `BulkToolbar` |
-| `/overrides` | CRUD table with filters, CSV import/export wizard, expiration reminders. | `OverrideTable`, `OverrideForm`, `CsvImporter` |
+| `/overrides` | Domain Allow / Deny CRUD table with filters and expiration reminders. | `OverrideTable`, `OverrideForm` |
 | `/taxonomy` | Category/subcategory management with drag/drop tree + default action picker. | `CategoryTree`, `SubcategoryForm` |
 | `/reports` | Dimension+period filters, chart + table, CSV export. | `ReportFilterBar`, `MetricsChart`, `DownloadButton` |
 | `/settings/rbac` | Role assignment matrix, API token rotation, CLI audit log viewer. | `RoleMatrix`, `ApiTokenList`, `CliLogTable` |
@@ -85,7 +81,7 @@ Design language:
 
 ## Testing & Accessibility (Spec §25)
 - React: unit tests with React Testing Library + Jest for forms, role guards, API hooks.
-- Cypress e2e: login, edit policy, resolve review, override CSV import/export, download report. Screenshots captured for evidence.
+- Cypress e2e: login, edit policy, apply domain allow/deny override, download report. Screenshots captured for evidence.
 - CLI: `assert_cmd` + `wiremock` harness to simulate Admin API responses; device-flow path tested via mocked token endpoint.
 - Accessibility: `axe-core` automated checks, keyboard focus traps, skip-link at top of layout, gradients validated for WCAG AA contrast. Mobile views verified at 375 px and 768 px breakpoints.
 

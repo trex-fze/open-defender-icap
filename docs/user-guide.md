@@ -4,8 +4,8 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 
 ## 1. Personas & Access
 - **Gateway Administrators**: Manage Squid config, ICAP adaptor deployment, SSL bump policies.
-- **Policy Administrators**: Create/modify policies, overrides, review decisions.
-- **SOC Analysts**: Investigate IP/User/Device activity, monitor review queue, respond to alerts.
+- **Policy Administrators**: Create/modify policies, maintain domain allow/deny overrides, manage taxonomy activation.
+- **SOC Analysts**: Investigate IP/User/Device activity, monitor pending sites, respond to alerts.
 - **DevOps/SRE**: Operate services, monitor health/metrics, perform deployments and rollbacks.
 - **CLI Power Users**: Use `odctl` for automation (smoke tests, migrations, cache operations).
 
@@ -36,14 +36,14 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 
 ## 5. Admin API & Overrides
 - Config file: `config/admin-api.json` controls host/port, optional `database_url`, optional `admin_token`, and cache invalidation wiring (`redis_url`, `cache_channel`). Leave `database_url` as `null` for check-ins, but set either `database_url` in the file or `OD_ADMIN_DATABASE_URL`/`DATABASE_URL` env vars in deployment shells; the service refuses to start without one of these values.
-- Cache invalidation: when `redis_url` is configured (or `OD_CACHE_REDIS_URL` env var is set) the Admin API publishes override/review updates to the `cache_channel` (defaults to `od:cache:invalidate`) and deletes the matching Redis keys before returning to the client. Without Redis configured the API logs a warning and skips invalidation, which means cached policy decisions may take up to 5 minutes to expire.
+- Cache invalidation: when `redis_url` is configured (or `OD_CACHE_REDIS_URL` env var is set) the Admin API publishes override/policy updates to the `cache_channel` (defaults to `od:cache:invalidate`) and deletes matching Redis keys before returning to the client. Without Redis configured the API logs a warning and skips invalidation, which means cached policy decisions may take up to 5 minutes to expire.
 - Local authentication (default): set `OD_AUTH_MODE=local`, `OD_LOCAL_AUTH_JWT_SECRET`, and `OD_DEFAULT_ADMIN_PASSWORD`. On first startup, Admin API bootstraps `admin` / `admin@local` with `policy-admin` role using the env password hash.
 - Login endpoint: `POST /api/v1/auth/login` with `{ "username": "admin", "password": "..." }`; use returned bearer token for UI/API calls.
 - Service-account/static tokens remain valid for automation through `X-Admin-Token`.
 - Optional OIDC mode: set `OD_AUTH_MODE=hybrid|oidc` + `OD_OIDC_*` variables to validate external JWTs.
-- Audit logging: every override create/update/delete and review resolution writes to `audit_events` (Postgres) and, when `audit.elastic_url`/`audit.index` (or the `OD_AUDIT_ELASTIC_*` env vars) are set, also ships JSON documents to Elasticsearch for downstream dashboards.
-- Service startup: `cargo run -p admin-api` applies migrations in `services/admin-api/migrations/` and exposes overrides + review queue routes under `/api/v1`. Operators can also run inside Docker by adding the same env vars to the container spec.
-- Metrics: `GET /metrics` exposes Prometheus gauges/counters for review queue depth, SLA compliance, and the `taxonomy_activation_changes_total` counter that increments whenever operators save checkbox state. Configure `metrics.review_sla_seconds` (or `OD_REVIEW_SLA_SECONDS`) to adjust the SLA threshold (default 4 hours).
+- Audit logging: every override create/update/delete writes to `audit_events` (Postgres) and, when `audit.elastic_url`/`audit.index` (or the `OD_AUDIT_ELASTIC_*` env vars) are set, also ships JSON documents to Elasticsearch for downstream dashboards.
+- Service startup: `cargo run -p admin-api` applies migrations in `services/admin-api/migrations/` and exposes overrides, pending-classification, taxonomy, and reporting routes under `/api/v1`. Operators can also run inside Docker by adding the same env vars to the container spec.
+- Metrics: `GET /metrics` exposes Prometheus counters including `taxonomy_activation_changes_total` that increments whenever operators save checkbox state.
 - Health checks: `curl http://localhost:19000/health/ready` (readiness) and `/health/live` (liveness). Use `OD_ADMIN_URL` (default `http://localhost:19000`) to point `odctl override ...` commands at the service.
 
 ## 6. CLI (`odctl`) Usage
@@ -62,8 +62,6 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl migrate run [admin|policy|all]` | Apply Postgres migrations for admin/policy services | Reads `OD_ADMIN_DATABASE_URL` / `OD_POLICY_DATABASE_URL` unless `--admin-url/--policy-url` provided; runs both when target omitted. |
 | `odctl seed policies [file] [name] [created_by]` | Load policy DSL file via Policy API | Defaults to `config/policies.json`, `name=default`; requires admin auth token. |
 | `odctl override update <id> <file>` | PUT override definition | JSON matches Admin API payload; invalidates caches instantly. |
-| `odctl review list` | List pending review queue items | Displays status, normalized key, submitter/assignee. |
-| `odctl review resolve <id> <file>` | Resolve review item via JSON payload | Wraps `/api/v1/review-queue/{id}/resolve`; triggers cache invalidation. |
 | `odctl page show --key <normalized>` | Inspect Crawl4AI excerpts and metadata | Useful when debugging LLM prompts; add `--json` for raw output. |
 | `odctl classification pending` | List sites blocked pending Crawl4AI + LLM verdict | Mirrors `/api/v1/classifications/pending`; shows latest status, base URL, timestamps. |
 | `odctl classification unblock --key <normalized> --action Allow ...` | Manually set a verdict to unblock/deny traffic | Sends `POST /api/v1/classifications/:key/unblock`; requires `policy-editor` role and records reason in audit log. |
@@ -72,7 +70,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 
 ## 7. React Admin UI
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
-- Routes: Dashboard, Investigations, Policies (+ draft create/publish), Review queue (resolve actions), **Pending Sites** (structured manual decision flow), Overrides (CRUD), Taxonomy (read-only canonical listing with checkbox activation toggles), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs).
+- Routes: Dashboard, Investigations, Policies (+ draft create/publish), **Pending Sites** (structured manual decision flow), Allow / Deny list (domain overrides), Taxonomy (read-only canonical listing with checkbox activation toggles), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs).
 - Authentication: local username/password login screen; RBAC controls navigation after token issuance.
 - Build: `npm run build`; deploy static assets behind reverse proxy.
 - Operator runbook and screenshot checklist: `docs/runbooks/stage10-web-admin-operator-runbook.md`.

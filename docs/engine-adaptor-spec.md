@@ -31,7 +31,7 @@
 1. Squid proxies traffic, enforces base ACLs, and delegates policy decisions via ICAP REQMOD/RESPMOD to the Rust adaptor.
 2. ICAP adaptor performs normalization, cache/override/policy lookups, and issues immediate verdicts; unknown cases enqueue async classification jobs while responding with safe temporary actions.
 3. Redis provides shared caches and queues (Streams) ensuring already-classified sites are reused and coordination occurs across adaptor instances.
-4. Postgres persists canonical data (classifications, policies, overrides, audits, review queues, reports).
+4. Postgres persists canonical data (classifications, policies, overrides, audits, reports).
 5. LLM worker and reclassification worker consume Redis Streams, call LLM providers, validate JSON, and write verdicts while updating caches and emitting audit events.
 6. Admin REST API (Axum) aggregates policy, overrides, review, reporting, health endpoints on port 19000; React frontend consumes these APIs on port 19001.
 7. Elasticsearch stores decision logs/events; Kibana provides SOC dashboards emphasizing IP analytics, health, and operations.
@@ -87,12 +87,12 @@ Observability: Prometheus exporters + logs -> Elasticsearch, metrics -> Kibana O
 - **Evidence**: policy DSL spec, compiled policy tests.
 
 ## 6.4 Classification Service (`svc-classify`)
-- **Purpose**: Manage classification records, overrides, review queue, manual actions.
+- **Purpose**: Manage classification records, domain allow/deny overrides, and manual actions.
 - **Responsibilities**: CRUD for classifications, manual overrides, review assignment, classification lookup APIs.
 - **Interfaces**: REST endpoints, Postgres, Redis invalidation pub/sub, Elasticsearch for audit.
 - **Scaling**: Stateless; caches read results; uses optimistic locking on classification versions.
 - **Failure Modes**: conflicting overrides, DB contention, invalid user input.
-- **Logs/Metrics**: override creation, review queue stats, `unknown_classification_rate`.
+- **Logs/Metrics**: override creation, taxonomy activation changes, `unknown_classification_rate`.
 - **Tests**: Unit (CRUD validation), integration (policy engine consumption), security (RBAC).
 - **Evidence**: API responses, audit entries.
 
@@ -205,7 +205,6 @@ For each category: definition, subcategories, sample site types, enterprise acti
 | policy_rules | Atomic rules | rule_id, policy_id, priority, conditions JSONB, outcome | (policy_id, priority) | same as policies | Policy engine | precedence tests |
 | cache_entries | Cache materialization metadata | key, value_json, expires_at, source | (key) | 7d | Cache team | TTL tests |
 | overrides | Manual overrides | override_id, scope (domain/user/ip), action, reason, created_by, expires_at | (scope_type, scope_value) | until expiry + 1y | Classification | workflow tests |
-| review_queue | Pending manual reviews | id, normalized_key, submitter, status, assigned_to, due_at | (status), (assignee,status) | 1y | SOC | SLA tests |
 | reclassification_jobs | Background tasks | job_id, reason, scope, status, created_at, started_at, completed_at | (status) | 1y | Reclass worker | job lifecycle |
 | users/groups/devices | Directory mirror | id, name, attributes, last_synced | (id) | 1y after deletion | IAM | sync tests |
 | ip_intelligence | Metadata per IP | ip, location, owner, device_refs | (ip) | 90d | Reporting | enrichment tests |
@@ -227,10 +226,10 @@ For each category: definition, subcategories, sample site types, enterprise acti
 - **Evaluation Order**: (1) System blocklist, (2) Manual overrides, (3) Allowlist, (4) Device-specific exceptions, (5) User-specific rules, (6) Group rules, (7) Source IP/subnet policies, (8) Location/site policies, (9) Time-of-day schedules, (10) Category/Subcategory decisions, (11) Risk/confidence thresholds, (12) Default tenant outcome.
 - **Allowlist precedence**: highest except for explicit system blocklist (malware).
 - **Unknown handling**: default `monitor` or `warn` per tenant. Optionally `require-approval` for high-risk roles.
-- **Low-confidence**: if confidence <0.6, degrade recommended action to `review` or `monitor` and push to review queue.
+- **Low-confidence**: if confidence <0.6, degrade recommended action to `monitor` and require operator confirmation via Pending Sites or override workflows.
 - **High-risk**: categories 1, 5, 6, 7, 31, 32 override to `block` even if LLM suggested `warn`.
 - **Repeated violations**: track per user/IP; escalate to `require-approval` after N events within window.
-- **Exceptions**: Temporary overrides via review queue; create audit entry with expiration.
+- **Exceptions**: Temporary domain allow/deny overrides; create audit entry with expiration.
 - **Coaching page flow**: For `warn` or `require-approval`, adaptor returns redirect to captive portal with reason, classification summary, override request link.
 - **Auditability**: Response includes `policy_rule_id`, `policy_version`, `trace_id`. All decisions logged to `audit_events`.
 
@@ -267,7 +266,7 @@ For each category: definition, subcategories, sample site types, enterprise acti
   - Device Investigation View: device info, associated IPs, violations.
   - Policy Management: list, edit, preview DSL, simulation tool.
   - Override Management: table of overrides, creation modal, expiration controls.
-  - Review Queue: prioritized list with approve/deny, evidence view.
+  - Domain Allow / Deny list: prioritized manual exceptions with expiry, reason, and audit trail.
   - Classification Lookup: search normalized keys, show history.
   - Report Builder: drag/drop metrics/dimensions, exports CSV/JSON.
   - Audit Trail Viewer: filter by actor/action/time.
@@ -372,7 +371,7 @@ Rules:
 }
 ```
 - **Validation**: JSON schema validation; enforce allowed enums; ensure confidence ∈ [0,1]. On invalid JSON: log, retry once, fallback to deterministic rules + mark `unknown=true`.
-- **Low-confidence handling**: If confidence <0.6, set `recommended_action` to `review`, push to review queue.
+- **Low-confidence handling**: If confidence <0.6, set `recommended_action` to `monitor` and require manual operator follow-up.
 - **Timeout handling**: 5 s for standard model, escalate to premium model with 10 s; on repeated timeout mark as unknown.
 - **Retry logic**: up to 2 attempts, backoff 1s/3s; fallback to heuristics.
 - **Anti-hallucination**: Provide strict schema, verify categories exist, limit context tokens, remove user-supplied prompts via sanitizer. If LLM output contains unrecognized category/subcategory, mark `unknown` and escalate to reviewer.
@@ -484,8 +483,8 @@ Rules:
 ## 20.4 Overrides API
 - `POST /api/v1/overrides`, `GET /api/v1/overrides`, `DELETE /api/v1/overrides/{id}`. Includes scope (domain/user/ip), action, expiry.
 
-## 20.5 Review Queue
-- `GET /api/v1/review-queue?status=pending&assignee=...` returns paged list with metadata. `POST /api/v1/review-queue/{id}/resolve` with verdict.
+## 20.5 Domain Allow / Deny Overrides
+- Manual decisions are managed through `/api/v1/overrides` using `scope_type=domain` and `action=allow|block`.
 
 ## 20.6 Report APIs
 - `GET /api/v1/reports/ip-activity?ip=10.1.1.5&range=24h&metrics=top-blocked` returns aggregated data.

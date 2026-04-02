@@ -45,13 +45,6 @@ All routes require `X-Admin-Token` or a JWT with the listed roles. Pagination pa
 | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/v1/auth/login` | Local username/password login (local/hybrid auth mode). | Public route. | `{ username, password }` | `{ access_token, expires_in, user { id, username, email, roles, permissions, must_change_password } }` |
 
-### Review Queue
-
-| Method | Path | Description | Roles | Request Schema | Response |
-| --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/review-queue` | List reviews (`status`, `assign`, `search` query params). | `review-approver` or `policy-viewer`. | — | Array of `ReviewRecord`. |
-| `POST` | `/api/v1/review-queue/:id/resolve` | Resolve a review entry. | `review-approver`. | `{ status: "approved"\|"rejected"\|..., decided_by?, decision_notes?, decision_action? }`. | Updated `ReviewRecord`. |
-
 ### Embedded Policy Admin (mirror of policy-engine)
 
 | Method | Path | Description | Roles |

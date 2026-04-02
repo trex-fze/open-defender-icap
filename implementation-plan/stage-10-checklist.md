@@ -15,8 +15,7 @@ This checklist tracks implementation progress for Stage 10 and maps directly to 
 
 - [x] Implement policy draft creation flow in UI (`/policies/new`).
 - [x] Implement policy publish action in policy detail page.
-- [x] Implement review resolve actions from Review Queue page.
-- [x] Implement override create/edit/delete flows.
+- [x] Implement domain Allow / Deny create/edit/delete flows.
 - [x] Implement taxonomy category/subcategory live CRUD.
 
 ## Phase C - Diagnostics and Investigations Parity
@@ -35,7 +34,7 @@ This checklist tracks implementation progress for Stage 10 and maps directly to 
 ## Phase E - Quality and Rollout
 
 - [x] Add/expand unit tests for new hooks/pages.
-- [x] Add/expand Cypress flows for policy/review/diagnostics parity.
+- [x] Add/expand Cypress flows for policy/allow-deny/diagnostics parity.
 - [x] Add accessibility pass for forms, dialogs, and action tables.
 - [x] Update operator/user docs with screenshots and runbook steps.
 

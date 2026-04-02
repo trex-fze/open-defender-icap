@@ -6,7 +6,7 @@
 1. Build Redis Stream (or Kafka) queue pipeline for classification jobs.
 2. Implement LLM worker with prompt enforcement, JSON validation, retry/backoff.
 3. Create reclassification worker for TTL/model/taxonomy refresh.
-4. Enforce first-seen placeholder logic + review queue escalation.
+4. Enforce first-seen placeholder logic + pending/manual override escalation.
 
 ## Checklist
 - [x] Queue schema, producer/consumer contracts (Spec §9B, §15). *(Redis stream `classification-jobs` with adaptor publisher + LLM worker consumer.)*

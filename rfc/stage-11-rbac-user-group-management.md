@@ -60,7 +60,6 @@ Retain existing built-in role names for compatibility:
 - `policy-admin`
 - `policy-editor`
 - `policy-viewer`
-- `review-approver`
 - `auditor`
 
 Add internal permission mapping and tie endpoint checks to permissions over time while preserving role constants.

@@ -12,7 +12,7 @@ This document records the design for the next iteration of the containerized dev
 | Service | Compose File(s) | Notes |
 | --- | --- | --- |
 | `redis` | all | Single instance for cache + queues; persistent volume `redis-data`. |
-| `postgres` | all | Stores policies, overrides, review queue; volume `pg-data`. |
+| `postgres` | all | Stores policies, classifications, and domain allow/deny overrides; volume `pg-data`. |
 | `icap-adaptor` | dev/test | Built from `deploy/docker/rust.Dockerfile`; mounts `config/`. Depends on `redis`, `policy-engine`. |
 | `policy-engine` | dev/test | Same image; waits on `postgres`. |
 | `admin-api` | dev/test | Waits on `postgres`, `redis`. Publishes cache invalidations. |

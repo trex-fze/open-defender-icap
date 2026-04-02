@@ -10,7 +10,7 @@ The current React admin UI (`web-admin/`) provides partial visibility and mostly
 
 Current gaps include:
 - Missing CRUD flows for Policies, Overrides, and Taxonomy.
-- Missing Review Queue resolve workflow.
+- Missing streamlined Allow / Deny domain workflow.
 - Missing diagnostics: cache inspection/eviction, page-content inspector/history, CLI logs viewer.
 - Reporting is aggregate-only; the traffic analytics route is not surfaced.
 - Auth in UI is still prototype-oriented (`VITE_ADMIN_TOKEN` fallback), not production-grade OIDC UX.
@@ -37,7 +37,7 @@ Result: operators still rely on CLI for many day-2 operations; UI is not yet a f
 | --- | --- | --- | --- |
 | Policies | list/show/create/update/validate/publish | list/show only | Missing create/edit/validate/publish UX |
 | Overrides | list/create/update/delete | list only | Missing full CRUD + filters |
-| Review Queue | list + resolve | list only | Missing resolve actions and notes |
+| Allow / Deny list | domain override CRUD (`allow|block`) | generic overrides UI | Missing domain-only constrained workflow |
 | Taxonomy | categories/subcategories CRUD | mock display | Missing live CRUD |
 | Reporting | aggregates + traffic summary | aggregates only | Missing traffic report UX |
 | Pending Classifications | list + unblock | list + unblock | Mostly present, needs hardening |
@@ -55,10 +55,8 @@ Result: operators still rely on CLI for many day-2 operations; UI is not yet a f
   - Search-centric analyst view with linked tabs for classification state, page content history, cache state, and override/review context.
 - `/policies` and `/policies/:id`
   - Full lifecycle: create draft, edit rules, validate, publish, and add change notes.
-- `/review-queue`
-  - Resolve flow with decision action + notes + assignee/status filters.
 - `/overrides`
-  - Create/edit/delete, expiry controls, and filter/search.
+  - Domain Allow / Deny list: create/edit/delete, expiry controls, and filter/search.
 - `/classifications/pending`
   - Keep current capabilities and add richer filters, analyst context, and evidence links.
 - `/taxonomy`
@@ -91,7 +89,7 @@ flowchart LR
   METRICS --> ING[event-ingester /metrics]
 
   subgraph Management Flows
-    UI -->|Policies and Overrides and Review and Taxonomy| BFF
+    UI -->|Policies and Allow-Deny and Taxonomy| BFF
     UI -->|Pending unblock| BFF
     UI -->|Cache inspect and evict| BFF
     UI -->|Page content and history| BFF
@@ -116,7 +114,6 @@ flowchart LR
   - `policy-viewer`: read-only investigations/policies/reports/pending.
   - `policy-editor`: policy draft edits, overrides write, taxonomy edits, manual unblock.
   - `policy-admin`: publish policy, override delete, cache evict, full admin operations.
-  - `review-approver`: review resolve workflows.
   - `auditor`: reports and CLI logs.
 - Introduce robust session handling:
   - access token refresh handling
@@ -142,7 +139,7 @@ flowchart LR
 - Cypress coverage for:
   - policy draft -> validate -> publish
   - override CRUD
-  - review resolve
+  - domain allow/deny create-update-delete
   - taxonomy CRUD
   - pending unblock
   - cache lookup/delete

@@ -7,7 +7,7 @@ This runbook describes how operators validate Stage 10 management parity in the 
 - Stack is running (`make compose-up` or `docker compose up -d --build`)
 - Admin API is healthy (`http://localhost:19000/health/ready`)
 - Web admin is reachable (`http://localhost:19001`)
-- User has a token with at least `policy-admin` and `review-approver` for full workflow testing
+- User has a token with at least `policy-admin` for full workflow testing
 
 ## Environment setup
 
@@ -34,32 +34,28 @@ npx start-server-and-test "npm run dev" http://127.0.0.1:19001 "npx cypress run 
    - Create a draft with name/version/notes
    - Confirm redirect to policy detail
    - Publish draft and verify success state
-2. **Review queue decisions**
-   - Go to `/review-queue`
-   - Approve one item and reject one item
-   - Confirm success message + row refresh
-3. **Pending classifications**
+2. **Pending classifications**
    - Go to `/classifications/pending`
    - Open manual decision panel
    - Apply decision with action/risk/reason
    - Confirm update message and queue refresh
-4. **Overrides CRUD**
+3. **Allow / Deny list CRUD**
    - Go to `/overrides`
-   - Create override, edit it, then delete it
+   - Create domain allow/block entry, edit it, then delete it
    - Confirm each mutation with success feedback
-5. **Taxonomy activation**
+4. **Taxonomy activation**
    - Go to `/taxonomy`
    - Toggle a category and a subcategory checkbox (locked entries should remain disabled)
    - Click **Save** and confirm the success banner
    - Click **Reset** and verify the state matches the persisted profile
-6. **Diagnostics**
+5. **Diagnostics**
    - `/diagnostics/page-content`: lookup key and verify latest + history
    - `/diagnostics/cache`: lookup key and evict cache entry
-7. **Audit and reporting**
+6. **Audit and reporting**
    - `/settings/rbac`: load CLI logs (optional operator filter)
    - `/reports`: change dimension/range/top filters, verify traffic summary, export CSV
-8. **Ops status**
-   - `/dashboard`: verify pending/review counts and ops source badge (`live`, `partial`, or `mock`)
+7. **Ops status**
+   - `/dashboard`: verify pending count and ops source badge (`live`, `partial`, or `mock`)
 
 ## Taxonomy Lockdown Monitoring (Stage 12)
 
@@ -96,9 +92,8 @@ Document every rollout/rollback in the release notes with the taxonomy version s
 Capture one screenshot for each of the following and attach to release evidence:
 
 - Policy draft create form and publish confirmation
-- Review queue action buttons and resolve confirmation
 - Pending decision panel before and after apply
-- Overrides form and table row operations
+- Allow / Deny form and table row operations
 - Taxonomy category/subcategory edit state
 - Page content diagnostics with history table
 - Cache diagnostics lookup + evict confirmation
@@ -109,15 +104,14 @@ Capture one screenshot for each of the following and attach to release evidence:
 Store screenshots under `docs/evidence/stage10-web-admin/` using this naming convention:
 
 - `01-policy-draft.png`
-- `02-review-resolve.png`
-- `03-pending-decision.png`
-- `04-overrides-crud.png`
-- `05-taxonomy-activation.png`
-- `06-page-content-diagnostics.png`
-- `07-cache-diagnostics.png`
-- `08-cli-logs.png`
-- `09-reports-traffic.png`
-- `10-dashboard-ops.png`
+- `02-pending-decision.png`
+- `03-overrides-crud.png`
+- `04-taxonomy-activation.png`
+- `05-page-content-diagnostics.png`
+- `06-cache-diagnostics.png`
+- `07-cli-logs.png`
+- `08-reports-traffic.png`
+- `09-dashboard-ops.png`
 
 ## Troubleshooting
 
