@@ -207,7 +207,7 @@ async fn persist_manual_classification(
             updated_at = NOW(),
             ttl_seconds = EXCLUDED.ttl_seconds,
             next_refresh_at = NOW() + INTERVAL '4 hours'
-        RETURNING id, primary_category, subcategory, risk_level, recommended_action, confidence, updated_at
+        RETURNING id, primary_category, subcategory, risk_level, recommended_action, confidence::float8 AS confidence, updated_at
         "#,
     )
     .bind(uuid::Uuid::new_v4())

@@ -163,8 +163,11 @@ async fn handle_connection(
         "policy decision"
     );
 
-    let classification_required = cfg.require_content
-        && matches!(decision.action, PolicyAction::Allow | PolicyAction::Monitor);
+    let classification_required = should_require_content_pending(
+        cfg.require_content,
+        &decision.action,
+        decision.verdict.is_some(),
+    );
     let requires_pending = classification_required;
     let base_url = derive_base_url(&normalized.full_url)
         .or_else(|| Some(fallback_base_url(&normalized.hostname)));
@@ -436,6 +439,16 @@ fn is_inheritable_ancestor_action(action: &PolicyAction) -> bool {
     )
 }
 
+fn should_require_content_pending(
+    require_content: bool,
+    action: &PolicyAction,
+    has_verdict: bool,
+) -> bool {
+    require_content
+        && !has_verdict
+        && matches!(action, PolicyAction::Allow | PolicyAction::Monitor)
+}
+
 static PENDING_HTML: Lazy<String> = Lazy::new(|| {
     let template = r#"<html><head><meta charset="utf-8" /><title>Site Under Classification</title>
 <style>body{font-family:sans-serif;background:#0b1221;color:#f4f7ff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;} .card{background:#141d33;border:1px solid #1f2a48;border-radius:12px;padding:32px;max-width:460px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.4);} h1{font-size:1.5rem;margin-bottom:12px;} p{line-height:1.5;color:#c6d4f5;} .hint{margin-top:20px;font-size:0.9rem;color:#8ea0ce;}</style>
@@ -494,5 +507,15 @@ mod icap_response_tests {
         assert!(is_inheritable_ancestor_action(&PolicyAction::Block));
         assert!(!is_inheritable_ancestor_action(&PolicyAction::Warn));
         assert!(!is_inheritable_ancestor_action(&PolicyAction::ContentPending));
+    }
+
+    #[test]
+    fn pending_required_only_when_verdict_missing() {
+        assert!(should_require_content_pending(true, &PolicyAction::Allow, false));
+        assert!(should_require_content_pending(true, &PolicyAction::Monitor, false));
+        assert!(!should_require_content_pending(true, &PolicyAction::Allow, true));
+        assert!(!should_require_content_pending(true, &PolicyAction::Monitor, true));
+        assert!(!should_require_content_pending(true, &PolicyAction::Block, false));
+        assert!(!should_require_content_pending(false, &PolicyAction::Allow, false));
     }
 }

@@ -1,29 +1,88 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PendingClassification, usePendingClassifications } from '../hooks/usePendingClassifications';
 import { usePendingActions } from '../hooks/usePendingActions';
+import { useTaxonomyData } from '../hooks/useTaxonomyData';
 
 const ACTION_OPTIONS = ['Allow', 'Block', 'Warn', 'Monitor', 'Review'];
 const RISK_OPTIONS = ['low', 'medium', 'high', 'critical'];
 
 export const PendingClassificationsPage = () => {
   const { data, loading, error, isMock, refresh, canCallApi } = usePendingClassifications();
+  const {
+    data: taxonomy,
+    loading: taxonomyLoading,
+    error: taxonomyError,
+    isMock: isTaxonomyMock,
+    canCallApi: canCallTaxonomyApi,
+  } = useTaxonomyData();
   const { manualUnblock, busyKey, error: actionError } = usePendingActions();
   const [selectedKey, setSelectedKey] = useState<string | undefined>();
   const [action, setAction] = useState('Allow');
   const [reason, setReason] = useState('Manual analyst decision');
   const [riskLevel, setRiskLevel] = useState('low');
+  const [categoryId, setCategoryId] = useState('');
+  const [subcategoryId, setSubcategoryId] = useState('');
   const [message, setMessage] = useState<string | undefined>();
 
   const selectedRecord = selectedKey ? data.find((item) => item.normalizedKey === selectedKey) : undefined;
+  const enabledCategories = useMemo(
+    () =>
+      taxonomy.categories
+        .filter((category) => category.enabled)
+        .map((category) => ({
+          ...category,
+          subcategories: category.subcategories.filter((sub) => sub.enabled),
+        }))
+        .filter((category) => category.subcategories.length > 0),
+    [taxonomy.categories],
+  );
+  const selectedCategory = enabledCategories.find((category) => category.id === categoryId);
+  const selectedSubcategory = selectedCategory?.subcategories.find((sub) => sub.id === subcategoryId);
+  const canSubmitManual =
+    Boolean(selectedCategory && selectedSubcategory) &&
+    canCallApi &&
+    canCallTaxonomyApi &&
+    !isMock &&
+    !isTaxonomyMock &&
+    !taxonomyLoading;
+
+  useEffect(() => {
+    if (!selectedRecord) {
+      setCategoryId('');
+      setSubcategoryId('');
+      return;
+    }
+
+    setCategoryId((prev) => {
+      if (enabledCategories.some((category) => category.id === prev)) {
+        return prev;
+      }
+      return enabledCategories[0]?.id ?? '';
+    });
+  }, [selectedRecord, enabledCategories]);
+
+  useEffect(() => {
+    if (!selectedCategory) {
+      setSubcategoryId('');
+      return;
+    }
+
+    setSubcategoryId((prev) => {
+      if (selectedCategory.subcategories.some((sub) => sub.id === prev)) {
+        return prev;
+      }
+      return selectedCategory.subcategories[0]?.id ?? '';
+    });
+  }, [selectedCategory]);
 
   const submitManualDecision = async () => {
-    if (!selectedRecord) return;
+    if (!selectedRecord || !selectedCategory || !selectedSubcategory) return;
     setMessage(undefined);
     try {
       await manualUnblock(selectedRecord.normalizedKey, {
         action,
-        primary_category: 'Manual Override',
-        subcategory: 'Analyst Override',
+        primary_category: selectedCategory.id,
+        subcategory: selectedSubcategory.id,
         risk_level: riskLevel,
         confidence: 0.95,
         reason: reason.trim() || undefined,
@@ -78,6 +137,35 @@ export const PendingClassificationsPage = () => {
           <p style={{ marginTop: 0, color: 'var(--muted)' }}>{selectedRecord.normalizedKey}</p>
           <div className="layout-grid">
             <label>
+              <span style={{ display: 'block', marginBottom: '0.3rem' }}>Category</span>
+              <select
+                className="search-input"
+                value={categoryId}
+                onChange={(event) => setCategoryId(event.target.value)}
+              >
+                {enabledCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span style={{ display: 'block', marginBottom: '0.3rem' }}>Subcategory</span>
+              <select
+                className="search-input"
+                value={subcategoryId}
+                onChange={(event) => setSubcategoryId(event.target.value)}
+                disabled={!selectedCategory}
+              >
+                {(selectedCategory?.subcategories ?? []).map((sub) => (
+                  <option key={sub.id} value={sub.id}>
+                    {sub.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               <span style={{ display: 'block', marginBottom: '0.3rem' }}>Action</span>
               <select className="search-input" value={action} onChange={(event) => setAction(event.target.value)}>
                 {ACTION_OPTIONS.map((item) => (
@@ -102,10 +190,15 @@ export const PendingClassificationsPage = () => {
               <input className="search-input" value={reason} onChange={(event) => setReason(event.target.value)} />
             </label>
           </div>
+          {taxonomyError || isTaxonomyMock || !enabledCategories.length ? (
+            <p style={{ marginTop: '0.75rem', marginBottom: 0, color: '#ffcf7f' }}>
+              Taxonomy is unavailable for manual unblock. Check Admin API taxonomy endpoint and try again.
+            </p>
+          ) : null}
           <div style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
             <button
               className="cta-button"
-              disabled={!canCallApi || isMock || busyKey === selectedRecord.normalizedKey}
+              disabled={!canSubmitManual || busyKey === selectedRecord.normalizedKey}
               onClick={submitManualDecision}
             >
               {busyKey === selectedRecord.normalizedKey ? 'Saving...' : 'Apply Decision'}
