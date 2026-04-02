@@ -4,7 +4,6 @@ export type Role =
   | 'policy-admin'
   | 'policy-editor'
   | 'policy-viewer'
-  | 'review-approver'
   | 'auditor';
 
 export type UserProfile = {
@@ -36,7 +35,7 @@ export const AuthContext = createContext<AuthContextValue | undefined>(undefined
 const defaultUser: UserProfile = {
   name: 'Avery Quinn',
   email: 'avery@example.com',
-  roles: ['policy-admin', 'policy-viewer', 'review-approver'],
+  roles: ['policy-admin', 'policy-viewer'],
 };
 
 const TOKEN_STORAGE_KEY = 'od.admin.tokens';

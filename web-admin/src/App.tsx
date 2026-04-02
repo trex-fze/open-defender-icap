@@ -7,7 +7,6 @@ import { InvestigationsPage } from './pages/InvestigationsPage';
 import { PoliciesPage } from './pages/PoliciesPage';
 import { PolicyCreatePage } from './pages/PolicyCreatePage';
 import { PolicyDetailPage } from './pages/PolicyDetailPage';
-import { ReviewQueuePage } from './pages/ReviewQueuePage';
 import { OverridesPage } from './pages/OverridesPage';
 import { TaxonomyPage } from './pages/TaxonomyPage';
 import { ReportsPage } from './pages/ReportsPage';
@@ -21,7 +20,6 @@ const guard = {
   viewer: ['policy-viewer'] as Role[],
   viewEdit: ['policy-viewer', 'policy-editor', 'policy-admin'] as Role[],
   editOnly: ['policy-editor', 'policy-admin'] as Role[],
-  review: ['review-approver', 'policy-admin'] as Role[],
   reports: ['auditor', 'policy-admin', 'policy-viewer'] as Role[],
   admin: ['policy-admin'] as Role[],
 };
@@ -39,8 +37,8 @@ const App = () => {
             <Route path="/policies" element={<ProtectedRoute roles={guard.viewEdit}><PoliciesPage /></ProtectedRoute>} />
             <Route path="/policies/new" element={<ProtectedRoute roles={guard.editOnly}><PolicyCreatePage /></ProtectedRoute>} />
             <Route path="/policies/:policyId" element={<ProtectedRoute roles={guard.viewEdit}><PolicyDetailPage /></ProtectedRoute>} />
-            <Route path="/review-queue" element={<ProtectedRoute roles={guard.review}><ReviewQueuePage /></ProtectedRoute>} />
             <Route path="/overrides" element={<ProtectedRoute roles={guard.editOnly}><OverridesPage /></ProtectedRoute>} />
+            <Route path="/allow-deny" element={<Navigate to="/overrides" replace />} />
             <Route path="/classifications/pending" element={<ProtectedRoute roles={guard.viewEdit}><PendingClassificationsPage /></ProtectedRoute>} />
             <Route path="/taxonomy" element={<ProtectedRoute roles={guard.editOnly}><TaxonomyPage /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute roles={guard.reports}><ReportsPage /></ProtectedRoute>} />

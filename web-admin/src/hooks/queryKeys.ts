@@ -1,7 +1,6 @@
 export const queryKeys = {
   policies: (baseUrl: string) => ['policies', baseUrl] as const,
   policyDetail: (baseUrl: string, policyId?: string) => ['policy-detail', baseUrl, policyId ?? 'missing'] as const,
-  reviewQueue: (baseUrl: string) => ['review-queue', baseUrl] as const,
   overrides: (baseUrl: string) => ['overrides', baseUrl] as const,
   taxonomy: (baseUrl: string) => ['taxonomy', baseUrl] as const,
   pendingClassifications: (baseUrl: string) => ['pending-classifications', baseUrl] as const,

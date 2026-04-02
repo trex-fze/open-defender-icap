@@ -18,9 +18,6 @@ enum CacheEvent<'a> {
         scope_type: &'a str,
         scope_value: &'a str,
     },
-    Review {
-        normalized_key: &'a str,
-    },
     Policy,
 }
 
@@ -38,11 +35,6 @@ impl CacheInvalidator {
             scope_value,
         })
         .await
-    }
-
-    pub async fn invalidate_review(&self, normalized_key: &str) -> Result<()> {
-        self.delete_key(normalized_key).await?;
-        self.publish(CacheEvent::Review { normalized_key }).await
     }
 
     pub async fn invalidate_policy(&self) -> Result<()> {

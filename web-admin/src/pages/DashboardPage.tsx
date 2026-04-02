@@ -1,19 +1,10 @@
 import { kpis } from '../data/mockData';
 import { useOpsStatus } from '../hooks/useOpsStatus';
-import { useReviewQueueData } from '../hooks/useReviewQueueData';
 import { useNavigate } from 'react-router-dom';
 
 export const DashboardPage = () => {
   const navigate = useNavigate();
   const { data: ops, loading: opsLoading, error: opsError } = useOpsStatus();
-  const review = useReviewQueueData();
-
-  const riskTone = (risk: string): 'red' | 'amber' | 'green' => {
-    const value = risk.toLowerCase();
-    if (value === 'critical' || value === 'high') return 'red';
-    if (value === 'medium' || value === 'urgent') return 'amber';
-    return 'green';
-  };
 
   return (
     <div>
@@ -51,9 +42,6 @@ export const DashboardPage = () => {
               <p style={{ fontSize: '1.1rem', margin: '0 0 0.6rem' }}>
                 Pending classifications: {ops.pendingCount.toLocaleString()}
               </p>
-              <p style={{ fontSize: '1.1rem', margin: '0 0 0.6rem' }}>
-                Review queue depth: {ops.reviewQueueCount.toLocaleString()}
-              </p>
               <p style={{ margin: 0, color: 'var(--muted)' }}>
                 Providers:{' '}
                 {ops.llmProviderNames.length > 0 ? ops.llmProviderNames.join(', ') : 'not available in this environment'}
@@ -66,46 +54,20 @@ export const DashboardPage = () => {
           {opsError ? <p style={{ color: '#ff9b9b', marginBottom: 0 }}>Ops status warning: {opsError}</p> : null}
         </div>
         <div className="glass-panel">
-          <p className="section-title">Review SLA</p>
-          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Review SLA table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>Status</th>
-                  <th>SLA</th>
-                </tr>
-              </thead>
-              <tbody>
-                {review.loading ? (
-                  <tr>
-                    <td colSpan={3} style={{ color: 'var(--muted)' }}>
-                      Loading live review queue...
-                    </td>
-                  </tr>
-                ) : review.data.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} style={{ color: 'var(--muted)' }}>
-                      Review queue is currently empty.
-                    </td>
-                  </tr>
-                ) : (
-                  review.data.slice(0, 3).map((item) => (
-                    <tr key={item.id}>
-                      <td>{item.key}</td>
-                      <td>
-                        <span className={`chip chip--${riskTone(item.risk)}`}>{item.status}</span>
-                      </td>
-                      <td>{item.sla}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+          <p className="section-title">Operator Focus</p>
+          <p style={{ margin: '0 0 0.8rem' }}>
+            Manual decisions now run through the domain Allow / Deny list and Pending Sites workflow.
+          </p>
+          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+            <button className="cta-button" onClick={() => navigate('/overrides')}>Open Allow / Deny</button>
+            <button
+              className="cta-button"
+              style={{ background: 'linear-gradient(120deg,#d6def6,#8ca0cb)', color: '#060b17' }}
+              onClick={() => navigate('/classifications/pending')}
+            >
+              Open Pending Sites
+            </button>
           </div>
-          {review.isMock ? (
-            <p style={{ marginTop: '0.6rem', color: '#ffcc88' }}>Using fallback data: {review.error ?? 'API unavailable'}</p>
-          ) : null}
         </div>
       </div>
     </div>

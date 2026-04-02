@@ -17,8 +17,7 @@ use anyhow::{anyhow, Context, Result};
 use audit::{AuditEvent, AuditLogger, ElasticExporter};
 use auth::{
     enforce_admin, require_roles, AdminAuth, AuthMode, AuthSettings, UserContext,
-    ROLE_OVERRIDES_DELETE, ROLE_OVERRIDES_VIEW, ROLE_OVERRIDES_WRITE, ROLE_REVIEW_RESOLVE,
-    ROLE_REVIEW_VIEW,
+    ROLE_OVERRIDES_DELETE, ROLE_OVERRIDES_VIEW, ROLE_OVERRIDES_WRITE,
 };
 use axum::{
     extract::{Path, State},
@@ -36,7 +35,7 @@ use sqlx::{
     postgres::{PgPoolOptions, PgRow},
     PgPool, Row,
 };
-use std::{env, net::IpAddr, sync::Arc};
+use std::{env, sync::Arc};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn, Level};
 use uuid::Uuid;
@@ -173,19 +172,6 @@ impl AppState {
         }
     }
 
-    async fn invalidate_review(&self, normalized_key: &str) {
-        if let Some(cache) = &self.cache_invalidator {
-            if let Err(err) = cache.invalidate_review(normalized_key).await {
-                error!(
-                    target = "svc-admin",
-                    %err,
-                    normalized_key,
-                    "failed to invalidate cache for review update"
-                );
-            }
-        }
-    }
-
     pub async fn invalidate_policy_cache(&self) {
         if let Some(cache) = &self.cache_invalidator {
             if let Err(err) = cache.invalidate_policy().await {
@@ -245,27 +231,6 @@ impl AppState {
                 actor,
                 action: action.to_string(),
                 target_type: Some("override".into()),
-                target_id: Some(target_id),
-                payload,
-            })
-            .await;
-    }
-
-    async fn log_review_event<T>(
-        &self,
-        action: &str,
-        actor: Option<String>,
-        target_id: String,
-        payload: T,
-    ) where
-        T: serde::Serialize,
-    {
-        let payload = serde_json::to_value(payload).ok();
-        self.audit_logger
-            .log(AuditEvent {
-                actor,
-                action: action.to_string(),
-                target_type: Some("review".into()),
                 target_id: Some(target_id),
                 payload,
             })
@@ -413,9 +378,6 @@ async fn main() -> Result<()> {
     };
 
     let review_metrics = ReviewMetrics::new(metrics_cfg.review_sla_seconds);
-    if let Err(err) = review_metrics.sync_from_db(&pool).await {
-        warn!(target = "svc-admin", %err, "failed to initialize review metrics gauge");
-    }
 
     if redis_url.is_none() {
         warn!(
@@ -483,11 +445,6 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/overrides/:id",
             delete(delete_override).put(update_override),
-        )
-        .route("/api/v1/review-queue", get(list_review_queue))
-        .route(
-            "/api/v1/review-queue/:id/resolve",
-            post(resolve_review_item),
         )
         .route(
             "/api/v1/policies",
@@ -685,10 +642,6 @@ async fn health() -> &'static str {
 async fn metrics_endpoint(
     State(state): State<AppState>,
 ) -> Result<(StatusCode, String), StatusCode> {
-    if let Err(err) = state.metrics.sync_from_db(&state.pool).await {
-        error!(target = "svc-admin", %err, "failed to sync review metrics gauge");
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
     state
         .metrics
         .render()
@@ -942,117 +895,6 @@ async fn update_override(
     Ok(Json(mapped))
 }
 
-async fn list_review_queue(
-    Extension(user): Extension<UserContext>,
-    State(state): State<AppState>,
-) -> Result<Json<Vec<ReviewRecord>>, StatusCode> {
-    require_roles(&user, ROLE_REVIEW_VIEW)?;
-    let rows = sqlx::query(
-        r#"SELECT id, normalized_key, request_metadata, status, submitter, assigned_to, decided_by, decision_notes, decision_action, created_at, updated_at
-        FROM review_queue ORDER BY created_at DESC LIMIT 200"#,
-    )
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|err| {
-        error!(target = "svc-admin", %err, "list_review_queue failed");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let mut records = Vec::with_capacity(rows.len());
-    for row in rows {
-        records.push(map_review_row(&row).map_err(|err| {
-            error!(target = "svc-admin", %err, "failed to map review row");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?);
-    }
-    let pending = records
-        .iter()
-        .filter(|r| r.status.eq_ignore_ascii_case("pending"))
-        .count() as i64;
-    state.metrics.set_open_count(pending);
-
-    Ok(Json(records))
-}
-
-async fn resolve_review_item(
-    Extension(user): Extension<UserContext>,
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-    Json(mut payload): Json<ReviewResolveRequest>,
-) -> Result<Json<ReviewRecord>, (StatusCode, Json<ApiError>)> {
-    require_roles(&user, ROLE_REVIEW_RESOLVE)
-        .map_err(|status| (status, Json(ApiError::forbidden())))?;
-    if payload.status.trim().is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ApiError::new("VALIDATION_ERROR", "status required")),
-        ));
-    }
-    if payload.decided_by.is_none() {
-        payload.decided_by = Some(user.actor.clone());
-    }
-
-    let rows = sqlx::query(
-        r#"UPDATE review_queue
-            SET status = $1,
-                decided_by = $2,
-                decision_notes = $3,
-                decision_action = $4,
-                updated_at = NOW()
-          WHERE id = $5
-          RETURNING id, normalized_key, request_metadata, status, submitter, assigned_to, decided_by, decision_notes, decision_action, created_at, updated_at"#,
-    )
-    .bind(&payload.status)
-    .bind(&payload.decided_by)
-    .bind(&payload.decision_notes)
-    .bind(&payload.decision_action)
-    .bind(id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|err| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiError::new("DB_ERROR", err.to_string())),
-    ))?;
-
-    let Some(row) = rows else {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(ApiError::new("NOT_FOUND", "review item not found")),
-        ));
-    };
-
-    let mapped = map_review_row(&row).map_err(|err| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new("DB_ERROR", err.to_string())),
-        )
-    })?;
-
-    state.invalidate_review(&mapped.normalized_key).await;
-    state
-        .log_review_event(
-            "review.resolve",
-            payload
-                .decided_by
-                .clone()
-                .or_else(|| Some(user.actor.clone())),
-            mapped.id.to_string(),
-            &mapped,
-        )
-        .await;
-    let duration = mapped
-        .updated_at
-        .signed_duration_since(mapped.created_at)
-        .num_seconds()
-        .max(0) as f64;
-    state.metrics.record_resolution(duration);
-    if let Err(err) = state.metrics.sync_from_db(&state.pool).await {
-        warn!(target = "svc-admin", %err, "failed to refresh review metrics gauge");
-    }
-
-    Ok(Json(mapped))
-}
-
 #[derive(Debug, Serialize)]
 pub struct ApiError {
     error_code: &'static str,
@@ -1105,29 +947,6 @@ struct OverrideRecord {
     updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize)]
-struct ReviewRecord {
-    id: Uuid,
-    normalized_key: String,
-    request_metadata: Value,
-    status: String,
-    submitter: Option<String>,
-    assigned_to: Option<String>,
-    decided_by: Option<String>,
-    decision_notes: Option<String>,
-    decision_action: Option<String>,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReviewResolveRequest {
-    status: String,
-    decided_by: Option<String>,
-    decision_notes: Option<String>,
-    decision_action: Option<String>,
-}
-
 #[derive(Debug)]
 struct ValidatedOverridePayload {
     scope_type: String,
@@ -1139,15 +958,8 @@ struct ValidatedOverridePayload {
     status: Option<String>,
 }
 
-const ALLOWED_SCOPE_TYPES: &[&str] = &["domain", "user", "ip"];
-const ALLOWED_ACTIONS: &[&str] = &[
-    "allow",
-    "block",
-    "warn",
-    "monitor",
-    "review",
-    "require-approval",
-];
+const ALLOWED_SCOPE_TYPES: &[&str] = &["domain"];
+const ALLOWED_ACTIONS: &[&str] = &["allow", "block"];
 const ALLOWED_STATUSES: &[&str] = &["active", "inactive", "expired", "revoked"];
 
 fn validate_override_payload(
@@ -1183,7 +995,7 @@ fn normalize_scope_type(value: &str) -> Result<String, (StatusCode, Json<ApiErro
     if ALLOWED_SCOPE_TYPES.contains(&normalized.as_str()) {
         Ok(normalized)
     } else {
-        Err(validation_error("scope_type must be one of domain|user|ip"))
+        Err(validation_error("scope_type must be domain"))
     }
 }
 
@@ -1193,8 +1005,6 @@ fn normalize_scope_value(
 ) -> Result<String, (StatusCode, Json<ApiError>)> {
     match scope_type {
         "domain" => normalize_domain_scope(value),
-        "user" => normalize_user_scope(value),
-        "ip" => normalize_ip_scope(value),
         _ => Err(validation_error("unsupported scope_type")),
     }
 }
@@ -1235,33 +1045,6 @@ fn normalize_domain_scope(value: &str) -> Result<String, (StatusCode, Json<ApiEr
     Ok(format!("{}{}", wildcard_prefix, domain_part))
 }
 
-fn normalize_user_scope(value: &str) -> Result<String, (StatusCode, Json<ApiError>)> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(validation_error("scope_value required for user overrides"));
-    }
-    if trimmed.len() > 256 {
-        return Err(validation_error("user scope exceeds maximum length"));
-    }
-    if trimmed.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        return Err(validation_error(
-            "user scope cannot contain whitespace or control characters",
-        ));
-    }
-    Ok(trimmed.to_string())
-}
-
-fn normalize_ip_scope(value: &str) -> Result<String, (StatusCode, Json<ApiError>)> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(validation_error("scope_value required for ip overrides"));
-    }
-    let parsed: IpAddr = trimmed
-        .parse()
-        .map_err(|_| validation_error("scope_value must be a valid IP address"))?;
-    Ok(parsed.to_string())
-}
-
 fn normalize_action(value: &str) -> Result<String, (StatusCode, Json<ApiError>)> {
     let normalized = value.trim().to_ascii_lowercase();
     if normalized.is_empty() {
@@ -1270,9 +1053,7 @@ fn normalize_action(value: &str) -> Result<String, (StatusCode, Json<ApiError>)>
     if ALLOWED_ACTIONS.contains(&normalized.as_str()) {
         Ok(normalized)
     } else {
-        Err(validation_error(
-            "action must be one of allow|block|warn|monitor|review|require-approval",
-        ))
+        Err(validation_error("action must be one of allow|block"))
     }
 }
 
@@ -1350,14 +1131,6 @@ mod tests {
         assert_eq!(result.scope_value, "*.example.com");
     }
 
-    #[test]
-    fn rejects_invalid_ip_scope() {
-        let mut payload = base_request();
-        payload.scope_type = "ip".into();
-        payload.scope_value = "not-an-ip".into();
-        let err = validate_override_payload(payload).unwrap_err();
-        assert_eq!(err.0, StatusCode::BAD_REQUEST);
-    }
 }
 
 fn map_override_row(row: &PgRow) -> sqlx::Result<OverrideRecord> {
@@ -1370,22 +1143,6 @@ fn map_override_row(row: &PgRow) -> sqlx::Result<OverrideRecord> {
         created_by: row.try_get("created_by")?,
         expires_at: row.try_get("expires_at")?,
         status: row.try_get("status")?,
-        created_at: row.try_get("created_at")?,
-        updated_at: row.try_get("updated_at")?,
-    })
-}
-
-fn map_review_row(row: &PgRow) -> sqlx::Result<ReviewRecord> {
-    Ok(ReviewRecord {
-        id: row.try_get("id")?,
-        normalized_key: row.try_get("normalized_key")?,
-        request_metadata: row.try_get("request_metadata")?,
-        status: row.try_get("status")?,
-        submitter: row.try_get("submitter")?,
-        assigned_to: row.try_get("assigned_to")?,
-        decided_by: row.try_get("decided_by")?,
-        decision_notes: row.try_get("decision_notes")?,
-        decision_action: row.try_get("decision_action")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })

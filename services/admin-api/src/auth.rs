@@ -26,7 +26,6 @@ type HmacSha256 = Hmac<Sha256>;
 const ROLE_POLICY_ADMIN: &str = "policy-admin";
 const ROLE_POLICY_EDITOR: &str = "policy-editor";
 const ROLE_POLICY_VIEWER: &str = "policy-viewer";
-const ROLE_REVIEWER: &str = "review-approver";
 const ROLE_AUDITOR: &str = "auditor";
 
 #[derive(Clone)]
@@ -774,8 +773,6 @@ pub const ROLE_OVERRIDES_WRITE: &[&str] = &[ROLE_POLICY_ADMIN, ROLE_POLICY_EDITO
 pub const ROLE_OVERRIDES_DELETE: &[&str] = &[ROLE_POLICY_ADMIN];
 pub const ROLE_OVERRIDES_VIEW: &[&str] =
     &[ROLE_POLICY_ADMIN, ROLE_POLICY_EDITOR, ROLE_POLICY_VIEWER];
-pub const ROLE_REVIEW_VIEW: &[&str] = &[ROLE_POLICY_ADMIN, ROLE_POLICY_VIEWER, ROLE_REVIEWER];
-pub const ROLE_REVIEW_RESOLVE: &[&str] = &[ROLE_POLICY_ADMIN, ROLE_REVIEWER];
 pub const ROLE_POLICY_VIEW: &[&str] = &[ROLE_POLICY_ADMIN, ROLE_POLICY_EDITOR, ROLE_POLICY_VIEWER];
 pub const ROLE_POLICY_EDIT: &[&str] = &[ROLE_POLICY_ADMIN, ROLE_POLICY_EDITOR];
 pub const ROLE_POLICY_PUBLISH: &[&str] = &[ROLE_POLICY_ADMIN];

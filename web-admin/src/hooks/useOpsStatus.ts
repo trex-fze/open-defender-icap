@@ -6,10 +6,6 @@ type PendingRecord = {
   normalized_key: string;
 };
 
-type ReviewRecord = {
-  id: string;
-};
-
 type ProviderSummary = {
   name: string;
   provider_type: string;
@@ -19,7 +15,6 @@ type ProviderSummary = {
 
 export type OpsSnapshot = {
   pendingCount: number;
-  reviewQueueCount: number;
   llmProviderNames: string[];
   source: 'live' | 'partial' | 'mock';
 };
@@ -30,7 +25,6 @@ export const useOpsStatus = () => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
   const [data, setData] = useState<OpsSnapshot>({
     pendingCount: 0,
-    reviewQueueCount: 0,
     llmProviderNames: [],
     source: 'mock',
   });
@@ -39,7 +33,7 @@ export const useOpsStatus = () => {
 
   useEffect(() => {
     if (!baseUrl || !canCallApi) {
-      setData({ pendingCount: 0, reviewQueueCount: 0, llmProviderNames: [], source: 'mock' });
+      setData({ pendingCount: 0, llmProviderNames: [], source: 'mock' });
       setLoading(false);
       return;
     }
@@ -51,20 +45,12 @@ export const useOpsStatus = () => {
       setLoading(true);
       setError(undefined);
       try {
-        const [pending, review] = await Promise.all([
-          adminGetJson<PendingRecord[]>(
-            { baseUrl, canCallApi, headers } as AdminApiContext,
-            '/api/v1/classifications/pending',
-            { limit: 500 },
-            { signal: controller.signal },
-          ),
-          adminGetJson<ReviewRecord[]>(
-            { baseUrl, canCallApi, headers } as AdminApiContext,
-            '/api/v1/review-queue',
-            undefined,
-            { signal: controller.signal },
-          ),
-        ]);
+        const pending = await adminGetJson<PendingRecord[]>(
+          { baseUrl, canCallApi, headers } as AdminApiContext,
+          '/api/v1/classifications/pending',
+          { limit: 500 },
+          { signal: controller.signal },
+        );
 
         let providers: ProviderSummary[] = [];
         let source: OpsSnapshot['source'] = 'live';
@@ -86,7 +72,6 @@ export const useOpsStatus = () => {
         if (!cancelled) {
           setData({
             pendingCount: pending.length,
-            reviewQueueCount: review.length,
             llmProviderNames: providers.map((item) => item.name),
             source,
           });
@@ -94,7 +79,7 @@ export const useOpsStatus = () => {
       } catch (err) {
         if (controller.signal.aborted || cancelled) return;
         setError(err instanceof Error ? err.message : 'Failed to fetch operations status');
-        setData({ pendingCount: 0, reviewQueueCount: 0, llmProviderNames: [], source: 'mock' });
+        setData({ pendingCount: 0, llmProviderNames: [], source: 'mock' });
       } finally {
         if (!cancelled) {
           setLoading(false);

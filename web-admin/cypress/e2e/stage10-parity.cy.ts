@@ -49,33 +49,6 @@ describe('Stage 10 management parity flows', () => {
     cy.contains(/published successfully/i).should('be.visible');
   });
 
-  it('resolves review queue items from the UI', () => {
-    cy.intercept('GET', '**/api/v1/review-queue', {
-      statusCode: 200,
-      body: [
-        {
-          id: 'rev-001',
-          normalized_key: 'domain:stage10.example',
-          status: 'open',
-          request_metadata: {},
-          submitter: null,
-          assigned_to: 'analyst@example.com',
-        },
-      ],
-    }).as('reviewList');
-
-    cy.intercept('POST', '**/api/v1/review-queue/rev-001/resolve', {
-      statusCode: 200,
-      body: { ok: true },
-    }).as('resolveReview');
-
-    cy.visit('/review-queue', { onBeforeLoad: seedAuthAndApi });
-    cy.wait('@reviewList');
-    cy.contains('button', 'Approve').click();
-    cy.wait('@resolveReview');
-    cy.contains(/resolved as approved/i).should('be.visible');
-  });
-
   it('applies manual decisions for pending classifications', () => {
     cy.intercept('GET', '**/api/v1/classifications/pending*', {
       statusCode: 200,

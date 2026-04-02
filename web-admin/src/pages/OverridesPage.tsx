@@ -2,16 +2,15 @@ import { FormEvent, useMemo, useState } from 'react';
 import { useOverrideActions } from '../hooks/useOverrideActions';
 import { useOverridesData } from '../hooks/useOverridesData';
 
-const ACTION_OPTIONS = ['allow', 'block', 'warn', 'monitor', 'review', 'require-approval'];
+const ACTION_OPTIONS = ['allow', 'block'];
 const STATUS_OPTIONS = ['active', 'inactive', 'expired', 'revoked'];
-const SCOPE_OPTIONS = ['domain', 'user', 'ip'];
 
 export const OverridesPage = () => {
   const { data, loading, error, isMock, refresh, canCallApi } = useOverridesData();
   const { createOverride, updateOverride, deleteOverride, busy, error: actionError } = useOverrideActions();
 
   const [editingId, setEditingId] = useState<string | undefined>();
-  const [scopeType, setScopeType] = useState('domain');
+  const scopeType = 'domain';
   const [scopeValue, setScopeValue] = useState('');
   const [action, setAction] = useState('allow');
   const [status, setStatus] = useState('active');
@@ -23,7 +22,6 @@ export const OverridesPage = () => {
 
   const resetForm = () => {
     setEditingId(undefined);
-    setScopeType('domain');
     setScopeValue('');
     setAction('allow');
     setStatus('active');
@@ -35,7 +33,6 @@ export const OverridesPage = () => {
     const row = data.find((item) => item.id === id);
     if (!row) return;
     setEditingId(row.id);
-    setScopeType(row.scopeType);
     setScopeValue(row.scopeValue);
     setAction(row.action);
     setStatus(row.status);
@@ -96,8 +93,8 @@ export const OverridesPage = () => {
     <div>
       <div className="page-header">
         <div>
-          <p className="section-title">Overrides</p>
-          <h2 style={{ margin: 0 }}>Manual policy exceptions</h2>
+          <p className="section-title">Allow / Deny List</p>
+          <h2 style={{ margin: 0 }}>Domain-level manual decisions</h2>
         </div>
         <button className="cta-button" onClick={refresh} disabled={loading}>
           Refresh
@@ -129,29 +126,19 @@ export const OverridesPage = () => {
       ) : null}
 
       <form className="glass-panel" onSubmit={submitOverride}>
-        <p className="section-title">{editing ? `Edit Override ${editing.id}` : 'Create Override'}</p>
+        <p className="section-title">{editing ? `Edit Entry ${editing.id}` : 'Create Entry'}</p>
         <div className="layout-grid">
           <label>
-            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Scope type</span>
-            <select className="search-input" value={scopeType} onChange={(event) => setScopeType(event.target.value)}>
-              {SCOPE_OPTIONS.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Scope value</span>
+            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Domain</span>
             <input
               className="search-input"
               value={scopeValue}
               onChange={(event) => setScopeValue(event.target.value)}
-              placeholder="example.com or user@example.com"
+              placeholder="example.com"
             />
           </label>
           <label>
-            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Action</span>
+            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Decision</span>
             <select className="search-input" value={action} onChange={(event) => setAction(event.target.value)}>
               {ACTION_OPTIONS.map((item) => (
                 <option key={item} value={item}>
@@ -180,15 +167,15 @@ export const OverridesPage = () => {
             />
           </label>
           <label>
-            <span style={{ display: 'block', marginBottom: '0.3rem' }}>Reason (optional)</span>
-            <input
-              className="search-input"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              placeholder="Temporary partner exception"
-            />
-          </label>
-        </div>
+              <span style={{ display: 'block', marginBottom: '0.3rem' }}>Reason (optional)</span>
+              <input
+                className="search-input"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="Temporary domain exception"
+              />
+            </label>
+          </div>
 
         <div style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
           <button
@@ -196,7 +183,7 @@ export const OverridesPage = () => {
             type="submit"
             disabled={busy || !canCallApi || isMock || !scopeValue.trim()}
           >
-            {busy ? 'Saving...' : editing ? 'Update Override' : 'Create Override'}
+              {busy ? 'Saving...' : editing ? 'Update Entry' : 'Create Entry'}
           </button>
           <button
             className="cta-button"

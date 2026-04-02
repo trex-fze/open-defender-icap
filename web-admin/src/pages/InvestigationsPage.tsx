@@ -1,20 +1,18 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useReviewQueueData } from '../hooks/useReviewQueueData';
+import { usePendingClassifications } from '../hooks/usePendingClassifications';
 
 export const InvestigationsPage = () => {
-  const navigate = useNavigate();
   const [query, setQuery] = useState('');
-  const { data, loading, error, isMock } = useReviewQueueData();
+  const { data, loading, error, isMock } = usePendingClassifications();
 
   const investigations = useMemo(
     () =>
       data.map((item) => ({
-        key: item.key,
+        key: item.normalizedKey,
         verdict: item.status,
-        risk: item.risk,
-        lastSeen: item.sla,
-        tags: item.assignedTo ? [item.assignedTo] : [],
+        risk: 'pending',
+        lastSeen: item.updatedAt,
+        tags: item.baseUrl ? [item.baseUrl] : [],
       })),
     [data],
   );
@@ -30,9 +28,8 @@ export const InvestigationsPage = () => {
       <div className="page-header">
         <div>
           <p className="section-title">Investigations</p>
-          <h2 style={{ margin: 0 }}>Classification History & Cache</h2>
+          <h2 style={{ margin: 0 }}>Pending Classification Investigations</h2>
         </div>
-        <button className="cta-button" onClick={() => navigate('/review-queue')}>Open Review Queue</button>
       </div>
 
       {error ? (
@@ -79,7 +76,7 @@ export const InvestigationsPage = () => {
                   <tr key={item.key}>
                     <td>{item.key}</td>
                     <td>
-                      <span className={`chip chip--${item.verdict === 'Block' ? 'red' : 'amber'}`}>
+        <span className={`chip chip--${item.verdict === 'Block' ? 'red' : 'amber'}`}>
                         {item.verdict}
                       </span>
                     </td>

@@ -58,8 +58,6 @@ enum Commands {
     #[clap(subcommand)]
     Override(OverrideCmd),
     #[clap(subcommand)]
-    Review(ReviewCmd),
-    #[clap(subcommand)]
     Cache(CacheCmd),
     #[clap(subcommand)]
     Migrate(MigrateCmd),
@@ -132,7 +130,7 @@ enum PolicyCmd {
 enum OverrideCmd {
     List,
     Create {
-        #[clap(long, help = "Scope in the form type:value (domain:user.example)")]
+        #[clap(long, help = "Scope in the form domain:<hostname> (domain-only mode)")]
         scope: String,
         #[clap(long)]
         action: String,
@@ -145,7 +143,7 @@ enum OverrideCmd {
     },
     Update {
         id: String,
-        #[clap(long, help = "Scope in the form type:value (domain:user.example)")]
+        #[clap(long, help = "Scope in the form domain:<hostname> (domain-only mode)")]
         scope: String,
         #[clap(long)]
         action: String,
@@ -158,20 +156,6 @@ enum OverrideCmd {
     },
     Delete {
         id: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum ReviewCmd {
-    Queue,
-    Resolve {
-        id: String,
-        #[clap(long, default_value = "resolved")]
-        status: String,
-        #[clap(long)]
-        decision_action: Option<String>,
-        #[clap(long)]
-        notes: Option<String>,
     },
 }
 
@@ -590,7 +574,6 @@ async fn main() -> Result<()> {
         Commands::Env { url } => handle_env(url.as_deref().unwrap_or(&cli.base_url)).await?,
         Commands::Policy(cmd) => handle_policy(cmd, &client, cli.json).await?,
         Commands::Override(cmd) => handle_override(cmd, &client, cli.json).await?,
-        Commands::Review(cmd) => handle_review(cmd, &client, cli.json).await?,
         Commands::Cache(cmd) => handle_cache(cmd, &client, cli.json).await?,
         Commands::Migrate(_) => unreachable!(),
         Commands::Page(cmd) => handle_page(cmd, &client, cli.json).await?,
@@ -931,57 +914,6 @@ async fn handle_override(cmd: &OverrideCmd, client: &ApiClient, json: bool) -> R
             client.delete(&format!("/api/v1/overrides/{id}")).await?;
             if !json {
                 println!("Deleted override {id}");
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn handle_review(cmd: &ReviewCmd, client: &ApiClient, json: bool) -> Result<()> {
-    match cmd {
-        ReviewCmd::Queue => {
-            let response: Vec<ReviewRecord> = client.get("/api/v1/review-queue", &[]).await?;
-            if json {
-                print_json(&response)?;
-            } else {
-                let rows = response
-                    .into_iter()
-                    .map(|item| {
-                        vec![
-                            item.id.to_string(),
-                            item.normalized_key,
-                            item.status,
-                            item.assigned_to.unwrap_or_else(|| "-".into()),
-                        ]
-                    })
-                    .collect();
-                print_table(&["ID", "Key", "Status", "Assigned"], rows);
-            }
-        }
-        ReviewCmd::Resolve {
-            id,
-            status,
-            decision_action,
-            notes,
-        } => {
-            let payload = ReviewResolvePayload {
-                status: status.to_string(),
-                decided_by: None,
-                decision_notes: notes.clone(),
-                decision_action: decision_action.clone(),
-            };
-            let record: ReviewRecord = client
-                .post(&format!("/api/v1/review-queue/{id}/resolve"), &payload)
-                .await?;
-            if json {
-                print_json(&record)?;
-            } else {
-                println!(
-                    "Resolved {} -> status={} action={}",
-                    record.id,
-                    record.status,
-                    record.decision_action.clone().unwrap_or_else(|| "-".into())
-                );
             }
         }
     }
@@ -1685,6 +1617,9 @@ fn parse_scope(scope: &str) -> Result<(String, String)> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("scope must include a value after ':'"))?;
+    if scope_type != "domain" {
+        return Err(anyhow!("scope type must be 'domain'"));
+    }
     Ok((scope_type, scope_value))
 }
 
@@ -2006,27 +1941,6 @@ struct OverrideUpsertPayload {
     created_by: Option<String>,
     expires_at: Option<String>,
     status: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct ReviewRecord {
-    id: Uuid,
-    normalized_key: String,
-    status: String,
-    assigned_to: Option<String>,
-    decided_by: Option<String>,
-    decision_notes: Option<String>,
-    decision_action: Option<String>,
-    created_at: Option<String>,
-    updated_at: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ReviewResolvePayload {
-    status: String,
-    decided_by: Option<String>,
-    decision_notes: Option<String>,
-    decision_action: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

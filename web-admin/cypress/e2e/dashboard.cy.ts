@@ -12,7 +12,7 @@ describe('Dashboard flow', () => {
     cy.contains('Requests Screened').should('be.visible');
     cy.get('aside').within(() => {
       cy.contains('Policies').should('exist');
-      cy.contains('Review Queue').should('exist');
+      cy.contains('Allow / Deny').should('exist');
     });
   });
 

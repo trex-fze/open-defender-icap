@@ -13,7 +13,6 @@ describe('Accessibility smoke', () => {
 
   [
     '/policies/new',
-    '/review-queue',
     '/overrides',
     '/taxonomy',
     '/classifications/pending',
