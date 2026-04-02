@@ -1,0 +1,3 @@
+# To test a site using proxy
+curl -sS -o /tmp/ig_now.out -w "%{http_code}\n" -x http://localhost:3128 https://www.instagram.com/ -k
+
