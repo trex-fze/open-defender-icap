@@ -229,6 +229,13 @@ Use `down -v` only when you explicitly need a clean local data state.
   - Retry with default integration settings (retries + prune-on-retry are enabled by default).
 - Where do I inspect pending sites?
   - Use Admin API/UI pending view or `odctl classification pending`.
+- How does stale pending diversion behave with OFFLINE + ONLINE models?
+  - Primary routing still starts with your configured default provider (usually offline/local).
+  - If a key remains `waiting_content` longer than `OD_LLM_STALE_PENDING_MINUTES`, worker can try `OD_LLM_STALE_PENDING_ONLINE_PROVIDER` first, but only when health checks pass.
+  - Existing fallback retry/cooldown rules still apply, and stale diversion is separately capped by `OD_LLM_STALE_PENDING_MAX_PER_MIN`.
+- How does stale pending diversion behave with ONLINE-only models?
+  - Diversion is effectively skipped because the online diversion target is already the primary provider (`provider_is_primary`).
+  - The worker continues normal primary processing with existing retry/backoff/failover behavior; no duplicate routing loop is introduced.
 
 ## 9) Additional relevant information
 

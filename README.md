@@ -278,6 +278,12 @@ Import `deploy/kibana/dashboards/ip-analytics.ndjson` into Kibana. Prometheus sc
 **Q: How are AI models used safely?**  
 The LLM worker runs behind the Admin API and never acts on decisions autonomously; outputs feed reviewers and reclass workflows. Prompt injection smoke tests are documented in `docs/testing/security-plan.md`.
 
+**Q: How does stale pending diversion work with OFFLINE + ONLINE models?**  
+Primary routing still starts with your configured default provider (commonly offline/local). For keys that stay in `waiting_content` longer than `OD_LLM_STALE_PENDING_MINUTES`, the worker may attempt `OD_LLM_STALE_PENDING_ONLINE_PROVIDER` first when provider health checks pass. Existing fallback retry/cooldown controls remain active, and stale diversion has its own cap via `OD_LLM_STALE_PENDING_MAX_PER_MIN`.
+
+**Q: How does stale pending diversion behave with ONLINE-only models?**  
+If the online provider is already primary, stale diversion is effectively skipped (`provider_is_primary`) and the worker continues normal primary processing with existing retry/backoff/failover logic.
+
 **Q: Where is evidence tracked?**  
 Stage 7 checklists live in `docs/evidence/stage07-checklist.md`. Follow Stage 6 instructions for dashboards.
 
