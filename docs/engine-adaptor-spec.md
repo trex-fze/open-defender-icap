@@ -474,11 +474,16 @@ Rules:
 - **Error Contract**: `{"error_code":"VALIDATION_ERROR","message":"..."}`.
 - **Tests**: UT for validation, IT for policy precedence, Smoke for cached flows.
 
-## 20.2 Classification Submit
-- `POST /api/v1/classifications` (admin only). Body includes normalized_key, manual verdict, reason. Response 201 with classification_id. Validation ensures category in taxonomy, reason required. Tests: UT, IT, security.
+## 20.2 Classification Management
+- `GET /api/v1/classifications?state=all|classified|unclassified&q=&limit=` lists management rows for the Classifications UI.
+- `PATCH /api/v1/classifications/{normalized_key}` updates category/subcategory and recomputes action via policy engine.
+- `DELETE /api/v1/classifications/{normalized_key}` removes classification/pending/page-content state and invalidates caches.
 
-## 20.3 Classification Fetch
-- `GET /api/v1/classifications/{normalized_key}` returns latest verdict, history summary. 404 if none.
+## 20.3 Pending Classification Operations
+- `GET /api/v1/classifications/pending` returns keys blocked in `ContentPending`.
+- `POST /api/v1/classifications/{normalized_key}/pending` upserts pending state immediately from ICAP so UI visibility is not backlog-bound.
+- `POST /api/v1/classifications/{normalized_key}/manual-classify` accepts `{primary_category, subcategory, reason?}` and persists policy-computed action/risk/confidence.
+- `POST /api/v1/classifications/{normalized_key}/unblock` remains for explicit manual action payloads.
 
 ## 20.4 Overrides API
 - `POST /api/v1/overrides`, `GET /api/v1/overrides`, `DELETE /api/v1/overrides/{id}`. Includes scope (domain/user/ip), action, expiry.

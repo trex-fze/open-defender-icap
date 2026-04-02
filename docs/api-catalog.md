@@ -36,7 +36,7 @@ All routes require `X-Admin-Token` or a JWT with the listed roles. Pagination pa
 | Method | Path | Description | Roles | Request Schema | Response |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/v1/overrides` | List override records (filters via query: `scope_type`, `status`, `search`). | `policy-viewer`. | — | Paged list of `OverrideRecord`. |
-| `POST` | `/api/v1/overrides` | Create an override. | `policy-editor`. | `{ scope_type: "domain"\|"user"\|"ip", scope_value, action: allow/block/warn/monitor/review/require-approval, reason?, created_by?, expires_at?, status? }`. | Newly created `OverrideRecord`. |
+| `POST` | `/api/v1/overrides` | Create an override. | `policy-editor`. | `{ scope_type: "domain", scope_value, action: "allow"\|"block", reason?, created_by?, expires_at?, status? }`. | Newly created `OverrideRecord`. |
 | `PUT`/`DELETE` | `/api/v1/overrides/:id` | Update or delete an override. | `policy-editor`. | Same payload as create (for PUT). | Updated `OverrideRecord` or `204 No Content`. |
 
 ### Authentication
@@ -76,10 +76,15 @@ All routes require `X-Admin-Token` or a JWT with the listed roles. Pagination pa
 | --- | --- | --- | --- |
 | `GET`/`DELETE` | `/api/v1/cache-entries/:cache_key` | Inspect or evict cache entries (ICAP adaptor cache). | Use normalized key (e.g., `domain:example.com`). |
 | `GET` | `/api/v1/cli-logs` | Retrieve CLI audit log entries. | Query: `operator_id`, `limit` (default 50). |
-| `GET` | `/api/v1/page-contents/:normalized_key` | Fetch latest Crawl4AI homepage HTML context (`[HEAD]`, `[TITLE]`, `[BODY]`). | Query: `version`, `max_excerpt`. Response includes metadata (hash, ttl, language, fetch status). |
+| `GET` | `/api/v1/page-contents/:normalized_key` | Fetch latest Crawl4AI homepage excerpt for operator diagnostics. | Query: `version`, `max_excerpt`. Response includes `excerpt_format` (currently `markdown`) plus hash/ttl/language/fetch metadata. |
 | `GET` | `/api/v1/page-contents/:normalized_key/history` | List prior crawl versions. | Query: `limit` (default 5). |
-| `GET` | `/api/v1/classifications/pending` | List sites blocked pending content-aware classification. | `policy-viewer` role; query: `status`, `limit`. | Array of pending records (key, base_url, updated timestamps). |
-| `POST` | `/api/v1/classifications/:normalized_key/unblock` | Manually approve or reclassify a blocked site. | `policy-editor` role; body `{ action, primary_category, subcategory, risk_level, confidence?, reason? }`. | Returns the persisted classification row; also invalidates caches. |
+| `GET` | `/api/v1/classifications/pending` | List sites blocked pending content-aware classification. | `policy-viewer`; query `status`, `limit`; returns pending records (`normalized_key`, `status`, `base_url`, timestamps). |
+| `POST` | `/api/v1/classifications/:normalized_key/pending` | Upsert a pending row for a key (used by ICAP for immediate queue visibility). | `policy-editor` (service token); body `{ status?, base_url? }`; returns `202 Accepted`. |
+| `POST` | `/api/v1/classifications/:normalized_key/manual-classify` | Manually classify a pending site with taxonomy category/subcategory only. | `policy-editor`; body `{ primary_category, subcategory, reason? }`; persists policy-computed action/risk/confidence and invalidates caches. |
+| `POST` | `/api/v1/classifications/:normalized_key/unblock` | Legacy/manual endpoint that accepts explicit action/risk/confidence payloads. | `policy-editor`; body `{ action, primary_category, subcategory, risk_level, confidence?, reason? }`; persists and invalidates caches. |
+| `GET` | `/api/v1/classifications` | List classified and/or unclassified keys for management UI. | `policy-viewer`; query `state=all|classified|unclassified`, `q`, `limit`; returns unified state/category/action rows. |
+| `PATCH` | `/api/v1/classifications/:normalized_key` | Update classification taxonomy labels for a key. | `policy-editor`; body `{ primary_category, subcategory, reason? }`; recomputes action via policy engine. |
+| `DELETE` | `/api/v1/classifications/:normalized_key` | Remove classification/pending/page-content state for a key and invalidate cache. | `policy-editor`; returns `204 No Content`. |
 | `GET` | `/health/ready`, `/health/live` | Health probes. | — |
 | `GET` | `/metrics` | Prometheus metrics (review SLA, cache invalidations). | Requires DB access to sync gauges. |
 

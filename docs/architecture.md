@@ -145,17 +145,17 @@ flowchart LR
 - Future: keyspace notifications to invalidate adaptor caches on updates.
 
 ### 2.4 Classification & Reclassification Workers
-- **LLM Worker**: Consumes Redis Streams, builds prompts, calls LLM, validates JSON, persists classification, updates caches, emits audit events. When `requires_content` is set, the worker waits until `page_contents` has fresh HTML context (`[HEAD]`, `[TITLE]`, `[BODY]`) and records interim state in `classification_requests` so operators can see what is blocked.
+- **LLM Worker**: Consumes Redis Streams, builds prompts, calls LLM, validates JSON, persists classification, updates caches, emits audit events. When `requires_content` is set, the worker waits until `page_contents` has a fresh homepage excerpt (stored as markdown text) before finalizing the verdict.
 - **Reclass Worker**: Scheduled jobs for TTL expiry, taxonomy/model version upgrades, manual reclass triggers. Every refresh job now republishes both the classification and base-URL crawl job so repeated validations are still content-aware.
 - **Canonicalization & fallback**: Both workers load the canonical taxonomy at startup, remap legacy/alias labels, and fall back to `Unknown / Unclassified` with `taxonomy_fallback_reason` metadata before persisting rows. The LLM prompt explicitly embeds canonical taxonomy IDs and retries non-canonical responses before persisting. Activation state is periodically refreshed so workers block verdicts automatically when operators disable categories.
 
 ### 2.5 Management Plane
-- **Admin API**: Aggregates policy, domain allow/deny overrides, reporting endpoints with OIDC auth. New endpoints expose pending classifications (`GET /api/v1/classifications/pending`) and allow manual unblock/reclassify actions that immediately update caches.
-- **React UI**: Dashboards, investigations, policy mgmt, domain Allow / Deny list, health, cache inspection, and a “Pending Sites” view that surfaces everything stuck in `ContentPending` so analysts can approve or escalate.
+- **Admin API**: Aggregates policy, domain allow/deny overrides, reporting endpoints with OIDC auth. It exposes pending classifications, classification CRUD (`GET/PATCH/DELETE /api/v1/classifications`), and manual classification (`POST /api/v1/classifications/:key/manual-classify`) that computes final action via policy-engine before persisting.
+- **React UI**: Dashboards, investigations, policy mgmt, domain Allow / Deny list, health, cache inspection, **Pending Sites** (manual classification with category/subcategory), and **Classifications** (classified/unclassified management).
 - **CLI (`odctl`)**: Commands for env validation, policy/override import/export, cache inspection/invalidation, reclass triggers, smoke tests, migrations, and `odctl classification pending|unblock` for security teams who prefer terminal workflows. (Taxonomy structure is now loaded exclusively from `config/canonical-taxonomy.json`; no CLI seeding step is required.)
 - **Taxonomy governance**: Admin API, UI, and CLI treat the canonical taxonomy file as immutable. Operators toggle allow/deny via activation checkboxes only; legacy taxonomy CRUD routes respond with `TAXONOMY_LOCKED` unless the break-glass flag `OD_TAXONOMY_MUTATION_ENABLED=true` is set. Activation state lives in `taxonomy_activation_profiles` / `_entries` and is refreshed into policy engine + workers to gate final decisions.
 
-- **Postgres**: Authoritative store for policies, classifications, overrides, audits, taxonomy activation profiles (`taxonomy_activation_profiles` / `_entries`), `page_contents` (Stage 9 Crawl4AI HTML context), and the `classification_requests` table that tracks blocked keys awaiting content-aware verdicts. Canonical taxonomy structure lives on disk (`config/canonical-taxonomy.json`) and is reloaded into each service at startup; only activation state is mutable at runtime.
+- **Postgres**: Authoritative store for policies, classifications, overrides, audits, taxonomy activation profiles (`taxonomy_activation_profiles` / `_entries`), `page_contents` (Stage 9 Crawl4AI excerpt context), and the `classification_requests` table that tracks blocked keys awaiting content-aware verdicts. Canonical taxonomy structure lives on disk (`config/canonical-taxonomy.json`) and is reloaded into each service at startup; only activation state is mutable at runtime.
 - **Redis**: Distributed cache + queue coordination (Streams) + ephemeral job metadata.
 - **Elasticsearch**: Structured event/audit storage; Kibana dashboards.
 
@@ -174,18 +174,18 @@ flowchart LR
 ### 3.2 Content-First Classification Flow
 The workflow for an unclassified site emphasizes “content-first” verification before allowing traffic (this is the path highlighted in the diagram above):
 
-1. **ICAP Adaptor** – Squid sends an ICAP REQMOD with an uncached URL. The adaptor normalizes the key, calls the policy engine, and (because the action is `allow`/`monitor`) issues `PolicyAction::ContentPending`. It serves the “Site under classification” HTML page, caches a short-lived placeholder, and emits two Redis jobs:
+1. **ICAP Adaptor** – Squid sends an ICAP REQMOD with an uncached URL. The adaptor normalizes the key, calls the policy engine, and (because the action is `allow`/`monitor` with missing or `unknown-unclassified` verdict) issues `PolicyAction::ContentPending`. It serves the “Site under classification” HTML page, caches a short-lived placeholder, inserts/updates `classification_requests` immediately via Admin API, and emits two Redis jobs:
    - `PageFetchJob` targeting the *base URL* (`https://host/`).
    - `ClassificationJob` with `requires_content=true`, `base_url`, and `trace_id` metadata.
-   The adaptor also inserts/updates a row in `classification_requests` to mark the site as pending (via the LLM worker when it first touches the job).
 
-2. **Page Fetcher + Crawl4AI** – The page-fetcher worker consumes the `PageFetchJob`, invokes `services/crawl4ai-service` headless Chromium instance, extracts homepage `[HEAD]`, `[TITLE]`, and `[BODY]` blocks, and writes the formatted HTML context + metadata into `page_contents`. This path is strict Crawl4AI-only (no direct HTTP fallback). Failures/retries update `fetch_status` so operators can see if Crawl4AI is struggling.
 
-3. **LLM Worker Gating** – When the LLM worker reads the `requires_content` job, it logs/updates `classification_requests` (`status = waiting_content`) and polls Postgres until fresh `page_contents` exist for that normalized key. If no content is ready, the worker requeues the job (or sleeps) instead of generating a metadata-only verdict.
+2. **Page Fetcher + Crawl4AI** – The page-fetcher worker consumes the `PageFetchJob`, invokes `services/crawl4ai-service` headless Chromium instance, extracts a homepage excerpt, and writes markdown/plain excerpt + metadata into `page_contents` (raw HTML bytes are not persisted). This path is strict Crawl4AI-only (no direct HTTP fallback). Failures/retries update `fetch_status` so operators can see if Crawl4AI is struggling.
+
+3. **LLM Worker Gating** – When the LLM worker reads the `requires_content` job, it updates `classification_requests` (`status = waiting_content`) and polls Postgres until fresh `page_contents` exist for that normalized key. If no content is ready, the worker requeues the job (or sleeps) instead of generating a metadata-only verdict.
 
 4. **Content-Backed Verdict** – Once content is available, the worker builds the prompt with canonical taxonomy IDs, normalized domain key, and homepage HTML context/hash, then calls the configured LLM provider(s). Non-canonical outputs are logged and retried before persistence. Valid JSON is then persisted to `classifications` + `classification_versions`, written into Redis (cache + invalidation channel), and the pending row is deleted.
 
-5. **Operator Touchpoints** – Admin API exposes these pending rows (`GET /api/v1/classifications/pending`) so analysts can monitor which sites are blocked. If Crawl4AI keeps failing, analysts can issue a manual unblock (`POST /api/v1/classifications/:key/unblock`) via UI/CLI, which stores a manual verdict and invalidates caches.
+5. **Operator Touchpoints** – Admin API exposes pending rows (`GET /api/v1/classifications/pending`) and a broader management list (`GET /api/v1/classifications`) so analysts can classify pending keys and edit/remove existing classifications. The Pending Sites flow uses `POST /api/v1/classifications/:key/manual-classify` (category + subcategory), while Allow / Deny overrides remain in `/api/v1/overrides`.
 
 6. **Subsequent Requests** – After the LLM verdict lands (or an analyst overrides it), ICAP adaptor cache hits serve the real action immediately. The site stays blocked indefinitely until content is verified (security-first posture).
 
@@ -198,7 +198,7 @@ The workflow for an unclassified site emphasizes “content-first” verificatio
 - `classifications` (normalized_key, taxonomy_version, activation-aware verdict fields, TTL).
 - `policies` / `policy_rules` (compiled DSL, priorities, outcomes).
 - `overrides`, `audit_events`, `reporting_aggregates` (per Spec §20).
-- `page_contents` + `classification_requests` (Stage 9 content-aware pipeline storing Crawl4AI HTML context and pending keys).
+- `page_contents` + `classification_requests` (Stage 9 content-aware pipeline storing Crawl4AI excerpts and pending keys).
 
 ## 5. Deployment Architecture
 - **Local Dev**: `deploy/docker/docker-compose.yml` orchestrates Squid, adaptor, policy engine, Redis, Postgres, Elasticsearch, Kibana, Prometheus, workers, UI, and an odctl runner; `docker-compose.test.yml` / `docker-compose.smoke.yml` provide trimmed stacks for CI and quick validation.
