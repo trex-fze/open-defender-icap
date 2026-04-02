@@ -192,7 +192,16 @@ impl CacheClient {
             CacheInvalidationEvent::Review { normalized_key } => {
                 Self::invalidate_key(memory, &normalized_key).await
             }
+            CacheInvalidationEvent::Policy => Self::invalidate_policy(memory).await,
         }
+    }
+
+    async fn invalidate_policy(memory: &Arc<RwLock<HashMap<String, CacheEntry>>>) -> Result<()> {
+        let mut store = memory.write().await;
+        let removed = store.len();
+        store.clear();
+        info!(target = "svc-icap", removed, "invalidated cache entries for policy refresh");
+        Ok(())
     }
 
     async fn invalidate_scope(
@@ -253,6 +262,7 @@ enum CacheInvalidationEvent {
     Review {
         normalized_key: String,
     },
+    Policy,
 }
 
 fn key_matches_domain_scope(key: &str, scope_value: &str, wildcard: bool) -> bool {
@@ -353,5 +363,32 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn policy_invalidation_clears_all_entries() {
+        let cache = CacheClient::new(None, "test".into()).unwrap();
+        cache
+            .set(
+                "domain:example.com".into(),
+                sample_decision(PolicyAction::Allow),
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap();
+        cache
+            .set(
+                "subdomain:www.example.com".into(),
+                sample_decision(PolicyAction::Monitor),
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap();
+        let payload = serde_json::json!({"kind": "policy"}).to_string();
+        CacheClient::apply_invalidation(&cache.memory, &payload)
+            .await
+            .unwrap();
+        assert!(cache.get("domain:example.com").await.unwrap().is_none());
+        assert!(cache.get("subdomain:www.example.com").await.unwrap().is_none());
     }
 }

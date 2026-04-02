@@ -78,6 +78,21 @@ pub async fn update_taxonomy_activation(
             &validated,
         )
         .await;
+    state.trigger_policy_reload().await.map_err(|err| {
+        error!(
+            target = "svc-admin",
+            %err,
+            "failed to trigger immediate policy-engine reload after taxonomy update"
+        );
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(ApiError::new(
+                "POLICY_RELOAD_FAILED",
+                "taxonomy update persisted but policy-engine reload failed",
+            )),
+        )
+    })?;
+    state.invalidate_policy_cache().await;
     record_taxonomy_activation_change();
 
     Ok(Json(ActivationSaveResponse {
@@ -646,6 +661,9 @@ mod support {
             canonical_taxonomy,
             taxonomy_store,
             taxonomy_mutation_enabled: mutation_enabled,
+            policy_engine_url: "http://policy-engine:19010".to_string(),
+            policy_engine_admin_token: Some("test-token".to_string()),
+            http_client: reqwest::Client::new(),
         })
     }
 }

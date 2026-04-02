@@ -5,6 +5,8 @@
   "admin_token": null,
   "redis_url": "redis://redis:6379",
   "cache_channel": "od:cache:invalidate",
+  "policy_engine_url": "http://policy-engine:19010",
+  "policy_engine_admin_token": null,
   "auth": {
     "mode": "local",
     "static_roles": ["policy-admin", "policy-editor", "policy-viewer", "auditor"],

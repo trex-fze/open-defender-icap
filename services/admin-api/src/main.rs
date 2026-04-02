@@ -13,7 +13,7 @@ mod reporting;
 mod reporting_es;
 mod taxonomy;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use audit::{AuditEvent, AuditLogger, ElasticExporter};
 use auth::{
     enforce_admin, require_roles, AdminAuth, AuthMode, AuthSettings, UserContext,
@@ -54,6 +54,8 @@ struct AdminApiConfig {
     pub admin_token: Option<String>,
     pub redis_url: Option<String>,
     pub cache_channel: Option<String>,
+    pub policy_engine_url: Option<String>,
+    pub policy_engine_admin_token: Option<String>,
     #[serde(default)]
     pub auth: AuthSettings,
     #[serde(default)]
@@ -127,6 +129,9 @@ pub struct AppState {
     canonical_taxonomy: Arc<CanonicalTaxonomy>,
     taxonomy_store: Arc<TaxonomyStore>,
     taxonomy_mutation_enabled: bool,
+    policy_engine_url: String,
+    policy_engine_admin_token: Option<String>,
+    http_client: reqwest::Client,
 }
 
 impl AppState {
@@ -187,6 +192,29 @@ impl AppState {
                 warn!(target = "svc-admin", %err, "failed to invalidate caches after policy change");
             }
         }
+    }
+
+    pub async fn trigger_policy_reload(&self) -> Result<()> {
+        let endpoint = format!("{}/api/v1/policies/reload", self.policy_engine_url);
+        let mut request = self.http_client.post(&endpoint);
+        if let Some(token) = self.policy_engine_admin_token.as_deref() {
+            request = request.header("X-Admin-Token", token);
+        }
+        let response = request
+            .send()
+            .await
+            .with_context(|| format!("failed to call policy-engine reload at {}", endpoint))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "policy-engine reload failed with status {} body={} ",
+                status,
+                body
+            ));
+        }
+        info!(target = "svc-admin", endpoint, "policy-engine reload triggered");
+        Ok(())
     }
 
     pub async fn invalidate_cache_key(&self, cache_key: &str) {
@@ -328,6 +356,16 @@ async fn main() -> Result<()> {
         .cache_channel
         .clone()
         .or_else(|| env::var("OD_CACHE_CHANNEL").ok());
+    let policy_engine_url = cfg
+        .policy_engine_url
+        .clone()
+        .or_else(|| env::var("OD_POLICY_ENGINE_URL").ok())
+        .unwrap_or_else(|| "http://policy-engine:19010".to_string());
+    let policy_engine_admin_token = cfg
+        .policy_engine_admin_token
+        .clone()
+        .or_else(|| env::var("OD_POLICY_ADMIN_TOKEN").ok())
+        .or_else(|| admin_token.clone());
     let cache_invalidator = redis_url
         .as_ref()
         .map(|url| CacheInvalidator::new(url.clone(), cache_channel.clone()))
@@ -414,6 +452,9 @@ async fn main() -> Result<()> {
         canonical_taxonomy,
         taxonomy_store,
         taxonomy_mutation_enabled,
+        policy_engine_url,
+        policy_engine_admin_token,
+        http_client: reqwest::Client::new(),
     };
 
     let auth_layer = {

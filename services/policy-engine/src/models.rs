@@ -14,6 +14,8 @@ pub struct DecisionRequest {
     #[serde(default)]
     pub category_hint: Option<String>,
     #[serde(default)]
+    pub subcategory_hint: Option<String>,
+    #[serde(default)]
     pub risk_hint: Option<String>,
     #[serde(default)]
     pub confidence_hint: Option<f32>,

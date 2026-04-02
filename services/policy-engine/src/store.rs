@@ -117,7 +117,9 @@ impl PolicyStore {
         let canonical_category = request
             .category_hint
             .as_deref()
-            .and_then(|hint| self.canonicalize_request_category(hint));
+            .and_then(|hint| {
+                self.canonicalize_request_category(hint, request.subcategory_hint.as_deref())
+            });
         let rules = self.inner.read();
         for rule in rules.iter() {
             if self.matches_conditions(&rule.conditions, canonical_category.as_deref(), request) {
@@ -157,13 +159,14 @@ impl PolicyStore {
         Arc::clone(&self.taxonomy)
     }
 
-    fn canonicalize_request_category(&self, hint: &str) -> Option<String> {
-        let validated = self.taxonomy.validate_labels(hint, None);
+    fn canonicalize_request_category(&self, hint: &str, subcategory_hint: Option<&str>) -> Option<String> {
+        let validated = self.taxonomy.validate_labels(hint, subcategory_hint);
         if let Some(reason) = validated.fallback_reason {
             warn!(
                 target = "svc-policy",
                 reason = reason.as_str(),
                 hint,
+                subcategory_hint,
                 "category hint normalized via taxonomy"
             );
         }
@@ -481,6 +484,7 @@ mod tests {
             user_id: Some("alice@example.com".into()),
             group_ids: Some(vec!["global-admins".into()]),
             category_hint: None,
+            subcategory_hint: None,
             risk_hint: None,
             confidence_hint: None,
         }

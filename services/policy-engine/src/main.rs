@@ -24,18 +24,19 @@ use models::{
     SimulationResponse,
 };
 use policy_dsl::PolicyDocument;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::{env, net::SocketAddr, sync::Arc};
 use store::PolicyStore;
 use taxonomy::{ActivationState, TaxonomyStore};
 use tokio::net::TcpListener;
-use tracing::{error, info, Level};
+use tracing::{debug, error, info, warn, Level};
 use uuid::Uuid;
 
 #[derive(Clone)]
 struct AppState {
     evaluator: Arc<PolicyEvaluator>,
     audit_logger: Option<PolicyAuditLogger>,
+    classification_pool: Option<PgPool>,
 }
 
 impl AppState {
@@ -49,6 +50,104 @@ impl AppState {
                 error!(target = "svc-policy", %err, "failed to persist policy audit event");
             }
         }
+    }
+
+    async fn hydrate_request_hints(&self, request: &mut DecisionRequest) {
+        if request.category_hint.is_some()
+            && request.subcategory_hint.is_some()
+            && request.risk_hint.is_some()
+            && request.confidence_hint.is_some()
+        {
+            return;
+        }
+        let Some(pool) = &self.classification_pool else {
+            return;
+        };
+
+        let row = sqlx::query(
+            r#"SELECT primary_category, subcategory, risk_level, confidence::float8 AS confidence
+               FROM classifications
+               WHERE normalized_key = $1 AND status = 'active'
+               ORDER BY updated_at DESC
+               LIMIT 1"#,
+        )
+        .bind(&request.normalized_key)
+        .fetch_optional(pool)
+        .await;
+
+        match row {
+            Ok(Some(row)) => {
+                let hints = PersistedClassificationHints {
+                    category_hint: row
+                        .try_get::<Option<String>, _>("primary_category")
+                        .ok()
+                        .flatten()
+                        .and_then(non_empty_string),
+                    subcategory_hint: row
+                        .try_get::<Option<String>, _>("subcategory")
+                        .ok()
+                        .flatten()
+                        .and_then(non_empty_string),
+                    risk_hint: row
+                        .try_get::<Option<String>, _>("risk_level")
+                        .ok()
+                        .flatten()
+                        .and_then(non_empty_string),
+                    confidence_hint: row
+                        .try_get::<Option<f64>, _>("confidence")
+                        .ok()
+                        .flatten()
+                        .map(|value| value as f32),
+                };
+                apply_persisted_hints(request, hints);
+                debug!(
+                    target = "svc-policy",
+                    normalized_key = %request.normalized_key,
+                    "hydrated decision request hints from persisted classification"
+                );
+            }
+            Ok(None) => {}
+            Err(err) => {
+                warn!(
+                    target = "svc-policy",
+                    %err,
+                    normalized_key = %request.normalized_key,
+                    "failed to hydrate classification hints"
+                );
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct PersistedClassificationHints {
+    category_hint: Option<String>,
+    subcategory_hint: Option<String>,
+    risk_hint: Option<String>,
+    confidence_hint: Option<f32>,
+}
+
+fn apply_persisted_hints(request: &mut DecisionRequest, hints: PersistedClassificationHints) {
+    if request.category_hint.is_none() {
+        request.category_hint = hints.category_hint;
+    }
+    if request.subcategory_hint.is_none() {
+        request.subcategory_hint = hints.subcategory_hint;
+    }
+    if request.risk_hint.is_none() {
+        request.risk_hint = hints.risk_hint;
+    }
+    if request.confidence_hint.is_none() {
+        request.confidence_hint = hints.confidence_hint;
+    }
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 
@@ -76,7 +175,7 @@ async fn main() -> Result<()> {
         Arc::new(TaxonomyStore::load_default().context("failed to load canonical taxonomy")?);
     let mut audit_logger = None;
 
-    let evaluator = if let Some(db_url) = db_url {
+    let (evaluator, classification_pool) = if let Some(db_url) = db_url {
         let pool = PgPoolOptions::new()
             .max_connections(5)
             .connect(&db_url)
@@ -116,17 +215,24 @@ async fn main() -> Result<()> {
             }
         };
         audit_logger = Some(PolicyAuditLogger::new(pool.clone()));
-        PolicyEvaluator::from_database(store, pool, Some(cfg.policy_file.clone()), activation)
+        (
+            PolicyEvaluator::from_database(store, pool.clone(), Some(cfg.policy_file.clone()), activation),
+            Some(activation_pool.clone()),
+        )
     } else {
         let activation = Arc::new(ActivationState::allow_all());
         let store = PolicyStore::load_from_file(&cfg.policy_file, Arc::clone(&taxonomy))?;
-        PolicyEvaluator::from_file(store, cfg.policy_file.clone(), activation)
+        (
+            PolicyEvaluator::from_file(store, cfg.policy_file.clone(), activation),
+            None,
+        )
     };
     let auth_settings = AuthSettings::from_env(cfg.auth.clone());
     let admin_auth = Arc::new(AdminAuth::from_config(auth_settings).await?);
     let state = AppState {
         evaluator: Arc::new(evaluator),
         audit_logger,
+        classification_pool,
     };
 
     let auth_layer = {
@@ -160,7 +266,7 @@ async fn main() -> Result<()> {
 
 async fn handle_decision(
     State(state): State<AppState>,
-    Json(payload): Json<DecisionRequest>,
+    Json(mut payload): Json<DecisionRequest>,
 ) -> Result<Json<common_types::PolicyDecision>, (StatusCode, Json<ErrorResponse>)> {
     if payload.normalized_key.is_empty() {
         return Err((
@@ -172,6 +278,7 @@ async fn handle_decision(
         ));
     }
 
+    state.hydrate_request_hints(&mut payload).await;
     let decision = state.evaluator.evaluate(&payload);
     Ok(Json(decision))
 }
@@ -394,6 +501,7 @@ mod tests {
         let state = AppState {
             evaluator: Arc::new(evaluator),
             audit_logger: None,
+            classification_pool: None,
         };
         Router::new()
             .route("/api/v1/decision", post(handle_decision))
@@ -489,6 +597,7 @@ mod tests {
             user_id: None,
             group_ids: None,
             category_hint: Some("Unknown / Unclassified".into()),
+            subcategory_hint: None,
             risk_hint: None,
             confidence_hint: None,
         };
@@ -506,5 +615,61 @@ mod tests {
         let evaluator = PolicyEvaluator::from_file(store_block, "test".into(), activation);
         let decision = evaluator.evaluate(&request);
         assert_eq!(decision.action, PolicyAction::Block);
+    }
+
+    #[test]
+    fn applies_persisted_hints_when_missing() {
+        let mut request = DecisionRequest {
+            normalized_key: "subdomain:www.instagram.com".into(),
+            entity_level: "subdomain".into(),
+            source_ip: "127.0.0.1".into(),
+            user_id: None,
+            group_ids: None,
+            category_hint: None,
+            subcategory_hint: None,
+            risk_hint: None,
+            confidence_hint: None,
+        };
+        apply_persisted_hints(
+            &mut request,
+            PersistedClassificationHints {
+                category_hint: Some("social-media".into()),
+                subcategory_hint: Some("photo-sharing".into()),
+                risk_hint: Some("low".into()),
+                confidence_hint: Some(0.9),
+            },
+        );
+        assert_eq!(request.category_hint.as_deref(), Some("social-media"));
+        assert_eq!(request.subcategory_hint.as_deref(), Some("photo-sharing"));
+        assert_eq!(request.risk_hint.as_deref(), Some("low"));
+        assert_eq!(request.confidence_hint, Some(0.9));
+    }
+
+    #[test]
+    fn does_not_override_existing_request_hints() {
+        let mut request = DecisionRequest {
+            normalized_key: "subdomain:www.instagram.com".into(),
+            entity_level: "subdomain".into(),
+            source_ip: "127.0.0.1".into(),
+            user_id: None,
+            group_ids: None,
+            category_hint: Some("news-media".into()),
+            subcategory_hint: Some("general-news".into()),
+            risk_hint: Some("medium".into()),
+            confidence_hint: Some(0.7),
+        };
+        apply_persisted_hints(
+            &mut request,
+            PersistedClassificationHints {
+                category_hint: Some("social-media".into()),
+                subcategory_hint: Some("photo-sharing".into()),
+                risk_hint: Some("low".into()),
+                confidence_hint: Some(0.9),
+            },
+        );
+        assert_eq!(request.category_hint.as_deref(), Some("news-media"));
+        assert_eq!(request.subcategory_hint.as_deref(), Some("general-news"));
+        assert_eq!(request.risk_hint.as_deref(), Some("medium"));
+        assert_eq!(request.confidence_hint, Some(0.7));
     }
 }
