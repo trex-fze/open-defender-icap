@@ -48,4 +48,18 @@ impl PendingClient {
         request.send().await?.error_for_status()?;
         Ok(())
     }
+
+    pub async fn clear_pending(&self, normalized_key: &str) -> Result<()> {
+        let url = format!(
+            "{}/api/v1/classifications/{}/pending",
+            self.base_url.trim_end_matches('/'),
+            urlencoding::encode(normalized_key)
+        );
+        let mut request = self.http.delete(url);
+        if let Some(token) = self.admin_token.as_deref() {
+            request = request.header("X-Admin-Token", token);
+        }
+        request.send().await?.error_for_status()?;
+        Ok(())
+    }
 }

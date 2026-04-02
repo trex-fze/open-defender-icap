@@ -544,7 +544,8 @@ async fn main() -> Result<()> {
         )
         .route(
             "/api/v1/classifications/:normalized_key/pending",
-            post(classification_requests::upsert_pending),
+            post(classification_requests::upsert_pending)
+                .delete(classification_requests::clear_pending),
         )
         .route(
             "/api/v1/iam/users",

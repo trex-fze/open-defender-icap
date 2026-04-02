@@ -137,6 +137,18 @@ async fn handle_connection(
     if let Some((decision, source)) =
         resolve_cached_decision(&cache, &normalized.normalized_key, &normalized).await?
     {
+        if !matches!(decision.action, PolicyAction::ContentPending) {
+            if let Some(client) = &pending_client {
+                if let Err(err) = client.clear_pending(&normalized.normalized_key).await {
+                    warn!(
+                        target = "svc-icap",
+                        %err,
+                        normalized_key = %normalized.normalized_key,
+                        "failed to clear stale pending classification request on cache hit"
+                    );
+                }
+            }
+        }
         metrics::record_cache_hit();
         info!(
             target = "svc-icap",
@@ -231,6 +243,15 @@ async fn handle_connection(
             if let Err(err) = publisher.publish(job).await {
                 error!(target = "svc-icap", %err, "failed to publish page fetch job");
             }
+        }
+    } else if let Some(client) = &pending_client {
+        if let Err(err) = client.clear_pending(&normalized.normalized_key).await {
+            warn!(
+                target = "svc-icap",
+                %err,
+                normalized_key = %normalized.normalized_key,
+                "failed to clear stale pending classification request"
+            );
         }
     }
 

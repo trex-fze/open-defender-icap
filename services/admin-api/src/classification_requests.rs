@@ -356,6 +356,33 @@ pub async fn upsert_pending(
     Ok(StatusCode::ACCEPTED)
 }
 
+pub async fn clear_pending(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Path(normalized_key): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_POLICY_EDIT)
+        .map_err(|status| (status, Json(ApiError::forbidden())))?;
+
+    if parse_normalized_key(&normalized_key).is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "INVALID_NORMALIZED_KEY",
+                "normalized_key must start with domain: or subdomain:",
+            )),
+        ));
+    }
+
+    sqlx::query("DELETE FROM classification_requests WHERE normalized_key = $1")
+        .bind(&normalized_key)
+        .execute(state.pool())
+        .await
+        .map_err(db_error)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn persist_manual_classification(
     pool: &PgPool,
     normalized_key: &str,
