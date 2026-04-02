@@ -108,6 +108,18 @@ Core variables used most often:
 - `OD_POLICY_DATABASE_URL`: Policy Engine Postgres connection
 - `OD_CACHE_REDIS_URL`: Redis URL for cache invalidation
 - `OD_CACHE_CHANNEL`: Redis invalidation channel (default `od:cache:invalidate`)
+- `OPENAI_API_KEY`: credential used by `openai` fallback provider
+- `OD_LOG_DIR`: local worker log root (default compose value `/app/logs`, mounted from host `logs/`)
+
+LLM failover safety controls (env overrides for `config/llm-worker.json` routing):
+
+- `OD_LLM_FAILOVER_POLICY`: `safe|aggressive|disabled`
+- `OD_LLM_PRIMARY_RETRY_MAX`: retries on primary provider before fallback (default `3`)
+- `OD_LLM_PRIMARY_RETRY_BACKOFF_MS`: base retry backoff in ms (default `500`)
+- `OD_LLM_PRIMARY_RETRY_MAX_BACKOFF_MS`: max retry backoff in ms (default `5000`)
+- `OD_LLM_RETRYABLE_STATUS_CODES`: comma-separated retryable statuses (default `408,429,500,502,503,504`)
+- `OD_LLM_FALLBACK_COOLDOWN_SECS`: cooldown after fallback failures (default `30`)
+- `OD_LLM_FALLBACK_MAX_PER_MIN`: fallback attempt budget per minute (default `30`)
 
 Integration-script performance and reliability controls:
 

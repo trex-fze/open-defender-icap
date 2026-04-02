@@ -147,6 +147,14 @@ flowchart LR
 | `OD_FILEBEAT_SECRET` | Shared secret between Filebeat and event-ingester. |
 | `OD_REPORTING_ELASTIC_URL` | Reporting endpoint used by `/api/v1/reporting/traffic` (feeds AI-driven analytics). |
 | `OPENAI_API_KEY` | API key for OpenAI-compatible providers (used when `type=openai/openai_compatible`). |
+| `OD_LOG_DIR` | Local directory for worker JSON logs (default `logs`; llm-worker writes `logs/llm-worker/llm-worker.log`). |
+| `OD_LLM_FAILOVER_POLICY` | Provider failover policy override: `safe`, `aggressive`, or `disabled` (default runtime fallback is `aggressive`; config can set `safe`). |
+| `OD_LLM_PRIMARY_RETRY_MAX` | Number of primary-provider retries before considering fallback in `safe` mode (default `3`). |
+| `OD_LLM_PRIMARY_RETRY_BACKOFF_MS` | Base backoff for primary retries in milliseconds (default `500`). |
+| `OD_LLM_PRIMARY_RETRY_MAX_BACKOFF_MS` | Maximum retry backoff in milliseconds (default `5000`). |
+| `OD_LLM_RETRYABLE_STATUS_CODES` | Comma-separated HTTP statuses treated as retryable (default `408,429,500,502,503,504`). |
+| `OD_LLM_FALLBACK_COOLDOWN_SECS` | Cooldown window after fallback failure before new fallback attempts are allowed (default `30`). |
+| `OD_LLM_FALLBACK_MAX_PER_MIN` | Max fallback attempts per minute before fallback is temporarily blocked (default `30`). |
 | `ANTHROPIC_API_KEY` | API key for Anthropic Claude providers. |
 | `LLM_API_KEY` | Legacy fallback for single-endpoint deployments. |
 | `VITE_ADMIN_API_URL` | UI base URL for API calls (set in `web-admin/.env`). |
@@ -238,14 +246,21 @@ INTEGRATION_BUILD=1 INTEGRATION_BUILD_RETRIES=3 tests/integration.sh
   "routing": {
     "default": "local-lmstudio",
     "fallback": "openai-fallback",
-    "policy": "failover"
+    "policy": "safe",
+    "primary_retry_max": 3,
+    "primary_retry_backoff_ms": 500,
+    "primary_retry_max_backoff_ms": 5000,
+    "retryable_status_codes": [408, 429, 500, 502, 503, 504],
+    "fallback_cooldown_secs": 30,
+    "fallback_max_per_min": 30
   }
 }
 ```
 
 - Supported `type` values: `ollama`, `lm_studio`, `vllm`, `openai`, `openai_compatible`, `anthropic`, `custom_json` (legacy HTTP).
-- Local deployments expect LM Studio listening on `192.168.1.170`; if unreachable, the worker automatically fails over to OpenAI (`gpt-4o-mini`). Provide `OPENAI_API_KEY` for fallback safety.
-- The worker automatically records provider names in logs/metrics; fallback triggers if the primary fails.
+- In `safe` policy, the worker retries the primary provider first, then falls back only after retry budget is exhausted and the failure is classified retryable.
+- Local deployments expect LM Studio listening on `192.168.1.170`; if unreachable, fallback can route to OpenAI (`gpt-4o-mini`). Provide `OPENAI_API_KEY` for fallback safety.
+- The worker records retry/fallback decisions in metrics and JSON logs at `logs/llm-worker/llm-worker.log`.
 - Query configured providers anytime: `curl http://localhost:19015/providers | jq`.
 - CLI inspection: `odctl llm providers --url http://localhost:19015/providers`.
 
