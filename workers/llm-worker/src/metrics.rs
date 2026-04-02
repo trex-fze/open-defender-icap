@@ -157,6 +157,41 @@ static LLM_PROVIDER_LATENCY: Lazy<HistogramVec> = Lazy::new(|| {
     prometheus::register_histogram_vec!(opts, &["provider"]).unwrap()
 });
 
+static STALE_PENDING_ELIGIBLE: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "llm_stale_pending_eligible_total",
+        "Number of jobs eligible for stale pending online diversion"
+    )
+    .unwrap()
+});
+
+static STALE_PENDING_DIVERT: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_stale_pending_divert_total",
+        "Stale pending diversion attempts/results by provider",
+        &["provider", "result"]
+    )
+    .unwrap()
+});
+
+static STALE_PENDING_HEALTHCHECK: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_stale_pending_healthcheck_total",
+        "Stale pending provider healthcheck outcomes",
+        &["provider", "result"]
+    )
+    .unwrap()
+});
+
+static STALE_PENDING_SKIPPED: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_stale_pending_skipped_total",
+        "Stale pending diversion skips by reason",
+        &["reason"]
+    )
+    .unwrap()
+});
+
 pub fn record_job_started() {
     JOBS_STARTED.inc();
 }
@@ -237,6 +272,26 @@ pub fn observe_provider_latency(provider: &str, seconds: f64) {
     LLM_PROVIDER_LATENCY
         .with_label_values(&[provider])
         .observe(seconds);
+}
+
+pub fn record_stale_pending_eligible() {
+    STALE_PENDING_ELIGIBLE.inc();
+}
+
+pub fn record_stale_pending_divert(provider: &str, result: &str) {
+    STALE_PENDING_DIVERT
+        .with_label_values(&[provider, result])
+        .inc();
+}
+
+pub fn record_stale_pending_healthcheck(provider: &str, result: &str) {
+    STALE_PENDING_HEALTHCHECK
+        .with_label_values(&[provider, result])
+        .inc();
+}
+
+pub fn record_stale_pending_skipped(reason: &str) {
+    STALE_PENDING_SKIPPED.with_label_values(&[reason]).inc();
 }
 
 async fn metrics_handler() -> String {

@@ -30,7 +30,11 @@
     "primary_retry_max_backoff_ms": 5000,
     "retryable_status_codes": [408, 429, 500, 502, 503, 504],
     "fallback_cooldown_secs": 30,
-    "fallback_max_per_min": 30
+    "fallback_max_per_min": 30,
+    "stale_pending_minutes": 10,
+    "stale_pending_online_provider": "openai-fallback",
+    "stale_pending_health_ttl_secs": 30,
+    "stale_pending_max_per_min": 10
   },
   "metrics_host": "0.0.0.0",
   "metrics_port": 19015

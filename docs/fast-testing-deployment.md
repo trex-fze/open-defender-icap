@@ -120,6 +120,10 @@ LLM failover safety controls (env overrides for `config/llm-worker.json` routing
 - `OD_LLM_RETRYABLE_STATUS_CODES`: comma-separated retryable statuses (default `408,429,500,502,503,504`)
 - `OD_LLM_FALLBACK_COOLDOWN_SECS`: cooldown after fallback failures (default `30`)
 - `OD_LLM_FALLBACK_MAX_PER_MIN`: fallback attempt budget per minute (default `30`)
+- `OD_LLM_STALE_PENDING_MINUTES`: enable stale pending online diversion after this many minutes (`0` disables)
+- `OD_LLM_STALE_PENDING_ONLINE_PROVIDER`: provider name to use for stale pending diversion (default routing fallback provider)
+- `OD_LLM_STALE_PENDING_HEALTH_TTL_SECS`: cache ttl for online provider health checks (default `30`)
+- `OD_LLM_STALE_PENDING_MAX_PER_MIN`: separate stale diversion cap per minute (default `10`)
 
 Integration-script performance and reliability controls:
 

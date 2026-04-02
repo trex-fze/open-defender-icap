@@ -183,11 +183,13 @@ The workflow for an unclassified site emphasizes “content-first” verificatio
 
 3. **LLM Worker Gating** – When the LLM worker reads the `requires_content` job, it updates `classification_requests` (`status = waiting_content`) and polls Postgres until fresh `page_contents` exist for that normalized key. If no content is ready, the worker requeues the job (or sleeps) instead of generating a metadata-only verdict.
 
-4. **Content-Backed Verdict** – Once content is available, the worker builds the prompt with canonical taxonomy IDs, normalized domain key, and homepage HTML context/hash, then calls the configured LLM provider(s). Non-canonical outputs are logged and retried before persistence. Valid JSON is then persisted to `classifications` + `classification_versions`, written into Redis (cache + invalidation channel), and the pending row is deleted.
+4. **Stale Pending Diversion (Budgeted)** – If a key remains `waiting_content` longer than the configured threshold (`requested_at` age), the worker can attempt an online provider first (for example OpenAI fallback) only when provider health checks pass. This diversion still respects normal failover budget/cooldown controls and also has a separate per-minute diversion cap.
 
-5. **Operator Touchpoints** – Admin API exposes pending rows (`GET /api/v1/classifications/pending`) and a broader management list (`GET /api/v1/classifications`) so analysts can classify pending keys and edit/remove existing classifications. The Pending Sites flow uses `POST /api/v1/classifications/:key/manual-classify` (category + subcategory), while Allow / Deny overrides remain in `/api/v1/overrides`.
+5. **Content-Backed Verdict** – Once content is available, the worker builds the prompt with canonical taxonomy IDs, normalized domain key, and homepage HTML context/hash, then calls the configured LLM provider(s). Non-canonical outputs are logged and retried before persistence. Valid JSON is then persisted to `classifications` + `classification_versions`, written into Redis (cache + invalidation channel), and the pending row is deleted.
 
-6. **Subsequent Requests** – After the LLM verdict lands (or an analyst overrides it), ICAP adaptor cache hits serve the real action immediately. The site stays blocked indefinitely until content is verified (security-first posture).
+6. **Operator Touchpoints** – Admin API exposes pending rows (`GET /api/v1/classifications/pending`) and a broader management list (`GET /api/v1/classifications`) so analysts can classify pending keys and edit/remove existing classifications. The Pending Sites flow uses `POST /api/v1/classifications/:key/manual-classify` (category + subcategory), while Allow / Deny overrides remain in `/api/v1/overrides`.
+
+7. **Subsequent Requests** – After the LLM verdict lands (or an analyst overrides it), ICAP adaptor cache hits serve the real action immediately. The site stays blocked indefinitely until content is verified (security-first posture).
 
 ### 3.3 Override Flow (Future)
 1. Admin defines override via API/UI/CLI (scope: user/IP/domain).

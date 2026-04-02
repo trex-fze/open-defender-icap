@@ -114,6 +114,14 @@ struct RoutingConfig {
     pub fallback_cooldown_secs: Option<u64>,
     #[serde(default)]
     pub fallback_max_per_min: Option<usize>,
+    #[serde(default)]
+    pub stale_pending_minutes: Option<u64>,
+    #[serde(default)]
+    pub stale_pending_online_provider: Option<String>,
+    #[serde(default)]
+    pub stale_pending_health_ttl_secs: Option<u64>,
+    #[serde(default)]
+    pub stale_pending_max_per_min: Option<usize>,
 }
 
 impl WorkerConfig {
@@ -194,6 +202,43 @@ impl WorkerConfig {
             .find(|p| p.name == name)
             .ok_or_else(|| anyhow!("provider '{name}' not found"))?;
         ResolvedProvider::from_config(provider)
+    }
+
+    fn resolve_stale_pending(&self) -> Result<Option<StalePendingRuntime>> {
+        let threshold_minutes = env_u64("OD_LLM_STALE_PENDING_MINUTES")
+            .or(self.routing.stale_pending_minutes)
+            .unwrap_or(0);
+        if threshold_minutes == 0 {
+            return Ok(None);
+        }
+
+        let provider_name = env::var("OD_LLM_STALE_PENDING_ONLINE_PROVIDER")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| self.routing.stale_pending_online_provider.clone())
+            .or_else(|| self.routing.fallback.clone())
+            .ok_or_else(|| {
+                anyhow!(
+                    "stale pending diversion enabled but no online provider configured (OD_LLM_STALE_PENDING_ONLINE_PROVIDER or routing.fallback)"
+                )
+            })?;
+
+        let online_provider = self.find_provider(provider_name.as_str())?;
+        let health_ttl_secs = env_u64("OD_LLM_STALE_PENDING_HEALTH_TTL_SECS")
+            .or(self.routing.stale_pending_health_ttl_secs)
+            .unwrap_or(DEFAULT_STALE_PENDING_HEALTH_TTL_SECS)
+            .max(1);
+        let max_per_min = env_usize("OD_LLM_STALE_PENDING_MAX_PER_MIN")
+            .or(self.routing.stale_pending_max_per_min)
+            .unwrap_or(DEFAULT_STALE_PENDING_MAX_PER_MIN)
+            .max(1);
+
+        Ok(Some(StalePendingRuntime {
+            threshold_minutes,
+            online_provider,
+            health_ttl_secs,
+            max_per_min,
+        }))
     }
 }
 
@@ -280,6 +325,9 @@ const DEFAULT_PRIMARY_RETRY_MAX_BACKOFF_MS: u64 = 5000;
 const DEFAULT_RETRYABLE_STATUS_CODES: &[u16] = &[408, 429, 500, 502, 503, 504];
 const DEFAULT_FALLBACK_COOLDOWN_SECS: u64 = 30;
 const DEFAULT_FALLBACK_MAX_PER_MIN: usize = 30;
+const DEFAULT_STALE_PENDING_HEALTH_TTL_SECS: u64 = 30;
+const DEFAULT_STALE_PENDING_MAX_PER_MIN: usize = 10;
+const HEALTHCHECK_PROMPT: &str = "Return JSON only with this exact shape: {\"primary_category\":\"unknown\",\"subcategory\":\"unclassified\",\"risk_level\":\"low\",\"confidence\":0.5,\"recommended_action\":\"Allow\"}.";
 
 #[derive(Debug, Clone, Copy)]
 enum FailoverPolicy {
@@ -388,6 +436,55 @@ struct FallbackBudgetState {
     window_events: VecDeque<Instant>,
 }
 
+#[derive(Debug)]
+struct WindowBudgetState {
+    window_start: Instant,
+    window_events: VecDeque<Instant>,
+}
+
+impl WindowBudgetState {
+    fn new() -> Self {
+        Self {
+            window_start: Instant::now(),
+            window_events: VecDeque::new(),
+        }
+    }
+
+    fn allow_and_record(&mut self, max_per_min: usize) -> bool {
+        let now = Instant::now();
+        if now.duration_since(self.window_start).as_secs() >= 60 {
+            self.window_start = now;
+            self.window_events.clear();
+        }
+        while let Some(ts) = self.window_events.front() {
+            if now.duration_since(*ts).as_secs() >= 60 {
+                self.window_events.pop_front();
+            } else {
+                break;
+            }
+        }
+        if self.window_events.len() >= max_per_min {
+            return false;
+        }
+        self.window_events.push_back(now);
+        true
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StalePendingRuntime {
+    threshold_minutes: u64,
+    online_provider: ResolvedProvider,
+    health_ttl_secs: u64,
+    max_per_min: usize,
+}
+
+#[derive(Debug)]
+struct ProviderHealthState {
+    checked_at: Instant,
+    healthy: bool,
+}
+
 impl FallbackBudgetState {
     fn new() -> Self {
         let now = Instant::now();
@@ -490,6 +587,9 @@ async fn main() -> Result<()> {
 
     let cfg: WorkerConfig = config_core::load_config("config/llm-worker.json")?;
     let failover = FailoverRuntime::from_routing(&cfg.routing);
+    let stale_pending = cfg
+        .resolve_stale_pending()
+        .context("failed to resolve stale pending diversion settings")?;
     info!(
         target = "svc-llm-worker",
         queue = %cfg.queue_name,
@@ -499,6 +599,17 @@ async fn main() -> Result<()> {
         primary_retry_max = failover.primary_retry_max,
         fallback_cooldown_secs = failover.fallback_cooldown_secs,
         fallback_max_per_min = failover.fallback_max_per_min,
+        stale_pending_enabled = stale_pending.is_some(),
+        stale_pending_threshold_minutes = stale_pending.as_ref().map(|cfg| cfg.threshold_minutes).unwrap_or(0),
+        stale_pending_provider = stale_pending
+            .as_ref()
+            .map(|cfg| cfg.online_provider.name.as_str())
+            .unwrap_or("disabled"),
+        stale_pending_health_ttl_secs = stale_pending
+            .as_ref()
+            .map(|cfg| cfg.health_ttl_secs)
+            .unwrap_or(0),
+        stale_pending_max_per_min = stale_pending.as_ref().map(|cfg| cfg.max_per_min).unwrap_or(0),
         "LLM worker initialized"
     );
 
@@ -548,8 +659,16 @@ async fn main() -> Result<()> {
     let cache_listener = CacheListener::new(&cfg.redis_url, &cfg.cache_channel).await?;
     tokio::spawn(cache_listener.run());
 
-    let job_consumer =
-        JobConsumer::new(&cfg, router, pool.clone(), taxonomy.clone(), activation, failover).await?;
+    let job_consumer = JobConsumer::new(
+        &cfg,
+        router,
+        stale_pending,
+        pool.clone(),
+        taxonomy.clone(),
+        activation,
+        failover,
+    )
+    .await?;
     tokio::spawn(job_consumer.run());
 
     signal::ctrl_c().await?;
@@ -640,12 +759,16 @@ struct JobConsumer {
     activation: Arc<ActivationState>,
     failover: FailoverRuntime,
     fallback_budget: Mutex<FallbackBudgetState>,
+    stale_pending: Option<StalePendingRuntime>,
+    stale_divert_budget: Mutex<WindowBudgetState>,
+    provider_health: Mutex<HashMap<String, ProviderHealthState>>,
 }
 
 impl JobConsumer {
     async fn new(
         cfg: &WorkerConfig,
         router: ProviderRouter,
+        stale_pending: Option<StalePendingRuntime>,
         pool: PgPool,
         taxonomy: Arc<TaxonomyStore>,
         activation: Arc<ActivationState>,
@@ -666,6 +789,9 @@ impl JobConsumer {
             activation,
             failover,
             fallback_budget: Mutex::new(FallbackBudgetState::new()),
+            stale_pending,
+            stale_divert_budget: Mutex::new(WindowBudgetState::new()),
+            provider_health: Mutex::new(HashMap::new()),
         })
     }
 
@@ -797,6 +923,7 @@ impl JobConsumer {
             self.mark_pending(&job, "waiting_content", None).await?;
         }
         self.enrich_job_with_content(&mut job).await?;
+        let stale_provider = self.select_stale_pending_provider(&job).await?;
         let mut provider_name = String::new();
         let mut selected_verdict: Option<LlmResponse> = None;
         let mut selected_fallback_reason = None;
@@ -808,7 +935,9 @@ impl JobConsumer {
                 None
             };
             let prompt = build_prompt(&job, &self.taxonomy_prompt, retry_instruction);
-            let (raw_verdict, provider) = self.invoke_with_fallback(&job, &prompt).await?;
+            let (raw_verdict, provider) = self
+                .invoke_with_fallback(&job, &prompt, stale_provider.as_ref())
+                .await?;
             provider_name = provider;
 
             let raw_category = raw_verdict.primary_category.clone();
@@ -970,11 +1099,145 @@ impl JobConsumer {
         Ok(())
     }
 
+    async fn select_stale_pending_provider(
+        &self,
+        job: &ClassificationJobPayload,
+    ) -> Result<Option<ResolvedProvider>> {
+        let Some(cfg) = self.stale_pending.as_ref() else {
+            return Ok(None);
+        };
+        if !job.requires_content {
+            return Ok(None);
+        }
+
+        let pending_age_minutes = self
+            .stale_pending_age_minutes(&job.normalized_key, cfg.threshold_minutes)
+            .await?;
+        let Some(age_minutes) = pending_age_minutes else {
+            return Ok(None);
+        };
+
+        metrics::record_stale_pending_eligible();
+        let provider = &cfg.online_provider;
+
+        if provider.name == self.router.primary().name {
+            metrics::record_stale_pending_skipped("provider_is_primary");
+            return Ok(None);
+        }
+
+        if !self.provider_health_ok(provider, cfg.health_ttl_secs).await {
+            metrics::record_stale_pending_skipped("provider_unhealthy");
+            return Ok(None);
+        }
+
+        {
+            let mut budget = self.stale_divert_budget.lock().await;
+            if !budget.allow_and_record(cfg.max_per_min) {
+                metrics::record_stale_pending_skipped("budget_exhausted");
+                return Ok(None);
+            }
+        }
+
+        info!(
+            target = "svc-llm-worker",
+            normalized_key = %job.normalized_key,
+            provider = %provider.name,
+            pending_age_minutes = age_minutes,
+            threshold_minutes = cfg.threshold_minutes,
+            "stale pending diversion is eligible"
+        );
+
+        Ok(Some(provider.clone()))
+    }
+
+    async fn stale_pending_age_minutes(
+        &self,
+        normalized_key: &str,
+        threshold_minutes: u64,
+    ) -> Result<Option<u64>> {
+        let row = sqlx::query(
+            r#"
+            SELECT FLOOR(EXTRACT(EPOCH FROM (NOW() - requested_at)) / 60.0)::BIGINT AS age_minutes
+            FROM classification_requests
+            WHERE normalized_key = $1
+              AND status = 'waiting_content'
+            LIMIT 1
+            "#,
+        )
+        .bind(normalized_key)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let age_minutes: i64 = row.try_get("age_minutes")?;
+        if age_minutes < threshold_minutes as i64 {
+            return Ok(None);
+        }
+        Ok(Some(age_minutes.max(0) as u64))
+    }
+
+    async fn provider_health_ok(&self, provider: &ResolvedProvider, ttl_secs: u64) -> bool {
+        {
+            let health = self.provider_health.lock().await;
+            if let Some(state) = health.get(&provider.name) {
+                if state.checked_at.elapsed().as_secs() <= ttl_secs {
+                    return state.healthy;
+                }
+            }
+        }
+
+        let healthy = invoke_provider_healthcheck(provider).await.is_ok();
+        let outcome = if healthy { "healthy" } else { "unhealthy" };
+        metrics::record_stale_pending_healthcheck(&provider.name, outcome);
+
+        let mut health = self.provider_health.lock().await;
+        health.insert(
+            provider.name.clone(),
+            ProviderHealthState {
+                checked_at: Instant::now(),
+                healthy,
+            },
+        );
+        healthy
+    }
+
     async fn invoke_with_fallback(
         &self,
         job: &ClassificationJobPayload,
         prompt: &str,
+        stale_provider: Option<&ResolvedProvider>,
     ) -> Result<(LlmResponse, String)> {
+        if let Some(provider) = stale_provider {
+            if provider.name != self.router.primary().name {
+                metrics::record_stale_pending_divert(&provider.name, "attempt");
+                info!(
+                    target = "svc-llm-worker",
+                    normalized_key = %job.normalized_key,
+                    provider = %provider.name,
+                    "attempting stale pending diversion to online provider"
+                );
+                match self.invoke_primary_with_retry(provider, job, prompt).await {
+                    Ok(response) => {
+                        metrics::record_stale_pending_divert(&provider.name, "success");
+                        return Ok((response, provider.name.clone()));
+                    }
+                    Err(err) => {
+                        metrics::record_stale_pending_divert(&provider.name, "failed");
+                        warn!(
+                            target = "svc-llm-worker",
+                            normalized_key = %job.normalized_key,
+                            provider = %provider.name,
+                            class = ?err.class,
+                            status = ?err.status,
+                            reason = %err.reason,
+                            "stale pending diversion failed; continuing with normal provider routing"
+                        );
+                    }
+                }
+            }
+        }
+
         let primary = self.router.primary();
         let primary_failure = self.invoke_primary_with_retry(primary, job, prompt).await;
         match primary_failure {
@@ -1011,7 +1274,8 @@ impl JobConsumer {
                     provider
                 } else {
                     metrics::record_fallback_skipped("fallback_not_configured");
-                    let reason = format!("primary failed and fallback not configured: {}", err.reason);
+                    let reason =
+                        format!("primary failed and fallback not configured: {}", err.reason);
                     return Err(RetryableJobError { reason }.into());
                 };
 
@@ -1114,10 +1378,14 @@ impl JobConsumer {
                         "llm invocation failed"
                     );
 
-                    if attempt >= max_attempts || failure.class == InvocationFailureClass::NonRetryable
+                    if attempt >= max_attempts
+                        || failure.class == InvocationFailureClass::NonRetryable
                     {
                         if attempt >= max_attempts {
-                            metrics::record_primary_retry_exhausted(&provider.name, "attempt_limit");
+                            metrics::record_primary_retry_exhausted(
+                                &provider.name,
+                                "attempt_limit",
+                            );
                         }
                         return Err(failure);
                     }
@@ -1473,7 +1741,46 @@ async fn invoke_llm(
     }
 }
 
-fn classify_invocation_failure(err: &anyhow::Error, failover: &FailoverRuntime) -> InvocationFailure {
+async fn invoke_provider_healthcheck(provider: &ResolvedProvider) -> Result<()> {
+    let dummy_job = ClassificationJobPayload {
+        normalized_key: "domain:healthcheck.internal".into(),
+        entity_level: "domain".into(),
+        hostname: "healthcheck.internal".into(),
+        full_url: "https://healthcheck.internal/".into(),
+        trace_id: "stale-pending-healthcheck".into(),
+        requires_content: false,
+        base_url: None,
+        content_excerpt: Some("Healthcheck payload".into()),
+        content_hash: None,
+        content_version: None,
+        content_language: None,
+    };
+
+    match provider.kind {
+        ProviderKind::Ollama => {
+            let _ = invoke_ollama(provider, HEALTHCHECK_PROMPT).await?;
+        }
+        ProviderKind::LmStudio => {
+            let _ = invoke_lmstudio_chat(provider, HEALTHCHECK_PROMPT).await?;
+        }
+        ProviderKind::Openai | ProviderKind::Vllm | ProviderKind::OpenaiCompatible => {
+            let _ = invoke_openai_chat(provider, HEALTHCHECK_PROMPT).await?;
+        }
+        ProviderKind::Anthropic => {
+            let _ = invoke_anthropic(provider, HEALTHCHECK_PROMPT).await?;
+        }
+        ProviderKind::CustomJson => {
+            let _ = invoke_custom_json(provider, &dummy_job).await?;
+        }
+    }
+
+    Ok(())
+}
+
+fn classify_invocation_failure(
+    err: &anyhow::Error,
+    failover: &FailoverRuntime,
+) -> InvocationFailure {
     if let Some(req_err) = err.downcast_ref::<reqwest::Error>() {
         if req_err.is_timeout() || req_err.is_connect() || req_err.is_request() {
             return InvocationFailure {
@@ -2052,6 +2359,76 @@ mod tests {
         assert!(extracted.contains("\"value\":1"));
     }
 
+    #[test]
+    fn stale_pending_runtime_resolves_online_provider() {
+        let cfg = WorkerConfig {
+            queue_name: "classification-jobs".into(),
+            redis_url: "redis://localhost:6379".into(),
+            cache_channel: "od:cache:invalidate".into(),
+            stream: "classification-jobs".into(),
+            page_fetch_stream: "page-fetch-jobs".into(),
+            database_url: "postgres://localhost/test".into(),
+            llm_endpoint: None,
+            llm_api_key: None,
+            providers: vec![
+                ProviderConfig {
+                    name: "local".into(),
+                    kind: ProviderKind::LmStudio,
+                    endpoint: "http://127.0.0.1:1234/v1/chat/completions".into(),
+                    model: Some("local-model".into()),
+                    timeout_ms: Some(5000),
+                    headers: HashMap::new(),
+                    api_key: None,
+                    api_key_env: None,
+                },
+                ProviderConfig {
+                    name: "online".into(),
+                    kind: ProviderKind::Openai,
+                    endpoint: "https://api.openai.com/v1/chat/completions".into(),
+                    model: Some("gpt-4o-mini".into()),
+                    timeout_ms: Some(5000),
+                    headers: HashMap::new(),
+                    api_key: Some("dummy".into()),
+                    api_key_env: None,
+                },
+            ],
+            routing: RoutingConfig {
+                default: Some("local".into()),
+                fallback: Some("online".into()),
+                policy: Some("safe".into()),
+                primary_retry_max: None,
+                primary_retry_backoff_ms: None,
+                primary_retry_max_backoff_ms: None,
+                retryable_status_codes: Vec::new(),
+                fallback_cooldown_secs: None,
+                fallback_max_per_min: None,
+                stale_pending_minutes: Some(7),
+                stale_pending_online_provider: None,
+                stale_pending_health_ttl_secs: Some(45),
+                stale_pending_max_per_min: Some(12),
+            },
+            metrics_host: "127.0.0.1".into(),
+            metrics_port: 0,
+        };
+
+        let runtime = cfg
+            .resolve_stale_pending()
+            .expect("resolve stale settings")
+            .expect("stale pending enabled");
+        assert_eq!(runtime.threshold_minutes, 7);
+        assert_eq!(runtime.online_provider.name, "online");
+        assert_eq!(runtime.health_ttl_secs, 45);
+        assert_eq!(runtime.max_per_min, 12);
+    }
+
+    #[test]
+    fn window_budget_enforces_per_minute_limit() {
+        let mut budget = WindowBudgetState::new();
+        assert!(budget.allow_and_record(2));
+        assert!(budget.allow_and_record(2));
+        assert!(!budget.allow_and_record(2));
+    }
+
     #[tokio::test]
     async fn processes_queue_job_and_persists_classification() -> Result<()> {
         let (redis_guard, redis_port) = start_redis_container()?;
@@ -2088,9 +2465,17 @@ mod tests {
         let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
         let activation = Arc::new(ActivationState::allow_all());
         let failover = FailoverRuntime::from_routing(&cfg.routing);
-        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation, failover)
-            .await
-            .unwrap();
+        let consumer = JobConsumer::new(
+            &cfg,
+            router,
+            None,
+            pool.clone(),
+            taxonomy,
+            activation,
+            failover,
+        )
+        .await
+        .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
         let job = ClassificationJobPayload {
@@ -2174,9 +2559,17 @@ mod tests {
         let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
         let activation = Arc::new(ActivationState::allow_all());
         let failover = FailoverRuntime::from_routing(&cfg.routing);
-        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation, failover)
-            .await
-            .unwrap();
+        let consumer = JobConsumer::new(
+            &cfg,
+            router,
+            None,
+            pool.clone(),
+            taxonomy,
+            activation,
+            failover,
+        )
+        .await
+        .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
         let job = ClassificationJobPayload {
@@ -2255,9 +2648,17 @@ mod tests {
         let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
         let activation = Arc::new(ActivationState::allow_all());
         let failover = FailoverRuntime::from_routing(&cfg.routing);
-        let consumer = JobConsumer::new(&cfg, router, pool.clone(), taxonomy, activation, failover)
-            .await
-            .unwrap();
+        let consumer = JobConsumer::new(
+            &cfg,
+            router,
+            None,
+            pool.clone(),
+            taxonomy,
+            activation,
+            failover,
+        )
+        .await
+        .unwrap();
         let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
         let job = ClassificationJobPayload {

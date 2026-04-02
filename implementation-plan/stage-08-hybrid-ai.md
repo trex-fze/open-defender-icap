@@ -43,3 +43,10 @@
 2. Add compose overlays + documentation for LM Studio/Ollama (S8-T6).
 3. Extend security/perf suites for provider failover (S8-T7).
 4. Capture evidence + runbooks (S8-T8).
+
+## Stage 8 Addendum (Post-Complete)
+- Added budgeted stale-pending online diversion in `llm-worker`:
+  - Uses `classification_requests.requested_at` age to determine stale pending eligibility.
+  - Attempts configured online provider when health checks pass.
+  - Respects existing fallback controls and introduces a separate stale-divert per-minute cap.
+- Added metrics family `llm_stale_pending_*` and updated architecture/runbook docs.
