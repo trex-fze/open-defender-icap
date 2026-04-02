@@ -125,6 +125,10 @@ LLM failover safety controls (env overrides for `config/llm-worker.json` routing
 - `OD_LLM_STALE_PENDING_HEALTH_TTL_SECS`: cache ttl for online provider health checks (default `30`)
 - `OD_LLM_STALE_PENDING_MAX_PER_MIN`: separate stale diversion cap per minute (default `10`)
 - `OD_LLM_ONLINE_CONTEXT_MODE`: online-provider content mode `required|preferred|metadata_only` (default `required`)
+- `OD_LLM_CONTENT_REQUIRED_MODE`: content gating mode `required|auto` (default `required`)
+- `OD_LLM_METADATA_ONLY_ALLOWED_FOR`: metadata-only scope `online|all` (default `online`)
+- `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD`: fallback threshold for fetch failures before metadata-only classification (default `2`)
+- `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES`: terminal fetch statuses treated as no-content targets (default `failed,unsupported,blocked`)
 - `OD_LLM_METADATA_ONLY_FORCE_ACTION`: force action when online call runs metadata-only (default `Monitor`)
 - `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`: cap confidence for metadata-only outputs (default `0.4`)
 - `OD_LLM_METADATA_ONLY_REQUEUE_FOR_CONTENT`: keep pending row and wait for excerpt after metadata-only persistence (default `true`)
@@ -243,6 +247,12 @@ Use `down -v` only when you explicitly need a clean local data state.
 - Can I choose whether online providers receive scraped excerpts?
   - Yes. Set `OD_LLM_ONLINE_CONTEXT_MODE` to `required` (always send excerpt), `preferred` (send when available), or `metadata_only` (never send excerpt).
   - In metadata-only mode, guardrails force conservative action/confidence via `OD_LLM_METADATA_ONLY_FORCE_ACTION` and `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`.
+- What if a site is API-like and page content never renders?
+  - Set `OD_LLM_CONTENT_REQUIRED_MODE=auto` and keep `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2` so repeated terminal fetch failures can fall back to metadata-only classification.
+  - Use `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES` to tune what counts as terminal content failure.
+- What if I run offline-only models?
+  - Set `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all` so metadata-only fallback is available to offline providers too.
+  - Conservative guardrails still apply (`OD_LLM_METADATA_ONLY_FORCE_ACTION`, `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`).
 
 ## 9) Additional relevant information
 

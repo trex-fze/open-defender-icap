@@ -130,6 +130,14 @@ struct RoutingConfig {
     pub metadata_only_max_confidence: Option<f32>,
     #[serde(default)]
     pub metadata_only_requeue_for_content: Option<bool>,
+    #[serde(default)]
+    pub content_required_mode: Option<String>,
+    #[serde(default)]
+    pub metadata_only_allowed_for: Option<String>,
+    #[serde(default)]
+    pub metadata_only_fetch_failure_threshold: Option<usize>,
+    #[serde(default)]
+    pub metadata_only_no_content_statuses: Option<Vec<String>>,
 }
 
 impl WorkerConfig {
@@ -276,11 +284,49 @@ impl WorkerConfig {
                 .or(self.routing.metadata_only_requeue_for_content)
                 .unwrap_or(DEFAULT_METADATA_ONLY_REQUEUE_FOR_CONTENT);
 
+        let content_required_mode = env::var("OD_LLM_CONTENT_REQUIRED_MODE")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| self.routing.content_required_mode.clone())
+            .map(|value| ContentRequiredMode::parse(value.as_str()))
+            .unwrap_or_else(|| ContentRequiredMode::parse(DEFAULT_CONTENT_REQUIRED_MODE));
+
+        let metadata_only_allowed_for = env::var("OD_LLM_METADATA_ONLY_ALLOWED_FOR")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| self.routing.metadata_only_allowed_for.clone())
+            .map(|value| MetadataOnlyAllowedFor::parse(value.as_str()))
+            .unwrap_or_else(|| MetadataOnlyAllowedFor::parse(DEFAULT_METADATA_ONLY_ALLOWED_FOR));
+
+        let metadata_only_fetch_failure_threshold =
+            env_usize("OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD")
+                .or(self.routing.metadata_only_fetch_failure_threshold)
+                .unwrap_or(DEFAULT_METADATA_ONLY_FETCH_FAILURE_THRESHOLD)
+                .max(1);
+
+        let metadata_only_no_content_statuses =
+            env_csv_strings("OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES")
+                .or_else(|| self.routing.metadata_only_no_content_statuses.clone())
+                .unwrap_or_else(|| {
+                    DEFAULT_METADATA_ONLY_NO_CONTENT_STATUSES
+                        .iter()
+                        .map(|value| value.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .into_iter()
+                .map(|value| value.trim().to_ascii_lowercase())
+                .filter(|value| !value.is_empty())
+                .collect::<HashSet<_>>();
+
         Ok(OnlineContextRuntime {
             mode,
             metadata_only_force_action,
             metadata_only_max_confidence,
             metadata_only_requeue_for_content,
+            content_required_mode,
+            metadata_only_allowed_for,
+            metadata_only_fetch_failure_threshold,
+            metadata_only_no_content_statuses,
         })
     }
 }
@@ -374,6 +420,10 @@ const DEFAULT_ONLINE_CONTEXT_MODE: &str = "required";
 const DEFAULT_METADATA_ONLY_FORCE_ACTION: &str = "Monitor";
 const DEFAULT_METADATA_ONLY_MAX_CONFIDENCE: f32 = 0.40;
 const DEFAULT_METADATA_ONLY_REQUEUE_FOR_CONTENT: bool = true;
+const DEFAULT_CONTENT_REQUIRED_MODE: &str = "required";
+const DEFAULT_METADATA_ONLY_ALLOWED_FOR: &str = "online";
+const DEFAULT_METADATA_ONLY_FETCH_FAILURE_THRESHOLD: usize = 2;
+const DEFAULT_METADATA_ONLY_NO_CONTENT_STATUSES: &[&str] = &["failed", "unsupported", "blocked"];
 const HEALTHCHECK_PROMPT: &str = "Return JSON only with this exact shape: {\"primary_category\":\"unknown\",\"subcategory\":\"unclassified\",\"risk_level\":\"low\",\"confidence\":0.5,\"recommended_action\":\"Allow\"}.";
 
 #[derive(Debug, Clone, Copy)]
@@ -381,6 +431,50 @@ enum OnlineContextMode {
     Required,
     Preferred,
     MetadataOnly,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ContentRequiredMode {
+    Required,
+    Auto,
+}
+
+impl ContentRequiredMode {
+    fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Self::Auto,
+            _ => Self::Required,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::Auto => "auto",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MetadataOnlyAllowedFor {
+    Online,
+    All,
+}
+
+impl MetadataOnlyAllowedFor {
+    fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "all" => Self::All,
+            _ => Self::Online,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Online => "online",
+            Self::All => "all",
+        }
+    }
 }
 
 impl OnlineContextMode {
@@ -422,12 +516,17 @@ struct OnlineContextRuntime {
     metadata_only_force_action: PolicyAction,
     metadata_only_max_confidence: f32,
     metadata_only_requeue_for_content: bool,
+    content_required_mode: ContentRequiredMode,
+    metadata_only_allowed_for: MetadataOnlyAllowedFor,
+    metadata_only_fetch_failure_threshold: usize,
+    metadata_only_no_content_statuses: HashSet<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ProviderRequestPlan {
     require_content: bool,
     send_excerpt: bool,
+    metadata_only_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -586,6 +685,12 @@ struct ProviderHealthState {
     healthy: bool,
 }
 
+#[derive(Debug)]
+struct PageFetchState {
+    latest_status: Option<String>,
+    failure_count: i64,
+}
+
 impl FallbackBudgetState {
     fn new() -> Self {
         let now = Instant::now();
@@ -691,6 +796,20 @@ fn env_csv_u16(key: &str) -> Option<Vec<u16>> {
     }
 }
 
+fn env_csv_strings(key: &str) -> Option<Vec<String>> {
+    let raw = env::var(key).ok()?;
+    let values = raw
+        .split(',')
+        .map(|token| token.trim().to_ascii_lowercase())
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing()?;
@@ -724,6 +843,10 @@ async fn main() -> Result<()> {
             .unwrap_or(0),
         stale_pending_max_per_min = stale_pending.as_ref().map(|cfg| cfg.max_per_min).unwrap_or(0),
         online_context_mode = online_context.mode.as_str(),
+        content_required_mode = online_context.content_required_mode.as_str(),
+        metadata_only_allowed_for = online_context.metadata_only_allowed_for.as_str(),
+        metadata_only_fetch_failure_threshold = online_context.metadata_only_fetch_failure_threshold,
+        metadata_only_no_content_statuses = ?online_context.metadata_only_no_content_statuses,
         metadata_only_force_action = ?online_context.metadata_only_force_action,
         metadata_only_max_confidence = online_context.metadata_only_max_confidence,
         metadata_only_requeue_for_content = online_context.metadata_only_requeue_for_content,
@@ -1047,6 +1170,7 @@ impl JobConsumer {
         let mut provider_name = String::new();
         let mut selected_verdict: Option<LlmResponse> = None;
         let mut selected_fallback_reason = None;
+        let mut selected_metadata_only_reason: Option<String> = None;
         let mut selected_context_mode = PromptContextMode::WithExcerpt;
         let mut selected_excerpt_sent = false;
 
@@ -1056,12 +1180,13 @@ impl JobConsumer {
             } else {
                 None
             };
-            let (raw_verdict, provider, context_mode, excerpt_sent) = self
+            let (raw_verdict, provider, context_mode, excerpt_sent, metadata_only_reason) = self
                 .invoke_with_fallback(&job, retry_instruction, stale_provider.as_ref())
                 .await?;
             provider_name = provider;
             selected_context_mode = context_mode;
             selected_excerpt_sent = excerpt_sent;
+            selected_metadata_only_reason = metadata_only_reason;
 
             let raw_category = raw_verdict.primary_category.clone();
             let raw_subcategory = raw_verdict.subcategory.clone();
@@ -1143,6 +1268,7 @@ impl JobConsumer {
             activation_blocked,
             selected_context_mode,
             selected_excerpt_sent,
+            selected_metadata_only_reason.as_deref(),
             guardrail_forced_action,
             guardrail_capped_confidence,
         )
@@ -1165,6 +1291,12 @@ impl JobConsumer {
             self.clear_pending(&job.normalized_key).await?;
         }
         metrics::record_context_mode(&provider_name, selected_context_mode.as_str());
+        if let Some(reason) = selected_metadata_only_reason.as_deref() {
+            metrics::record_metadata_only_reason(reason);
+            if reason == "fetch_failed_threshold" {
+                metrics::record_fetch_failure_fallback(&provider_name, "applied");
+            }
+        }
         info!(
             target = "svc-llm-worker",
             key = job.normalized_key,
@@ -1172,6 +1304,7 @@ impl JobConsumer {
             provider = provider_name,
             context_mode = selected_context_mode.as_str(),
             excerpt_sent = selected_excerpt_sent,
+            metadata_only_reason = ?selected_metadata_only_reason,
             "classification stored"
         );
         Ok(())
@@ -1360,32 +1493,79 @@ impl JobConsumer {
         healthy
     }
 
-    fn provider_request_plan(
+    async fn provider_request_plan(
         &self,
         provider: &ResolvedProvider,
         job: &ClassificationJobPayload,
-    ) -> ProviderRequestPlan {
-        if !is_online_provider(provider) {
-            return ProviderRequestPlan {
-                require_content: job.requires_content,
-                send_excerpt: true,
-            };
+    ) -> Result<ProviderRequestPlan> {
+        let metadata_only_allowed = match self.online_context.metadata_only_allowed_for {
+            MetadataOnlyAllowedFor::All => true,
+            MetadataOnlyAllowedFor::Online => is_online_provider(provider),
+        };
+
+        if job.requires_content && metadata_only_allowed {
+            if let Some(reason) = self.metadata_only_fetch_failure_reason(job).await? {
+                return Ok(ProviderRequestPlan {
+                    require_content: false,
+                    send_excerpt: true,
+                    metadata_only_reason: Some(reason),
+                });
+            }
         }
 
-        match self.online_context.mode {
-            OnlineContextMode::Required => ProviderRequestPlan {
+        if !is_online_provider(provider) {
+            return Ok(ProviderRequestPlan {
                 require_content: job.requires_content,
                 send_excerpt: true,
+                metadata_only_reason: None,
+            });
+        }
+
+        let require_content = match self.online_context.content_required_mode {
+            ContentRequiredMode::Required => job.requires_content,
+            ContentRequiredMode::Auto => false,
+        };
+
+        Ok(match self.online_context.mode {
+            OnlineContextMode::Required => ProviderRequestPlan {
+                require_content,
+                send_excerpt: true,
+                metadata_only_reason: None,
             },
             OnlineContextMode::Preferred => ProviderRequestPlan {
-                require_content: false,
+                require_content,
                 send_excerpt: true,
+                metadata_only_reason: None,
             },
             OnlineContextMode::MetadataOnly => ProviderRequestPlan {
                 require_content: false,
                 send_excerpt: false,
+                metadata_only_reason: Some("mode_forced".to_string()),
             },
+        })
+    }
+
+    async fn metadata_only_fetch_failure_reason(
+        &self,
+        job: &ClassificationJobPayload,
+    ) -> Result<Option<String>> {
+        let state = self.load_page_fetch_state(&job.normalized_key).await?;
+        let has_terminal_status = state
+            .latest_status
+            .as_ref()
+            .map(|status| {
+                self.online_context
+                    .metadata_only_no_content_statuses
+                    .contains(status)
+            })
+            .unwrap_or(false);
+        if has_terminal_status
+            && state.failure_count
+                >= self.online_context.metadata_only_fetch_failure_threshold as i64
+        {
+            return Ok(Some("fetch_failed_threshold".to_string()));
         }
+        Ok(None)
     }
 
     async fn prepare_provider_request(
@@ -1393,25 +1573,45 @@ impl JobConsumer {
         base_job: &ClassificationJobPayload,
         provider: &ResolvedProvider,
         retry_instruction: Option<&str>,
-    ) -> Result<(ClassificationJobPayload, String, PromptContextMode, bool)> {
-        let plan = self.provider_request_plan(provider, base_job);
+    ) -> Result<(
+        ClassificationJobPayload,
+        String,
+        PromptContextMode,
+        bool,
+        Option<String>,
+    )> {
+        let plan = self.provider_request_plan(provider, base_job).await?;
         let mut job = base_job.clone();
         self.enrich_job_with_content(&mut job, plan.require_content)
             .await?;
 
         let excerpt_available = has_content(&job.content_excerpt);
-        let (context_mode, excerpt_sent) = if plan.send_excerpt && excerpt_available {
-            (PromptContextMode::WithExcerpt, true)
-        } else {
-            job.content_excerpt = None;
-            job.content_hash = None;
-            job.content_version = None;
-            job.content_language = None;
-            (PromptContextMode::MetadataOnly, false)
-        };
+        let (context_mode, excerpt_sent, metadata_only_reason) =
+            if plan.send_excerpt && excerpt_available {
+                (PromptContextMode::WithExcerpt, true, None)
+            } else {
+                job.content_excerpt = None;
+                job.content_hash = None;
+                job.content_version = None;
+                job.content_language = None;
+                let reason = plan.metadata_only_reason.or_else(|| {
+                    if plan.send_excerpt {
+                        Some("missing_excerpt".to_string())
+                    } else {
+                        Some("mode_forced".to_string())
+                    }
+                });
+                (PromptContextMode::MetadataOnly, false, reason)
+            };
 
         let prompt = build_prompt(&job, &self.taxonomy_prompt, retry_instruction, context_mode);
-        Ok((job, prompt, context_mode, excerpt_sent))
+        Ok((
+            job,
+            prompt,
+            context_mode,
+            excerpt_sent,
+            metadata_only_reason,
+        ))
     }
 
     async fn invoke_with_fallback(
@@ -1419,10 +1619,10 @@ impl JobConsumer {
         job: &ClassificationJobPayload,
         retry_instruction: Option<&str>,
         stale_provider: Option<&ResolvedProvider>,
-    ) -> Result<(LlmResponse, String, PromptContextMode, bool)> {
+    ) -> Result<(LlmResponse, String, PromptContextMode, bool, Option<String>)> {
         if let Some(provider) = stale_provider {
             if provider.name != self.router.primary().name {
-                let (provider_job, prompt, context_mode, excerpt_sent) = self
+                let (provider_job, prompt, context_mode, excerpt_sent, metadata_only_reason) = self
                     .prepare_provider_request(job, provider, retry_instruction)
                     .await?;
                 metrics::record_stale_pending_divert(&provider.name, "attempt");
@@ -1438,7 +1638,13 @@ impl JobConsumer {
                 {
                     Ok(response) => {
                         metrics::record_stale_pending_divert(&provider.name, "success");
-                        return Ok((response, provider.name.clone(), context_mode, excerpt_sent));
+                        return Ok((
+                            response,
+                            provider.name.clone(),
+                            context_mode,
+                            excerpt_sent,
+                            metadata_only_reason,
+                        ));
                     }
                     Err(err) => {
                         metrics::record_stale_pending_divert(&provider.name, "failed");
@@ -1457,7 +1663,13 @@ impl JobConsumer {
         }
 
         let primary = self.router.primary();
-        let (primary_job, primary_prompt, primary_context_mode, primary_excerpt_sent) = self
+        let (
+            primary_job,
+            primary_prompt,
+            primary_context_mode,
+            primary_excerpt_sent,
+            primary_metadata_reason,
+        ) = self
             .prepare_provider_request(job, primary, retry_instruction)
             .await?;
         let primary_failure = self
@@ -1470,6 +1682,7 @@ impl JobConsumer {
                     primary.name.clone(),
                     primary_context_mode,
                     primary_excerpt_sent,
+                    primary_metadata_reason,
                 ))
             }
             Err(err) => {
@@ -1531,9 +1744,15 @@ impl JobConsumer {
                     "attempting provider fallback"
                 );
 
-                let (fallback_job, fallback_prompt, fallback_context_mode, fallback_excerpt_sent) =
-                    self.prepare_provider_request(job, fallback, retry_instruction)
-                        .await?;
+                let (
+                    fallback_job,
+                    fallback_prompt,
+                    fallback_context_mode,
+                    fallback_excerpt_sent,
+                    fallback_metadata_reason,
+                ) = self
+                    .prepare_provider_request(job, fallback, retry_instruction)
+                    .await?;
 
                 match invoke_llm(fallback, &fallback_job, &fallback_prompt).await {
                     Ok(response) => {
@@ -1548,6 +1767,7 @@ impl JobConsumer {
                             fallback.name.clone(),
                             fallback_context_mode,
                             fallback_excerpt_sent,
+                            fallback_metadata_reason,
                         ))
                     }
                     Err(fallback_err) => {
@@ -1726,6 +1946,54 @@ impl JobConsumer {
         }
     }
 
+    async fn load_page_fetch_state(&self, normalized_key: &str) -> Result<PageFetchState> {
+        let latest_row = sqlx::query(
+            r#"
+            SELECT fetch_status
+            FROM page_contents
+            WHERE normalized_key = $1
+            ORDER BY fetch_version DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(normalized_key)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let latest_status = latest_row
+            .and_then(|row| {
+                row.try_get::<Option<String>, _>("fetch_status")
+                    .ok()
+                    .flatten()
+            })
+            .map(|status| status.trim().to_ascii_lowercase())
+            .filter(|status| !status.is_empty());
+
+        let terminal_statuses = self
+            .online_context
+            .metadata_only_no_content_statuses
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let failure_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COALESCE(COUNT(*), 0)
+            FROM page_contents
+            WHERE normalized_key = $1
+              AND LOWER(fetch_status) = ANY($2)
+            "#,
+        )
+        .bind(normalized_key)
+        .bind(&terminal_statuses)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(PageFetchState {
+            latest_status,
+            failure_count,
+        })
+    }
+
     async fn await_page_content(&self, normalized_key: &str) -> Result<Option<PageContentSnippet>> {
         for _ in 0..CONTENT_WAIT_ATTEMPTS {
             if let Some(snippet) = self.load_page_content(normalized_key).await? {
@@ -1858,6 +2126,7 @@ async fn store_classification(
     activation_blocked: bool,
     context_mode: PromptContextMode,
     excerpt_sent: bool,
+    metadata_only_reason: Option<&str>,
     guardrail_forced_action: bool,
     guardrail_capped_confidence: bool,
 ) -> Result<PolicyAction> {
@@ -1885,6 +2154,9 @@ async fn store_classification(
     flags_map.insert("excerpt_sent".to_string(), Value::from(excerpt_sent));
     if context_mode == PromptContextMode::MetadataOnly {
         flags_map.insert("metadata_only".to_string(), Value::from(true));
+        if let Some(reason) = metadata_only_reason {
+            flags_map.insert("metadata_only_reason".to_string(), Value::from(reason));
+        }
         flags_map.insert(
             "metadata_only_guardrail_forced_action".to_string(),
             Value::from(guardrail_forced_action),
@@ -2685,6 +2957,10 @@ mod tests {
                 metadata_only_force_action: None,
                 metadata_only_max_confidence: None,
                 metadata_only_requeue_for_content: None,
+                content_required_mode: None,
+                metadata_only_allowed_for: None,
+                metadata_only_fetch_failure_threshold: None,
+                metadata_only_no_content_statuses: None,
             },
             metrics_host: "127.0.0.1".into(),
             metrics_port: 0,
@@ -2732,6 +3008,10 @@ mod tests {
         assert_eq!(runtime.metadata_only_force_action, PolicyAction::Monitor);
         assert_eq!(runtime.metadata_only_max_confidence, 0.40);
         assert!(runtime.metadata_only_requeue_for_content);
+        assert_eq!(runtime.content_required_mode.as_str(), "required");
+        assert_eq!(runtime.metadata_only_allowed_for.as_str(), "online");
+        assert_eq!(runtime.metadata_only_fetch_failure_threshold, 2);
+        assert!(runtime.metadata_only_no_content_statuses.contains("failed"));
     }
 
     #[test]
@@ -2751,6 +3031,13 @@ mod tests {
                 metadata_only_force_action: Some("Warn".into()),
                 metadata_only_max_confidence: Some(0.25),
                 metadata_only_requeue_for_content: Some(false),
+                content_required_mode: Some("auto".into()),
+                metadata_only_allowed_for: Some("all".into()),
+                metadata_only_fetch_failure_threshold: Some(3),
+                metadata_only_no_content_statuses: Some(vec![
+                    "failed".into(),
+                    "unsupported".into(),
+                ]),
                 ..RoutingConfig::default()
             },
             metrics_host: "127.0.0.1".into(),
@@ -2764,6 +3051,12 @@ mod tests {
         assert_eq!(runtime.metadata_only_force_action, PolicyAction::Warn);
         assert_eq!(runtime.metadata_only_max_confidence, 0.25);
         assert!(!runtime.metadata_only_requeue_for_content);
+        assert_eq!(runtime.content_required_mode.as_str(), "auto");
+        assert_eq!(runtime.metadata_only_allowed_for.as_str(), "all");
+        assert_eq!(runtime.metadata_only_fetch_failure_threshold, 3);
+        assert!(runtime
+            .metadata_only_no_content_statuses
+            .contains("unsupported"));
     }
 
     #[tokio::test]

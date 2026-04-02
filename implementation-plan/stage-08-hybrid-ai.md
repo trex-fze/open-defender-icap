@@ -55,3 +55,8 @@
   - metadata-only guardrails (`OD_LLM_METADATA_ONLY_FORCE_ACTION`, `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`).
   - optional pending follow-up mode (`OD_LLM_METADATA_ONLY_REQUEUE_FOR_CONTENT`).
 - Added observability for context decisions and guardrails via `llm_context_mode_total`, `llm_metadata_only_guardrail_total`, and `llm_metadata_only_requeue_total`.
+- Added no-content/API fallback controls:
+  - `OD_LLM_CONTENT_REQUIRED_MODE=required|auto` for strict vs adaptive content gating.
+  - `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD` (default `2`) and `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES` to trigger metadata fallback after repeated terminal fetch failures.
+  - `OD_LLM_METADATA_ONLY_ALLOWED_FOR=online|all` to support offline-only provider deployments.
+- Added observability for metadata fallback reasons via `llm_metadata_only_reason_total` and `llm_fetch_failure_fallback_total`.

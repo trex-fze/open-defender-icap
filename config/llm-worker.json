@@ -38,7 +38,11 @@
     "online_context_mode": "required",
     "metadata_only_force_action": "Monitor",
     "metadata_only_max_confidence": 0.4,
-    "metadata_only_requeue_for_content": true
+    "metadata_only_requeue_for_content": true,
+    "content_required_mode": "required",
+    "metadata_only_allowed_for": "online",
+    "metadata_only_fetch_failure_threshold": 2,
+    "metadata_only_no_content_statuses": ["failed", "unsupported", "blocked"]
   },
   "metrics_host": "0.0.0.0",
   "metrics_port": 19015

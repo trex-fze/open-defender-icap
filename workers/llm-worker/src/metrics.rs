@@ -218,6 +218,24 @@ static METADATA_ONLY_REQUEUE: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+static METADATA_ONLY_REASON: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_metadata_only_reason_total",
+        "Metadata-only classifications by reason",
+        &["reason"]
+    )
+    .unwrap()
+});
+
+static FETCH_FAILURE_FALLBACK: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_fetch_failure_fallback_total",
+        "Metadata fallback triggered by repeated fetch failures",
+        &["provider", "result"]
+    )
+    .unwrap()
+});
+
 pub fn record_job_started() {
     JOBS_STARTED.inc();
 }
@@ -332,6 +350,16 @@ pub fn record_metadata_only_guardrail(guardrail_type: &str) {
 
 pub fn record_metadata_only_requeue() {
     METADATA_ONLY_REQUEUE.inc();
+}
+
+pub fn record_metadata_only_reason(reason: &str) {
+    METADATA_ONLY_REASON.with_label_values(&[reason]).inc();
+}
+
+pub fn record_fetch_failure_fallback(provider: &str, result: &str) {
+    FETCH_FAILURE_FALLBACK
+        .with_label_values(&[provider, result])
+        .inc();
 }
 
 async fn metrics_handler() -> String {
