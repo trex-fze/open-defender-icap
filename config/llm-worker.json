@@ -34,7 +34,11 @@
     "stale_pending_minutes": 10,
     "stale_pending_online_provider": "openai-fallback",
     "stale_pending_health_ttl_secs": 30,
-    "stale_pending_max_per_min": 10
+    "stale_pending_max_per_min": 10,
+    "online_context_mode": "required",
+    "metadata_only_force_action": "Monitor",
+    "metadata_only_max_confidence": 0.4,
+    "metadata_only_requeue_for_content": true
   },
   "metrics_host": "0.0.0.0",
   "metrics_port": 19015

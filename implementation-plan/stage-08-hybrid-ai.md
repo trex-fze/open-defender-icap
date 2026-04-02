@@ -50,3 +50,8 @@
   - Attempts configured online provider when health checks pass.
   - Respects existing fallback controls and introduces a separate stale-divert per-minute cap.
 - Added metrics family `llm_stale_pending_*` and updated architecture/runbook docs.
+- Added online-context mode controls for online providers:
+  - `required|preferred|metadata_only` excerpt handling (`OD_LLM_ONLINE_CONTEXT_MODE`).
+  - metadata-only guardrails (`OD_LLM_METADATA_ONLY_FORCE_ACTION`, `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`).
+  - optional pending follow-up mode (`OD_LLM_METADATA_ONLY_REQUEUE_FOR_CONTENT`).
+- Added observability for context decisions and guardrails via `llm_context_mode_total`, `llm_metadata_only_guardrail_total`, and `llm_metadata_only_requeue_total`.

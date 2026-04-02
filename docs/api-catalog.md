@@ -125,7 +125,7 @@ All routes require `X-Admin-Token` or a JWT with the listed roles. Pagination pa
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/providers` | Lists configured LLM providers (name, type, endpoint, role). Useful for operator dashboards and tests. |
-| `GET` | `/metrics` | Prometheus metrics covering `llm_jobs_*`, per-provider latency, failover counters, and stale-pending diversion counters (`llm_stale_pending_*`). |
+| `GET` | `/metrics` | Prometheus metrics covering `llm_jobs_*`, per-provider latency, failover counters, stale-pending diversion counters (`llm_stale_pending_*`), and online context/guardrail counters (`llm_context_mode_total`, `llm_metadata_only_guardrail_total`, `llm_metadata_only_requeue_total`). |
 
 ### Reclass Worker (`reclass-worker`)
 

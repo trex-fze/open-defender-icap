@@ -192,6 +192,32 @@ static STALE_PENDING_SKIPPED: Lazy<IntCounterVec> = Lazy::new(|| {
     .unwrap()
 });
 
+static CONTEXT_MODE: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_context_mode_total",
+        "Classification jobs by provider and context mode",
+        &["provider", "mode"]
+    )
+    .unwrap()
+});
+
+static METADATA_ONLY_GUARDRAIL: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_metadata_only_guardrail_total",
+        "Metadata-only guardrail applications",
+        &["type"]
+    )
+    .unwrap()
+});
+
+static METADATA_ONLY_REQUEUE: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "llm_metadata_only_requeue_total",
+        "Metadata-only classifications that stay pending for content follow-up"
+    )
+    .unwrap()
+});
+
 pub fn record_job_started() {
     JOBS_STARTED.inc();
 }
@@ -292,6 +318,20 @@ pub fn record_stale_pending_healthcheck(provider: &str, result: &str) {
 
 pub fn record_stale_pending_skipped(reason: &str) {
     STALE_PENDING_SKIPPED.with_label_values(&[reason]).inc();
+}
+
+pub fn record_context_mode(provider: &str, mode: &str) {
+    CONTEXT_MODE.with_label_values(&[provider, mode]).inc();
+}
+
+pub fn record_metadata_only_guardrail(guardrail_type: &str) {
+    METADATA_ONLY_GUARDRAIL
+        .with_label_values(&[guardrail_type])
+        .inc();
+}
+
+pub fn record_metadata_only_requeue() {
+    METADATA_ONLY_REQUEUE.inc();
 }
 
 async fn metrics_handler() -> String {

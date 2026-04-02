@@ -124,6 +124,10 @@ LLM failover safety controls (env overrides for `config/llm-worker.json` routing
 - `OD_LLM_STALE_PENDING_ONLINE_PROVIDER`: provider name to use for stale pending diversion (default routing fallback provider)
 - `OD_LLM_STALE_PENDING_HEALTH_TTL_SECS`: cache ttl for online provider health checks (default `30`)
 - `OD_LLM_STALE_PENDING_MAX_PER_MIN`: separate stale diversion cap per minute (default `10`)
+- `OD_LLM_ONLINE_CONTEXT_MODE`: online-provider content mode `required|preferred|metadata_only` (default `required`)
+- `OD_LLM_METADATA_ONLY_FORCE_ACTION`: force action when online call runs metadata-only (default `Monitor`)
+- `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`: cap confidence for metadata-only outputs (default `0.4`)
+- `OD_LLM_METADATA_ONLY_REQUEUE_FOR_CONTENT`: keep pending row and wait for excerpt after metadata-only persistence (default `true`)
 
 Integration-script performance and reliability controls:
 
@@ -236,6 +240,9 @@ Use `down -v` only when you explicitly need a clean local data state.
 - How does stale pending diversion behave with ONLINE-only models?
   - Diversion is effectively skipped because the online diversion target is already the primary provider (`provider_is_primary`).
   - The worker continues normal primary processing with existing retry/backoff/failover behavior; no duplicate routing loop is introduced.
+- Can I choose whether online providers receive scraped excerpts?
+  - Yes. Set `OD_LLM_ONLINE_CONTEXT_MODE` to `required` (always send excerpt), `preferred` (send when available), or `metadata_only` (never send excerpt).
+  - In metadata-only mode, guardrails force conservative action/confidence via `OD_LLM_METADATA_ONLY_FORCE_ACTION` and `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`.
 
 ## 9) Additional relevant information
 

@@ -77,7 +77,7 @@ flowchart LR
     C -->|Enqueue page fetch| PSTREAM
     CSTREAM --> G
     CSTREAM --> H
-    G -->|Pending record| PEND
+    G -->|Pending and context-mode state| PEND
     G -->|Verdict update| F
     G -->|Cache update| E
     H -->|TTL refresh| CSTREAM
@@ -86,7 +86,7 @@ flowchart LR
 
     EI -->|Page fetch job| PSTREAM
     PSTREAM --> PF -->|HTTP crawl| CRAWL --> PF
-    PF -->|Store HEAD TITLE BODY context| PAGE
+    PF -->|Store markdown/plain excerpt| PAGE
 
     TAX -->|Canonical IDs + aliases| I
     TAX -->|Canonical IDs + aliases| D
@@ -101,6 +101,7 @@ flowchart LR
     I -->|taxonomy.mutation.blocked audit| L
     I -->|taxonomy_activation_changes_total| M
     G -->|taxonomy_fallback_total reason| M
+    G -->|llm_context_mode_total and guardrail metrics| M
 
     F --> I
     PAGE --> I
@@ -185,11 +186,13 @@ The workflow for an unclassified site emphasizes “content-first” verificatio
 
 4. **Stale Pending Diversion (Budgeted)** – If a key remains `waiting_content` longer than the configured threshold (`requested_at` age), the worker can attempt an online provider first (for example OpenAI fallback) only when provider health checks pass. This diversion still respects normal failover budget/cooldown controls and also has a separate per-minute diversion cap.
 
-5. **Content-Backed Verdict** – Once content is available, the worker builds the prompt with canonical taxonomy IDs, normalized domain key, and homepage HTML context/hash, then calls the configured LLM provider(s). Non-canonical outputs are logged and retried before persistence. Valid JSON is then persisted to `classifications` + `classification_versions`, written into Redis (cache + invalidation channel), and the pending row is deleted.
+5. **Online Context Mode Decision** – For online providers, operators can select `required`, `preferred`, or `metadata_only` context mode. `required` enforces content-first gating, `preferred` uses excerpts when available, and `metadata_only` avoids sending excerpts to online APIs. Metadata-only classifications apply conservative guardrails (forced action + confidence cap) and can optionally stay pending for later content-backed refresh.
 
-6. **Operator Touchpoints** – Admin API exposes pending rows (`GET /api/v1/classifications/pending`) and a broader management list (`GET /api/v1/classifications`) so analysts can classify pending keys and edit/remove existing classifications. The Pending Sites flow uses `POST /api/v1/classifications/:key/manual-classify` (category + subcategory), while Allow / Deny overrides remain in `/api/v1/overrides`.
+6. **Content-Backed Verdict** – Once content is available, the worker builds the prompt with canonical taxonomy IDs, normalized domain key, and homepage HTML context/hash, then calls the configured LLM provider(s). Non-canonical outputs are logged and retried before persistence. Valid JSON is then persisted to `classifications` + `classification_versions`, written into Redis (cache + invalidation channel), and the pending row is deleted (or retained when metadata-only follow-up is enabled).
 
-7. **Subsequent Requests** – After the LLM verdict lands (or an analyst overrides it), ICAP adaptor cache hits serve the real action immediately. The site stays blocked indefinitely until content is verified (security-first posture).
+7. **Operator Touchpoints** – Admin API exposes pending rows (`GET /api/v1/classifications/pending`) and a broader management list (`GET /api/v1/classifications`) so analysts can classify pending keys and edit/remove existing classifications. The Pending Sites flow uses `POST /api/v1/classifications/:key/manual-classify` (category + subcategory), while Allow / Deny overrides remain in `/api/v1/overrides`.
+
+8. **Subsequent Requests** – After the LLM verdict lands (or an analyst overrides it), ICAP adaptor cache hits serve the real action immediately. The site stays blocked indefinitely until content is verified (security-first posture).
 
 ### 3.3 Override Flow (Future)
 1. Admin defines override via API/UI/CLI (scope: user/IP/domain).

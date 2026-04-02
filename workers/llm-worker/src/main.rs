@@ -122,6 +122,14 @@ struct RoutingConfig {
     pub stale_pending_health_ttl_secs: Option<u64>,
     #[serde(default)]
     pub stale_pending_max_per_min: Option<usize>,
+    #[serde(default)]
+    pub online_context_mode: Option<String>,
+    #[serde(default)]
+    pub metadata_only_force_action: Option<String>,
+    #[serde(default)]
+    pub metadata_only_max_confidence: Option<f32>,
+    #[serde(default)]
+    pub metadata_only_requeue_for_content: Option<bool>,
 }
 
 impl WorkerConfig {
@@ -240,6 +248,41 @@ impl WorkerConfig {
             max_per_min,
         }))
     }
+
+    fn resolve_online_context(&self) -> Result<OnlineContextRuntime> {
+        let mode = env::var("OD_LLM_ONLINE_CONTEXT_MODE")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| self.routing.online_context_mode.clone())
+            .map(|value| OnlineContextMode::parse(value.as_str()))
+            .unwrap_or_else(|| OnlineContextMode::parse(DEFAULT_ONLINE_CONTEXT_MODE));
+
+        let forced_action = env::var("OD_LLM_METADATA_ONLY_FORCE_ACTION")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| self.routing.metadata_only_force_action.clone())
+            .unwrap_or_else(|| DEFAULT_METADATA_ONLY_FORCE_ACTION.to_string());
+        let metadata_only_force_action = parse_policy_action(forced_action.as_str())?;
+
+        let metadata_only_max_confidence = env::var("OD_LLM_METADATA_ONLY_MAX_CONFIDENCE")
+            .ok()
+            .and_then(|value| value.trim().parse::<f32>().ok())
+            .or(self.routing.metadata_only_max_confidence)
+            .unwrap_or(DEFAULT_METADATA_ONLY_MAX_CONFIDENCE)
+            .clamp(0.0, 1.0);
+
+        let metadata_only_requeue_for_content =
+            env_bool("OD_LLM_METADATA_ONLY_REQUEUE_FOR_CONTENT")
+                .or(self.routing.metadata_only_requeue_for_content)
+                .unwrap_or(DEFAULT_METADATA_ONLY_REQUEUE_FOR_CONTENT);
+
+        Ok(OnlineContextRuntime {
+            mode,
+            metadata_only_force_action,
+            metadata_only_max_confidence,
+            metadata_only_requeue_for_content,
+        })
+    }
 }
 
 #[allow(dead_code)]
@@ -327,7 +370,65 @@ const DEFAULT_FALLBACK_COOLDOWN_SECS: u64 = 30;
 const DEFAULT_FALLBACK_MAX_PER_MIN: usize = 30;
 const DEFAULT_STALE_PENDING_HEALTH_TTL_SECS: u64 = 30;
 const DEFAULT_STALE_PENDING_MAX_PER_MIN: usize = 10;
+const DEFAULT_ONLINE_CONTEXT_MODE: &str = "required";
+const DEFAULT_METADATA_ONLY_FORCE_ACTION: &str = "Monitor";
+const DEFAULT_METADATA_ONLY_MAX_CONFIDENCE: f32 = 0.40;
+const DEFAULT_METADATA_ONLY_REQUEUE_FOR_CONTENT: bool = true;
 const HEALTHCHECK_PROMPT: &str = "Return JSON only with this exact shape: {\"primary_category\":\"unknown\",\"subcategory\":\"unclassified\",\"risk_level\":\"low\",\"confidence\":0.5,\"recommended_action\":\"Allow\"}.";
+
+#[derive(Debug, Clone, Copy)]
+enum OnlineContextMode {
+    Required,
+    Preferred,
+    MetadataOnly,
+}
+
+impl OnlineContextMode {
+    fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "preferred" => Self::Preferred,
+            "metadata_only" => Self::MetadataOnly,
+            _ => Self::Required,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::Preferred => "preferred",
+            Self::MetadataOnly => "metadata_only",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptContextMode {
+    WithExcerpt,
+    MetadataOnly,
+}
+
+impl PromptContextMode {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::WithExcerpt => "with_excerpt",
+            Self::MetadataOnly => "metadata_only",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct OnlineContextRuntime {
+    mode: OnlineContextMode,
+    metadata_only_force_action: PolicyAction,
+    metadata_only_max_confidence: f32,
+    metadata_only_requeue_for_content: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ProviderRequestPlan {
+    require_content: bool,
+    send_excerpt: bool,
+}
 
 #[derive(Debug, Clone, Copy)]
 enum FailoverPolicy {
@@ -562,6 +663,15 @@ fn env_usize(key: &str) -> Option<usize> {
     env::var(key).ok()?.trim().parse::<usize>().ok()
 }
 
+fn env_bool(key: &str) -> Option<bool> {
+    let raw = env::var(key).ok()?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
 fn env_csv_u16(key: &str) -> Option<Vec<u16>> {
     let raw = env::var(key).ok()?;
     let mut values = Vec::new();
@@ -590,6 +700,9 @@ async fn main() -> Result<()> {
     let stale_pending = cfg
         .resolve_stale_pending()
         .context("failed to resolve stale pending diversion settings")?;
+    let online_context = cfg
+        .resolve_online_context()
+        .context("failed to resolve online context mode settings")?;
     info!(
         target = "svc-llm-worker",
         queue = %cfg.queue_name,
@@ -610,6 +723,10 @@ async fn main() -> Result<()> {
             .map(|cfg| cfg.health_ttl_secs)
             .unwrap_or(0),
         stale_pending_max_per_min = stale_pending.as_ref().map(|cfg| cfg.max_per_min).unwrap_or(0),
+        online_context_mode = online_context.mode.as_str(),
+        metadata_only_force_action = ?online_context.metadata_only_force_action,
+        metadata_only_max_confidence = online_context.metadata_only_max_confidence,
+        metadata_only_requeue_for_content = online_context.metadata_only_requeue_for_content,
         "LLM worker initialized"
     );
 
@@ -663,6 +780,7 @@ async fn main() -> Result<()> {
         &cfg,
         router,
         stale_pending,
+        online_context,
         pool.clone(),
         taxonomy.clone(),
         activation,
@@ -760,6 +878,7 @@ struct JobConsumer {
     failover: FailoverRuntime,
     fallback_budget: Mutex<FallbackBudgetState>,
     stale_pending: Option<StalePendingRuntime>,
+    online_context: OnlineContextRuntime,
     stale_divert_budget: Mutex<WindowBudgetState>,
     provider_health: Mutex<HashMap<String, ProviderHealthState>>,
 }
@@ -769,6 +888,7 @@ impl JobConsumer {
         cfg: &WorkerConfig,
         router: ProviderRouter,
         stale_pending: Option<StalePendingRuntime>,
+        online_context: OnlineContextRuntime,
         pool: PgPool,
         taxonomy: Arc<TaxonomyStore>,
         activation: Arc<ActivationState>,
@@ -790,6 +910,7 @@ impl JobConsumer {
             failover,
             fallback_budget: Mutex::new(FallbackBudgetState::new()),
             stale_pending,
+            online_context,
             stale_divert_budget: Mutex::new(WindowBudgetState::new()),
             provider_health: Mutex::new(HashMap::new()),
         })
@@ -918,15 +1039,16 @@ impl JobConsumer {
     }
 
     async fn handle_job(&self, payload: &str) -> Result<(), anyhow::Error> {
-        let mut job: ClassificationJobPayload = serde_json::from_str(payload)?;
+        let job: ClassificationJobPayload = serde_json::from_str(payload)?;
         if job.requires_content {
             self.mark_pending(&job, "waiting_content", None).await?;
         }
-        self.enrich_job_with_content(&mut job).await?;
         let stale_provider = self.select_stale_pending_provider(&job).await?;
         let mut provider_name = String::new();
         let mut selected_verdict: Option<LlmResponse> = None;
         let mut selected_fallback_reason = None;
+        let mut selected_context_mode = PromptContextMode::WithExcerpt;
+        let mut selected_excerpt_sent = false;
 
         for attempt in 1..=NON_CANONICAL_RETRY_ATTEMPTS {
             let retry_instruction = if attempt > 1 {
@@ -934,11 +1056,12 @@ impl JobConsumer {
             } else {
                 None
             };
-            let prompt = build_prompt(&job, &self.taxonomy_prompt, retry_instruction);
-            let (raw_verdict, provider) = self
-                .invoke_with_fallback(&job, &prompt, stale_provider.as_ref())
+            let (raw_verdict, provider, context_mode, excerpt_sent) = self
+                .invoke_with_fallback(&job, retry_instruction, stale_provider.as_ref())
                 .await?;
             provider_name = provider;
+            selected_context_mode = context_mode;
+            selected_excerpt_sent = excerpt_sent;
 
             let raw_category = raw_verdict.primary_category.clone();
             let raw_subcategory = raw_verdict.subcategory.clone();
@@ -975,7 +1098,23 @@ impl JobConsumer {
         let mut verdict =
             selected_verdict.ok_or_else(|| anyhow!("missing classification verdict"))?;
         let fallback_reason = selected_fallback_reason;
-        let recommended_action = parse_policy_action(&verdict.recommended_action)?;
+        let mut recommended_action = parse_policy_action(&verdict.recommended_action)?;
+        let mut guardrail_forced_action = false;
+        let mut guardrail_capped_confidence = false;
+
+        if selected_context_mode == PromptContextMode::MetadataOnly {
+            if recommended_action != self.online_context.metadata_only_force_action {
+                recommended_action = self.online_context.metadata_only_force_action.clone();
+                guardrail_forced_action = true;
+                metrics::record_metadata_only_guardrail("forced_action");
+            }
+            if verdict.confidence > self.online_context.metadata_only_max_confidence {
+                verdict.confidence = self.online_context.metadata_only_max_confidence;
+                guardrail_capped_confidence = true;
+                metrics::record_metadata_only_guardrail("confidence_cap");
+            }
+        }
+
         let activation_allowed = self
             .activation
             .is_enabled(&verdict.primary_category, Some(&verdict.subcategory));
@@ -1002,18 +1141,37 @@ impl JobConsumer {
             fallback_reason,
             final_action,
             activation_blocked,
+            selected_context_mode,
+            selected_excerpt_sent,
+            guardrail_forced_action,
+            guardrail_capped_confidence,
         )
         .await
         .context("failed to persist classification")?;
         self.publish_cache_entry(&job, &verdict, action.clone())
             .await
             .context("failed to publish cache entry")?;
-        self.clear_pending(&job.normalized_key).await?;
+        if selected_context_mode == PromptContextMode::MetadataOnly
+            && self.online_context.metadata_only_requeue_for_content
+        {
+            metrics::record_metadata_only_requeue();
+            self.mark_pending(
+                &job,
+                "waiting_content",
+                Some("metadata_only_classification"),
+            )
+            .await?;
+        } else {
+            self.clear_pending(&job.normalized_key).await?;
+        }
+        metrics::record_context_mode(&provider_name, selected_context_mode.as_str());
         info!(
             target = "svc-llm-worker",
             key = job.normalized_key,
             action = ?action,
             provider = provider_name,
+            context_mode = selected_context_mode.as_str(),
+            excerpt_sent = selected_excerpt_sent,
             "classification stored"
         );
         Ok(())
@@ -1202,14 +1360,71 @@ impl JobConsumer {
         healthy
     }
 
+    fn provider_request_plan(
+        &self,
+        provider: &ResolvedProvider,
+        job: &ClassificationJobPayload,
+    ) -> ProviderRequestPlan {
+        if !is_online_provider(provider) {
+            return ProviderRequestPlan {
+                require_content: job.requires_content,
+                send_excerpt: true,
+            };
+        }
+
+        match self.online_context.mode {
+            OnlineContextMode::Required => ProviderRequestPlan {
+                require_content: job.requires_content,
+                send_excerpt: true,
+            },
+            OnlineContextMode::Preferred => ProviderRequestPlan {
+                require_content: false,
+                send_excerpt: true,
+            },
+            OnlineContextMode::MetadataOnly => ProviderRequestPlan {
+                require_content: false,
+                send_excerpt: false,
+            },
+        }
+    }
+
+    async fn prepare_provider_request(
+        &self,
+        base_job: &ClassificationJobPayload,
+        provider: &ResolvedProvider,
+        retry_instruction: Option<&str>,
+    ) -> Result<(ClassificationJobPayload, String, PromptContextMode, bool)> {
+        let plan = self.provider_request_plan(provider, base_job);
+        let mut job = base_job.clone();
+        self.enrich_job_with_content(&mut job, plan.require_content)
+            .await?;
+
+        let excerpt_available = has_content(&job.content_excerpt);
+        let (context_mode, excerpt_sent) = if plan.send_excerpt && excerpt_available {
+            (PromptContextMode::WithExcerpt, true)
+        } else {
+            job.content_excerpt = None;
+            job.content_hash = None;
+            job.content_version = None;
+            job.content_language = None;
+            (PromptContextMode::MetadataOnly, false)
+        };
+
+        let prompt = build_prompt(&job, &self.taxonomy_prompt, retry_instruction, context_mode);
+        Ok((job, prompt, context_mode, excerpt_sent))
+    }
+
     async fn invoke_with_fallback(
         &self,
         job: &ClassificationJobPayload,
-        prompt: &str,
+        retry_instruction: Option<&str>,
         stale_provider: Option<&ResolvedProvider>,
-    ) -> Result<(LlmResponse, String)> {
+    ) -> Result<(LlmResponse, String, PromptContextMode, bool)> {
         if let Some(provider) = stale_provider {
             if provider.name != self.router.primary().name {
+                let (provider_job, prompt, context_mode, excerpt_sent) = self
+                    .prepare_provider_request(job, provider, retry_instruction)
+                    .await?;
                 metrics::record_stale_pending_divert(&provider.name, "attempt");
                 info!(
                     target = "svc-llm-worker",
@@ -1217,10 +1432,13 @@ impl JobConsumer {
                     provider = %provider.name,
                     "attempting stale pending diversion to online provider"
                 );
-                match self.invoke_primary_with_retry(provider, job, prompt).await {
+                match self
+                    .invoke_primary_with_retry(provider, &provider_job, &prompt)
+                    .await
+                {
                     Ok(response) => {
                         metrics::record_stale_pending_divert(&provider.name, "success");
-                        return Ok((response, provider.name.clone()));
+                        return Ok((response, provider.name.clone(), context_mode, excerpt_sent));
                     }
                     Err(err) => {
                         metrics::record_stale_pending_divert(&provider.name, "failed");
@@ -1239,9 +1457,21 @@ impl JobConsumer {
         }
 
         let primary = self.router.primary();
-        let primary_failure = self.invoke_primary_with_retry(primary, job, prompt).await;
+        let (primary_job, primary_prompt, primary_context_mode, primary_excerpt_sent) = self
+            .prepare_provider_request(job, primary, retry_instruction)
+            .await?;
+        let primary_failure = self
+            .invoke_primary_with_retry(primary, &primary_job, &primary_prompt)
+            .await;
         match primary_failure {
-            Ok(response) => return Ok((response, primary.name.clone())),
+            Ok(response) => {
+                return Ok((
+                    response,
+                    primary.name.clone(),
+                    primary_context_mode,
+                    primary_excerpt_sent,
+                ))
+            }
             Err(err) => {
                 error!(
                     target = "svc-llm-worker",
@@ -1301,7 +1531,11 @@ impl JobConsumer {
                     "attempting provider fallback"
                 );
 
-                match invoke_llm(fallback, job, prompt).await {
+                let (fallback_job, fallback_prompt, fallback_context_mode, fallback_excerpt_sent) =
+                    self.prepare_provider_request(job, fallback, retry_instruction)
+                        .await?;
+
+                match invoke_llm(fallback, &fallback_job, &fallback_prompt).await {
                     Ok(response) => {
                         info!(
                             target = "svc-llm-worker",
@@ -1309,7 +1543,12 @@ impl JobConsumer {
                             provider = %fallback.name,
                             "fallback provider succeeded"
                         );
-                        Ok((response, fallback.name.clone()))
+                        Ok((
+                            response,
+                            fallback.name.clone(),
+                            fallback_context_mode,
+                            fallback_excerpt_sent,
+                        ))
                     }
                     Err(fallback_err) => {
                         let classified = classify_invocation_failure(&fallback_err, &self.failover);
@@ -1416,8 +1655,12 @@ impl JobConsumer {
         }
     }
 
-    async fn enrich_job_with_content(&self, job: &mut ClassificationJobPayload) -> Result<()> {
-        if job.requires_content {
+    async fn enrich_job_with_content(
+        &self,
+        job: &mut ClassificationJobPayload,
+        require_content: bool,
+    ) -> Result<()> {
+        if require_content {
             let snippet = self.await_page_content(&job.normalized_key).await?;
             if let Some(snippet) = snippet {
                 job.content_excerpt = snippet.content_excerpt;
@@ -1547,7 +1790,7 @@ impl CacheListener {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ClassificationJobPayload {
     normalized_key: String,
     entity_level: String,
@@ -1595,6 +1838,16 @@ fn parse_policy_action(value: &str) -> Result<PolicyAction> {
     }
 }
 
+fn is_online_provider(provider: &ResolvedProvider) -> bool {
+    matches!(
+        provider.kind,
+        ProviderKind::Openai
+            | ProviderKind::OpenaiCompatible
+            | ProviderKind::Anthropic
+            | ProviderKind::Vllm
+    )
+}
+
 async fn store_classification(
     pool: &PgPool,
     job: &ClassificationJobPayload,
@@ -1603,6 +1856,10 @@ async fn store_classification(
     fallback_reason: Option<FallbackReason>,
     final_action: PolicyAction,
     activation_blocked: bool,
+    context_mode: PromptContextMode,
+    excerpt_sent: bool,
+    guardrail_forced_action: bool,
+    guardrail_capped_confidence: bool,
 ) -> Result<PolicyAction> {
     let new_id = Uuid::new_v4();
     let ttl_seconds = 3600;
@@ -1619,6 +1876,22 @@ async fn store_classification(
         flags_map.insert(
             "taxonomy_activation_state".to_string(),
             Value::from("blocked"),
+        );
+    }
+    flags_map.insert(
+        "context_mode".to_string(),
+        Value::from(context_mode.as_str()),
+    );
+    flags_map.insert("excerpt_sent".to_string(), Value::from(excerpt_sent));
+    if context_mode == PromptContextMode::MetadataOnly {
+        flags_map.insert("metadata_only".to_string(), Value::from(true));
+        flags_map.insert(
+            "metadata_only_guardrail_forced_action".to_string(),
+            Value::from(guardrail_forced_action),
+        );
+        flags_map.insert(
+            "metadata_only_guardrail_confidence_cap".to_string(),
+            Value::from(guardrail_capped_confidence),
         );
     }
     let flags = Value::Object(flags_map);
@@ -1999,6 +2272,7 @@ fn build_prompt(
     job: &ClassificationJobPayload,
     taxonomy_prompt: &str,
     retry_instruction: Option<&str>,
+    context_mode: PromptContextMode,
 ) -> String {
     let mut sections = vec![format!(
         "Classify the following web request. Return JSON with fields: primary_category, subcategory, risk_level, confidence (0-1), recommended_action (Allow|Block|Warn|Monitor|Review|RequireApproval). Use ONLY canonical taxonomy IDs for primary_category and subcategory.\\nNormalized Key: {}\\nHostname: {}\\nURL: {}\\nEntity Level: {}\\nTrace ID: {}",
@@ -2009,6 +2283,7 @@ fn build_prompt(
     if let Some(instruction) = retry_instruction {
         sections.push(format!("Retry Instruction: {instruction}"));
     }
+    sections.push(format!("Context Mode: {}", context_mode.as_str()));
 
     if let Some(excerpt) = job_excerpt(job) {
         let (formatted_excerpt, truncated) = format_html_context(excerpt);
@@ -2308,7 +2583,7 @@ mod tests {
             content_version: Some(2),
             content_language: Some("en".into()),
         };
-        let prompt = build_prompt(&job, &taxonomy_prompt, None);
+        let prompt = build_prompt(&job, &taxonomy_prompt, None, PromptContextMode::WithExcerpt);
         assert!(prompt.contains("Allowed Taxonomy IDs"));
         assert!(prompt.contains("social-media"));
         assert!(prompt.contains("Homepage Content Excerpt"));
@@ -2334,7 +2609,7 @@ mod tests {
             content_version: None,
             content_language: None,
         };
-        let prompt = build_prompt(&job, &taxonomy_prompt, None);
+        let prompt = build_prompt(&job, &taxonomy_prompt, None, PromptContextMode::WithExcerpt);
         assert!(prompt.contains("Homepage Content Excerpt: unavailable"));
     }
 
@@ -2406,6 +2681,10 @@ mod tests {
                 stale_pending_online_provider: None,
                 stale_pending_health_ttl_secs: Some(45),
                 stale_pending_max_per_min: Some(12),
+                online_context_mode: None,
+                metadata_only_force_action: None,
+                metadata_only_max_confidence: None,
+                metadata_only_requeue_for_content: None,
             },
             metrics_host: "127.0.0.1".into(),
             metrics_port: 0,
@@ -2427,6 +2706,64 @@ mod tests {
         assert!(budget.allow_and_record(2));
         assert!(budget.allow_and_record(2));
         assert!(!budget.allow_and_record(2));
+    }
+
+    #[test]
+    fn online_context_runtime_defaults_to_required_mode() {
+        let cfg = WorkerConfig {
+            queue_name: "classification-jobs".into(),
+            redis_url: "redis://localhost:6379".into(),
+            cache_channel: "od:cache:invalidate".into(),
+            stream: "classification-jobs".into(),
+            page_fetch_stream: "page-fetch-jobs".into(),
+            database_url: "postgres://localhost/test".into(),
+            llm_endpoint: None,
+            llm_api_key: None,
+            providers: Vec::new(),
+            routing: RoutingConfig::default(),
+            metrics_host: "127.0.0.1".into(),
+            metrics_port: 0,
+        };
+
+        let runtime = cfg
+            .resolve_online_context()
+            .expect("resolve online context");
+        assert_eq!(runtime.mode.as_str(), "required");
+        assert_eq!(runtime.metadata_only_force_action, PolicyAction::Monitor);
+        assert_eq!(runtime.metadata_only_max_confidence, 0.40);
+        assert!(runtime.metadata_only_requeue_for_content);
+    }
+
+    #[test]
+    fn online_context_mode_parses_metadata_only() {
+        let cfg = WorkerConfig {
+            queue_name: "classification-jobs".into(),
+            redis_url: "redis://localhost:6379".into(),
+            cache_channel: "od:cache:invalidate".into(),
+            stream: "classification-jobs".into(),
+            page_fetch_stream: "page-fetch-jobs".into(),
+            database_url: "postgres://localhost/test".into(),
+            llm_endpoint: None,
+            llm_api_key: None,
+            providers: Vec::new(),
+            routing: RoutingConfig {
+                online_context_mode: Some("metadata_only".into()),
+                metadata_only_force_action: Some("Warn".into()),
+                metadata_only_max_confidence: Some(0.25),
+                metadata_only_requeue_for_content: Some(false),
+                ..RoutingConfig::default()
+            },
+            metrics_host: "127.0.0.1".into(),
+            metrics_port: 0,
+        };
+
+        let runtime = cfg
+            .resolve_online_context()
+            .expect("resolve online context");
+        assert_eq!(runtime.mode.as_str(), "metadata_only");
+        assert_eq!(runtime.metadata_only_force_action, PolicyAction::Warn);
+        assert_eq!(runtime.metadata_only_max_confidence, 0.25);
+        assert!(!runtime.metadata_only_requeue_for_content);
     }
 
     #[tokio::test]
@@ -2462,6 +2799,7 @@ mod tests {
         };
 
         let router = cfg.resolve_router().unwrap();
+        let online_context = cfg.resolve_online_context().unwrap();
         let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
         let activation = Arc::new(ActivationState::allow_all());
         let failover = FailoverRuntime::from_routing(&cfg.routing);
@@ -2469,6 +2807,7 @@ mod tests {
             &cfg,
             router,
             None,
+            online_context,
             pool.clone(),
             taxonomy,
             activation,
@@ -2556,6 +2895,7 @@ mod tests {
         };
 
         let router = cfg.resolve_router().unwrap();
+        let online_context = cfg.resolve_online_context().unwrap();
         let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
         let activation = Arc::new(ActivationState::allow_all());
         let failover = FailoverRuntime::from_routing(&cfg.routing);
@@ -2563,6 +2903,7 @@ mod tests {
             &cfg,
             router,
             None,
+            online_context,
             pool.clone(),
             taxonomy,
             activation,
@@ -2645,6 +2986,7 @@ mod tests {
         };
 
         let router = cfg.resolve_router().unwrap();
+        let online_context = cfg.resolve_online_context().unwrap();
         let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
         let activation = Arc::new(ActivationState::allow_all());
         let failover = FailoverRuntime::from_routing(&cfg.routing);
@@ -2652,6 +2994,7 @@ mod tests {
             &cfg,
             router,
             None,
+            online_context,
             pool.clone(),
             taxonomy,
             activation,
