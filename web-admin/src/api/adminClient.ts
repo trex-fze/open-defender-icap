@@ -137,3 +137,26 @@ export const adminDelete = async (
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
 };
+
+export const adminPatchJson = async <TResponse, TBody = unknown>(
+  ctx: AdminApiContext,
+  path: string,
+  body: TBody,
+  init?: RequestInit,
+): Promise<TResponse> => {
+  ensureCallable(ctx);
+  const headers = withHeaders(ctx.headers, init);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  const resp = await fetch(buildUrl(ctx.baseUrl, path), {
+    ...init,
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    throw new AdminApiError(resp.status, await parseErrorBody(resp));
+  }
+  return (await resp.json()) as TResponse;
+};

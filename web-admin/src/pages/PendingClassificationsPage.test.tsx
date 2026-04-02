@@ -39,7 +39,7 @@ const taxonomyState: TaxonomyActivationState = {
 
 describe('PendingClassificationsPage', () => {
   const refresh = vi.fn().mockResolvedValue(undefined);
-  const manualUnblock = vi.fn().mockResolvedValue(undefined);
+  const manualClassify = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -62,7 +62,7 @@ describe('PendingClassificationsPage', () => {
       headers: {},
     });
     mockedUsePendingActions.mockReturnValue({
-      manualUnblock,
+      manualClassify,
       busyKey: undefined,
       error: undefined,
       canCallApi: true,
@@ -77,13 +77,30 @@ describe('PendingClassificationsPage', () => {
     });
   });
 
-  it('submits selected category and subcategory for manual unblock', async () => {
+  it('submits selected category and subcategory for manual classification', async () => {
     const user = userEvent.setup();
+    mockedUseTaxonomyData.mockReturnValue({
+      data: {
+        ...taxonomyState,
+        categories: taxonomyState.categories.map((category) =>
+          category.id === 'social-media' ? { ...category, enabled: false } : category,
+        ),
+      },
+      loading: false,
+      error: undefined,
+      isMock: false,
+      refresh: vi.fn(),
+      canCallApi: true,
+    });
     render(<PendingClassificationsPage />);
 
     await act(async () => {
-      await user.click(screen.getByRole('button', { name: 'Manual Unblock' }));
+      await user.click(screen.getByRole('button', { name: 'Manual Classify' }));
     });
+
+    expect(screen.getByRole('option', { name: 'Social Media (disabled)' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Action')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Risk')).not.toBeInTheDocument();
 
     await act(async () => {
       await user.selectOptions(screen.getByLabelText('Category'), 'social-media');
@@ -93,10 +110,10 @@ describe('PendingClassificationsPage', () => {
     expect(subcategorySelect.value).toBe('social-networking');
 
     await act(async () => {
-      await user.click(screen.getByRole('button', { name: 'Apply Decision' }));
+      await user.click(screen.getByRole('button', { name: 'Save Classification' }));
     });
 
-    expect(manualUnblock).toHaveBeenCalledWith(
+    expect(manualClassify).toHaveBeenCalledWith(
       'domain:test.example',
       expect.objectContaining({
         primary_category: 'social-media',
@@ -105,7 +122,7 @@ describe('PendingClassificationsPage', () => {
     );
   });
 
-  it('disables manual unblock apply when taxonomy is unavailable', async () => {
+  it('disables manual classify apply when taxonomy is unavailable', async () => {
     const user = userEvent.setup();
     mockedUseTaxonomyData.mockReturnValue({
       data: { ...taxonomyState, categories: [] },
@@ -119,10 +136,10 @@ describe('PendingClassificationsPage', () => {
     render(<PendingClassificationsPage />);
 
     await act(async () => {
-      await user.click(screen.getByRole('button', { name: 'Manual Unblock' }));
+      await user.click(screen.getByRole('button', { name: 'Manual Classify' }));
     });
 
-    expect(screen.getByRole('button', { name: 'Apply Decision' })).toBeDisabled();
-    expect(screen.getByText(/Taxonomy is unavailable for manual unblock/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Classification' })).toBeDisabled();
+    expect(screen.getByText(/Taxonomy is unavailable for manual classification/i)).toBeInTheDocument();
   });
 });

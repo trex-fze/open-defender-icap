@@ -2,12 +2,9 @@ import { useState } from 'react';
 import { adminPostJson, type AdminApiContext } from '../api/adminClient';
 import { useAdminApi } from './useAdminApi';
 
-type ManualUnblockPayload = {
-  action: string;
+type ManualClassifyPayload = {
   primary_category: string;
   subcategory: string;
-  risk_level: string;
-  confidence: number;
   reason?: string;
 };
 
@@ -16,16 +13,16 @@ export const usePendingActions = () => {
   const [busyKey, setBusyKey] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
 
-  const manualUnblock = async (
+  const manualClassify = async (
     normalizedKey: string,
-    payload: ManualUnblockPayload,
+    payload: ManualClassifyPayload,
   ) => {
     setBusyKey(normalizedKey);
     setError(undefined);
     try {
-      await adminPostJson<unknown, ManualUnblockPayload>(
+      await adminPostJson<unknown, ManualClassifyPayload>(
         api as AdminApiContext,
-        `/api/v1/classifications/${encodeURIComponent(normalizedKey)}/unblock`,
+        `/api/v1/classifications/${encodeURIComponent(normalizedKey)}/manual-classify`,
         payload,
       );
     } catch (err) {
@@ -37,7 +34,7 @@ export const usePendingActions = () => {
   };
 
   return {
-    manualUnblock,
+    manualClassify,
     busyKey,
     error,
     canCallApi: api.canCallApi,

@@ -17,6 +17,11 @@ const navItems: NavItem[] = [
     path: '/classifications/pending',
     roles: ['policy-viewer', 'policy-editor', 'policy-admin'] as Role[],
   },
+  {
+    label: 'Classifications',
+    path: '/classifications',
+    roles: ['policy-viewer', 'policy-editor', 'policy-admin'] as Role[],
+  },
   { label: 'Allow / Deny', path: '/overrides', roles: ['policy-editor', 'policy-admin'] as Role[] },
   { label: 'Taxonomy', path: '/taxonomy', roles: ['policy-editor', 'policy-admin'] as Role[] },
   { label: 'Reports', path: '/reports', roles: ['auditor', 'policy-admin', 'policy-viewer'] as Role[] },

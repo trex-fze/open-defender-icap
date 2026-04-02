@@ -13,6 +13,7 @@ import { ReportsPage } from './pages/ReportsPage';
 import { SettingsIamPage } from './pages/SettingsIamPage';
 import { LoginPage } from './pages/LoginPage';
 import { PendingClassificationsPage } from './pages/PendingClassificationsPage';
+import { ClassificationsPage } from './pages/ClassificationsPage';
 import { DiagnosticsCachePage } from './pages/DiagnosticsCachePage';
 import { DiagnosticsPageContentPage } from './pages/DiagnosticsPageContentPage';
 
@@ -40,6 +41,7 @@ const App = () => {
             <Route path="/overrides" element={<ProtectedRoute roles={guard.editOnly}><OverridesPage /></ProtectedRoute>} />
             <Route path="/allow-deny" element={<Navigate to="/overrides" replace />} />
             <Route path="/classifications/pending" element={<ProtectedRoute roles={guard.viewEdit}><PendingClassificationsPage /></ProtectedRoute>} />
+            <Route path="/classifications" element={<ProtectedRoute roles={guard.viewEdit}><ClassificationsPage /></ProtectedRoute>} />
             <Route path="/taxonomy" element={<ProtectedRoute roles={guard.editOnly}><TaxonomyPage /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute roles={guard.reports}><ReportsPage /></ProtectedRoute>} />
             <Route path="/diagnostics/cache" element={<ProtectedRoute roles={guard.admin}><DiagnosticsCachePage /></ProtectedRoute>} />

@@ -3,9 +3,6 @@ import { PendingClassification, usePendingClassifications } from '../hooks/usePe
 import { usePendingActions } from '../hooks/usePendingActions';
 import { useTaxonomyData } from '../hooks/useTaxonomyData';
 
-const ACTION_OPTIONS = ['Allow', 'Block', 'Warn', 'Monitor', 'Review'];
-const RISK_OPTIONS = ['low', 'medium', 'high', 'critical'];
-
 export const PendingClassificationsPage = () => {
   const { data, loading, error, isMock, refresh, canCallApi } = usePendingClassifications();
   const {
@@ -15,28 +12,25 @@ export const PendingClassificationsPage = () => {
     isMock: isTaxonomyMock,
     canCallApi: canCallTaxonomyApi,
   } = useTaxonomyData();
-  const { manualUnblock, busyKey, error: actionError } = usePendingActions();
+  const { manualClassify, busyKey, error: actionError } = usePendingActions();
   const [selectedKey, setSelectedKey] = useState<string | undefined>();
-  const [action, setAction] = useState('Allow');
-  const [reason, setReason] = useState('Manual analyst decision');
-  const [riskLevel, setRiskLevel] = useState('low');
+  const [reason, setReason] = useState('Manual analyst classification');
   const [categoryId, setCategoryId] = useState('');
   const [subcategoryId, setSubcategoryId] = useState('');
   const [message, setMessage] = useState<string | undefined>();
 
   const selectedRecord = selectedKey ? data.find((item) => item.normalizedKey === selectedKey) : undefined;
-  const enabledCategories = useMemo(
+  const taxonomyCategories = useMemo(
     () =>
       taxonomy.categories
-        .filter((category) => category.enabled)
         .map((category) => ({
           ...category,
-          subcategories: category.subcategories.filter((sub) => sub.enabled),
+          subcategories: category.subcategories,
         }))
         .filter((category) => category.subcategories.length > 0),
     [taxonomy.categories],
   );
-  const selectedCategory = enabledCategories.find((category) => category.id === categoryId);
+  const selectedCategory = taxonomyCategories.find((category) => category.id === categoryId);
   const selectedSubcategory = selectedCategory?.subcategories.find((sub) => sub.id === subcategoryId);
   const canSubmitManual =
     Boolean(selectedCategory && selectedSubcategory) &&
@@ -54,12 +48,12 @@ export const PendingClassificationsPage = () => {
     }
 
     setCategoryId((prev) => {
-      if (enabledCategories.some((category) => category.id === prev)) {
+      if (taxonomyCategories.some((category) => category.id === prev)) {
         return prev;
       }
-      return enabledCategories[0]?.id ?? '';
+      return taxonomyCategories[0]?.id ?? '';
     });
-  }, [selectedRecord, enabledCategories]);
+  }, [selectedRecord, taxonomyCategories]);
 
   useEffect(() => {
     if (!selectedCategory) {
@@ -79,15 +73,12 @@ export const PendingClassificationsPage = () => {
     if (!selectedRecord || !selectedCategory || !selectedSubcategory) return;
     setMessage(undefined);
     try {
-      await manualUnblock(selectedRecord.normalizedKey, {
-        action,
+      await manualClassify(selectedRecord.normalizedKey, {
         primary_category: selectedCategory.id,
         subcategory: selectedSubcategory.id,
-        risk_level: riskLevel,
-        confidence: 0.95,
         reason: reason.trim() || undefined,
       });
-      setMessage(`Updated ${selectedRecord.normalizedKey} with action ${action}`);
+      setMessage(`Saved classification for ${selectedRecord.normalizedKey}`);
       setSelectedKey(undefined);
       await refresh();
     } catch {
@@ -133,7 +124,7 @@ export const PendingClassificationsPage = () => {
 
       {selectedRecord ? (
         <div className="glass-panel">
-          <p className="section-title">Manual Decision</p>
+          <p className="section-title">Manual Classification</p>
           <p style={{ marginTop: 0, color: 'var(--muted)' }}>{selectedRecord.normalizedKey}</p>
           <div className="layout-grid">
             <label>
@@ -143,9 +134,9 @@ export const PendingClassificationsPage = () => {
                 value={categoryId}
                 onChange={(event) => setCategoryId(event.target.value)}
               >
-                {enabledCategories.map((category) => (
+                {taxonomyCategories.map((category) => (
                   <option key={category.id} value={category.id}>
-                    {category.name}
+                    {category.name}{category.enabled ? '' : ' (disabled)'}
                   </option>
                 ))}
               </select>
@@ -160,27 +151,7 @@ export const PendingClassificationsPage = () => {
               >
                 {(selectedCategory?.subcategories ?? []).map((sub) => (
                   <option key={sub.id} value={sub.id}>
-                    {sub.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span style={{ display: 'block', marginBottom: '0.3rem' }}>Action</span>
-              <select className="search-input" value={action} onChange={(event) => setAction(event.target.value)}>
-                {ACTION_OPTIONS.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span style={{ display: 'block', marginBottom: '0.3rem' }}>Risk</span>
-              <select className="search-input" value={riskLevel} onChange={(event) => setRiskLevel(event.target.value)}>
-                {RISK_OPTIONS.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
+                    {sub.name}{sub.enabled ? '' : ' (disabled)'}
                   </option>
                 ))}
               </select>
@@ -190,9 +161,12 @@ export const PendingClassificationsPage = () => {
               <input className="search-input" value={reason} onChange={(event) => setReason(event.target.value)} />
             </label>
           </div>
-          {taxonomyError || isTaxonomyMock || !enabledCategories.length ? (
+          <p style={{ marginTop: '0.75rem', marginBottom: 0, color: 'var(--muted)' }}>
+            Classification only: enforcement overrides belong in the Allow / Deny list.
+          </p>
+          {taxonomyError || isTaxonomyMock || !taxonomyCategories.length ? (
             <p style={{ marginTop: '0.75rem', marginBottom: 0, color: '#ffcf7f' }}>
-              Taxonomy is unavailable for manual unblock. Check Admin API taxonomy endpoint and try again.
+              Taxonomy is unavailable for manual classification. Check Admin API taxonomy endpoint and try again.
             </p>
           ) : null}
           <div style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
@@ -201,7 +175,7 @@ export const PendingClassificationsPage = () => {
               disabled={!canSubmitManual || busyKey === selectedRecord.normalizedKey}
               onClick={submitManualDecision}
             >
-              {busyKey === selectedRecord.normalizedKey ? 'Saving...' : 'Apply Decision'}
+              {busyKey === selectedRecord.normalizedKey ? 'Saving...' : 'Save Classification'}
             </button>
             <button
               className="cta-button"
@@ -249,7 +223,7 @@ export const PendingClassificationsPage = () => {
                       <td>{item.updatedAt}</td>
                       <td style={{ textAlign: 'right' }}>
                         <button className="cta-button" style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem' }} onClick={() => setSelectedKey(item.normalizedKey)}>
-                          Manual Unblock
+                          Manual Classify
                         </button>
                       </td>
                     </tr>
