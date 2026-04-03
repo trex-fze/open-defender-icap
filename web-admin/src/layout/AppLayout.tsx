@@ -5,6 +5,7 @@ import { Role, useAuth } from '../context/AuthContext';
 type NavItem = {
   label: string;
   path: string;
+  exact?: boolean;
   roles?: Role[];
 };
 
@@ -20,6 +21,7 @@ const navItems: NavItem[] = [
   {
     label: 'Classifications',
     path: '/classifications',
+    exact: true,
     roles: ['policy-viewer', 'policy-editor', 'policy-admin'] as Role[],
   },
   { label: 'Allow / Deny', path: '/overrides', roles: ['policy-editor', 'policy-admin'] as Role[] },
@@ -46,7 +48,12 @@ const AppLayout = () => {
           {navItems
             .filter((item) => !item.roles || hasAnyRole(item.roles))
             .map((item) => (
-              <NavLink key={item.path} to={item.path} className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+              <NavLink
+                key={item.path}
+                to={item.path}
+                end={item.exact}
+                className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+              >
                 {item.label}
               </NavLink>
             ))}

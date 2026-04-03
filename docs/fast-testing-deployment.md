@@ -285,6 +285,17 @@ Use `down -v` only when you explicitly need a clean local data state.
 - How do I understand Crawl4AI failures clearly?
   - Read `logs/crawl4ai/crawl-audit.jsonl` on the host. Each entry contains timestamp, URL, report (`success|failed|blocked`), reason, status code, duration, and error details.
   - `blocked` is used for anti-bot/access-denied style failures (e.g., HTTP 403/captcha/access denied); other crawl failures are labeled `failed`.
+- How do I block an entire domain including subdomains?
+  - In Allow / Deny, create one active `block` override for the apex domain (for example `example.com`).
+  - That single override applies to the apex plus all subdomains (`www.example.com`, `api.example.com`, and deeper hosts).
+- Can I set a different decision for one subdomain under a blocked domain?
+  - Yes. Add a more-specific host override (for example `safe.example.com`).
+  - Override resolution uses most-specific scope first, so the subdomain rule wins over the parent domain rule.
+- How do I see override commands in odctl help?
+  - Run `odctl --help` for top-level commands.
+  - Run `odctl override --help` for override subcommands.
+  - Run `odctl override create --help` for create flags.
+  - Example full-domain block: `odctl override create --scope domain:example.com --action block --reason "Block entire domain"`.
 
 ## 9) Additional relevant information
 

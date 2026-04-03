@@ -305,6 +305,15 @@ Use `OD_LLM_FAILOVER_POLICY=safe`, disable stale online diversion (`OD_LLM_STALE
 **Q: Where can I see crawl outcomes (success/failed/blocked) for a URL?**  
 Check `logs/crawl4ai/crawl-audit.jsonl` on the host. Each line includes UTC timestamp, normalized key, URL, report (`success|failed|blocked`), reason, status code, duration, and truncated error detail. The compose stack binds this path via `../../logs:/app/logs`.
 
+**Q: How do I block an entire domain including subdomains?**  
+Use Allow / Deny and create one active `block` override for the apex domain (for example `example.com`). That single domain override applies to `example.com` plus all subdomains like `www.example.com`, `api.example.com`, and deeper hosts.
+
+**Q: Can I set a different decision for one subdomain under a blocked domain?**  
+Yes. Add a more-specific override for that host (for example `safe.example.com`). Override matching uses most-specific scope first, so the specific subdomain rule wins over the parent domain rule.
+
+**Q: How do I discover CLI commands for overrides (`odctl help`)?**  
+Run `odctl --help` for top-level commands, `odctl override --help` for override subcommands, and `odctl override create --help` for create flags. Example full-domain block command: `odctl override create --scope domain:example.com --action block --reason "Block entire domain"`.
+
 **Q: Where is evidence tracked?**  
 Stage 7 checklists live in `docs/evidence/stage07-checklist.md`. Follow Stage 6 instructions for dashboards.
 

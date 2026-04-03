@@ -95,6 +95,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - **CLI auth failures**: Ensure config token valid; inspect `~/.odctl/logs` (future) for stack traces.
 - **Docker build failures**: Clear `target/` and rebuild; ensure Rust toolchain matches required version.
 - **Crawl pending unclear**: inspect `logs/crawl4ai/crawl-audit.jsonl` and correlate failing URLs by `normalized_key`; repeated `blocked` or `failed` reasons indicate no-content fallback path should be used.
+- **Need override examples (domain + subdomain behavior)?** See FAQ entries in `README.md` and `docs/fast-testing-deployment.md` for UI + `odctl` examples, including full-domain block (`domain:example.com`) and most-specific subdomain precedence.
 
 ## 10. Evidence & Reporting
 - Keep `rfc/` and `implementation-plan/` documents updated as work progresses.
