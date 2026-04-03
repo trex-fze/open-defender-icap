@@ -57,7 +57,7 @@ a {
 }
 
 .sidebar-toggle-desktop {
-  margin-left: auto;
+  align-self: flex-start;
   min-width: 2.4rem;
 }
 
@@ -182,8 +182,8 @@ a {
   display: none;
 }
 
-.app-shell.sidebar-collapsed .sidebar-toggle-desktop {
-  margin-left: 0;
+.app-shell.sidebar-collapsed .sidebar-brand-row {
+  justify-content: center;
 }
 
 .app-shell.sidebar-collapsed .nav-link {

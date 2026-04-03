@@ -120,22 +120,22 @@ const AppLayout = () => {
         {mobileToggleLabel}
       </button>
       <aside className="sidebar" id="primary-sidebar">
+        <button
+          type="button"
+          className="sidebar-toggle sidebar-toggle-desktop"
+          aria-controls="primary-sidebar"
+          aria-expanded={!isSidebarCollapsed}
+          aria-label={desktopToggleLabel}
+          onClick={toggleDesktopSidebar}
+        >
+          {isSidebarCollapsed ? '>>' : '<<'}
+        </button>
         <div className="sidebar-brand-row">
-          {isSidebarCollapsed ? <div className="sidebar-brand-mark" aria-hidden="true">OD</div> : null}
+          {isSidebarCollapsed ? <div className="sidebar-brand-mark" aria-hidden="true">ICAP</div> : null}
           <div className="sidebar-brand-text">
             <h1>Open Defender - ICAP</h1>
             <p className="sidebar-subtitle">AI-enhanced Web Security Platform</p>
           </div>
-          <button
-            type="button"
-            className="sidebar-toggle sidebar-toggle-desktop"
-            aria-controls="primary-sidebar"
-            aria-expanded={!isSidebarCollapsed}
-            aria-label={desktopToggleLabel}
-            onClick={toggleDesktopSidebar}
-          >
-            {isSidebarCollapsed ? '>>' : '<<'}
-          </button>
         </div>
         <nav className="sidebar-nav" aria-label="Primary">
           {navItems
