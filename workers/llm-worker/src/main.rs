@@ -452,8 +452,8 @@ const DEFAULT_ONLINE_CONTEXT_MODE: &str = "required";
 const DEFAULT_METADATA_ONLY_FORCE_ACTION: &str = "Monitor";
 const DEFAULT_METADATA_ONLY_MAX_CONFIDENCE: f32 = 0.40;
 const DEFAULT_METADATA_ONLY_REQUEUE_FOR_CONTENT: bool = true;
-const DEFAULT_CONTENT_REQUIRED_MODE: &str = "required";
-const DEFAULT_METADATA_ONLY_ALLOWED_FOR: &str = "online";
+const DEFAULT_CONTENT_REQUIRED_MODE: &str = "auto";
+const DEFAULT_METADATA_ONLY_ALLOWED_FOR: &str = "all";
 const DEFAULT_METADATA_ONLY_FETCH_FAILURE_THRESHOLD: usize = 2;
 const DEFAULT_METADATA_ONLY_NO_CONTENT_STATUSES: &[&str] = &["failed", "unsupported", "blocked"];
 const DEFAULT_PENDING_RECONCILE_ENABLED: bool = true;
@@ -3271,7 +3271,7 @@ mod tests {
     }
 
     #[test]
-    fn online_context_runtime_defaults_to_required_mode() {
+    fn online_context_runtime_defaults_to_auto_mode() {
         let cfg = WorkerConfig {
             queue_name: "classification-jobs".into(),
             redis_url: "redis://localhost:6379".into(),
@@ -3294,8 +3294,8 @@ mod tests {
         assert_eq!(runtime.metadata_only_force_action, PolicyAction::Monitor);
         assert_eq!(runtime.metadata_only_max_confidence, 0.40);
         assert!(runtime.metadata_only_requeue_for_content);
-        assert_eq!(runtime.content_required_mode.as_str(), "required");
-        assert_eq!(runtime.metadata_only_allowed_for.as_str(), "online");
+        assert_eq!(runtime.content_required_mode.as_str(), "auto");
+        assert_eq!(runtime.metadata_only_allowed_for.as_str(), "all");
         assert_eq!(runtime.metadata_only_fetch_failure_threshold, 2);
         assert!(runtime.metadata_only_no_content_statuses.contains("failed"));
     }
