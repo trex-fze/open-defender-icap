@@ -29,6 +29,8 @@ pub struct ClassificationListRecord {
     pub subcategory: Option<String>,
     pub risk_level: Option<String>,
     pub recommended_action: Option<PolicyAction>,
+    pub effective_action: Option<PolicyAction>,
+    pub effective_decision_source: Option<String>,
     pub confidence: Option<f32>,
     pub status: String,
     pub updated_at: DateTime<Utc>,
@@ -112,6 +114,8 @@ pub async fn list(
                     .flatten()
                     .as_deref()
                     .and_then(parse_policy_action),
+                effective_action: None,
+                effective_decision_source: None,
                 confidence: row
                     .try_get::<Option<f64>, _>("confidence")
                     .ok()
@@ -145,6 +149,8 @@ pub async fn list(
             subcategory: None,
             risk_level: None,
             recommended_action: None,
+            effective_action: None,
+            effective_decision_source: None,
             confidence: None,
             status: row.get("status"),
             updated_at: row.get("updated_at"),
@@ -155,7 +161,50 @@ pub async fn list(
     if out.len() > limit as usize {
         out.truncate(limit as usize);
     }
+    enrich_effective_decisions(&state, &mut out).await;
     Ok(Json(out))
+}
+
+async fn enrich_effective_decisions(state: &AppState, out: &mut [ClassificationListRecord]) {
+    for record in out.iter_mut() {
+        if record.state != "classified" {
+            continue;
+        }
+
+        let Some((entity_level, _)) = parse_normalized_key(&record.normalized_key) else {
+            continue;
+        };
+
+        let payload = PolicyDecisionRequestPayload {
+            normalized_key: record.normalized_key.clone(),
+            entity_level: entity_level.to_string(),
+            source_ip: "127.0.0.1".to_string(),
+            user_id: None,
+            group_ids: None,
+            category_hint: record.primary_category.clone(),
+            subcategory_hint: record.subcategory.clone(),
+            risk_hint: record.risk_level.clone(),
+            confidence_hint: record.confidence,
+        };
+
+        match state
+            .evaluate_policy_decision::<_, PolicyDecision>(&payload)
+            .await
+        {
+            Ok(decision) => {
+                record.effective_action = Some(decision.action);
+                record.effective_decision_source = decision.decision_source;
+            }
+            Err(err) => {
+                warn!(
+                    target = "svc-admin",
+                    %err,
+                    normalized_key = %record.normalized_key,
+                    "failed to compute effective decision for classifications list"
+                );
+            }
+        }
+    }
 }
 
 pub async fn update(

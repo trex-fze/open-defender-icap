@@ -196,7 +196,8 @@ export const ClassificationsPage = () => {
                   <th>State</th>
                   <th>Category</th>
                   <th>Subcategory</th>
-                  <th>Action</th>
+                  <th>Effective Action</th>
+                  <th>Recorded Action</th>
                   <th>Updated</th>
                   <th></th>
                 </tr>
@@ -204,7 +205,7 @@ export const ClassificationsPage = () => {
               <tbody>
                 {data.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', color: '#7f8fb2' }}>
+                    <td colSpan={8} style={{ textAlign: 'center', color: '#7f8fb2' }}>
                       No matching sites.
                     </td>
                   </tr>
@@ -215,6 +216,10 @@ export const ClassificationsPage = () => {
                       <td>{item.state}</td>
                       <td>{item.primary_category ?? '—'}</td>
                       <td>{item.subcategory ?? '—'}</td>
+                      <td>
+                        {item.effective_action ?? '—'}
+                        {item.effective_decision_source ? ` (${item.effective_decision_source})` : ''}
+                      </td>
                       <td>{item.recommended_action ?? '—'}</td>
                       <td>{item.updated_at}</td>
                       <td style={{ textAlign: 'right' }}>

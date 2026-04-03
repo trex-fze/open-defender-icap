@@ -12,6 +12,8 @@ export type ClassificationRecord = {
   subcategory?: string;
   risk_level?: string;
   recommended_action?: string;
+  effective_action?: string;
+  effective_decision_source?: string;
   confidence?: number;
   status: string;
   updated_at: string;

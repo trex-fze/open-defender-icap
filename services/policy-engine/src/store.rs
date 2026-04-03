@@ -163,14 +163,27 @@ impl PolicyStore {
         hint: &str,
         subcategory_hint: Option<&str>,
     ) -> Option<String> {
-        let validated = self.taxonomy.validate_labels(hint, subcategory_hint);
+        if subcategory_hint.is_some() {
+            let validated = self.taxonomy.validate_labels(hint, subcategory_hint);
+            if let Some(reason) = validated.fallback_reason {
+                warn!(
+                    target = "svc-policy",
+                    reason = reason.as_str(),
+                    hint,
+                    subcategory_hint,
+                    "category hint normalized via taxonomy"
+                );
+            }
+            return Some(validated.category.id.clone());
+        }
+
+        let validated = self.taxonomy.validate_category(hint);
         if let Some(reason) = validated.fallback_reason {
             warn!(
                 target = "svc-policy",
                 reason = reason.as_str(),
                 hint,
-                subcategory_hint,
-                "category hint normalized via taxonomy"
+                "category hint normalized via taxonomy category resolver"
             );
         }
         Some(validated.category.id.clone())
@@ -269,7 +282,7 @@ fn canonicalize_rules(taxonomy: &TaxonomyStore, rules: &mut [PolicyRule]) -> Res
     for rule in rules.iter_mut() {
         if let Some(categories) = rule.conditions.categories.as_mut() {
             for category in categories.iter_mut() {
-                let validated = taxonomy.validate_labels(category, None);
+                let validated = taxonomy.validate_category(category);
                 if let Some(reason) = validated.fallback_reason {
                     if matches!(
                         reason,
@@ -553,7 +566,7 @@ mod tests {
             .categories
             .clone()
             .expect("categories present");
-        assert_eq!(categories, vec![String::from("unknown-unclassified")]);
+        assert_eq!(categories, vec![String::from("social-media")]);
     }
 
     #[test]
@@ -610,5 +623,37 @@ mod tests {
         let mut other = base_request();
         other.group_ids = Some(vec!["finance".into()]);
         assert_eq!(store.simulate(&other).decision.action, PolicyAction::Allow);
+    }
+
+    #[test]
+    fn category_only_hint_matches_canonicalized_rule_category() {
+        let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
+        let rule = PolicyRule {
+            id: "social-monitor".into(),
+            description: Some("Monitor social".into()),
+            priority: 10,
+            action: PolicyAction::Monitor,
+            conditions: Conditions {
+                categories: Some(vec!["Social Media".into()]),
+                ..Default::default()
+            },
+        };
+        let store = PolicyStore::from_document(
+            PolicyDocument {
+                version: "v1".into(),
+                rules: vec![rule],
+            },
+            taxonomy,
+        )
+        .unwrap();
+
+        let mut request = base_request();
+        request.category_hint = Some("social".into());
+        request.subcategory_hint = None;
+
+        assert_eq!(
+            store.simulate(&request).decision.action,
+            PolicyAction::Monitor
+        );
     }
 }

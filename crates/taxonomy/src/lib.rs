@@ -141,6 +141,13 @@ pub struct ValidatedTaxonomyLabels<'a> {
     pub normalized_subcategory: Option<String>,
 }
 
+#[derive(Debug)]
+pub struct ValidatedCategory<'a> {
+    pub category: &'a CanonicalCategory,
+    pub fallback_reason: Option<FallbackReason>,
+    pub normalized_category: Option<String>,
+}
+
 impl TaxonomyStore {
     pub fn new(taxonomy: Arc<CanonicalTaxonomy>) -> Self {
         let mut category_by_id = HashMap::new();
@@ -268,6 +275,19 @@ impl TaxonomyStore {
             fallback_reason,
             normalized_category,
             normalized_subcategory,
+        }
+    }
+
+    pub fn validate_category<'a>(&'a self, category: &str) -> ValidatedCategory<'a> {
+        let trimmed_category = category.trim();
+        let normalized_category = normalize_label(trimmed_category);
+        let category_resolution =
+            self.resolve_category(trimmed_category, normalized_category.as_deref());
+
+        ValidatedCategory {
+            category: self.category_by_index(category_resolution.index),
+            fallback_reason: category_resolution.fallback_reason,
+            normalized_category,
         }
     }
 
@@ -519,6 +539,17 @@ mod tests {
         let result = store.validate_labels("Social", Some("Short form video"));
         assert_eq!(result.category.id, "social-media");
         assert_eq!(result.subcategory.id, "short-video-platforms");
+        assert!(result.fallback_reason.is_none());
+    }
+
+    #[test]
+    fn resolves_category_only_alias_without_unknown_fallback() {
+        let taxonomy = CanonicalTaxonomy::load(&canonical_path())
+            .expect("canonical taxonomy should parse")
+            .into_arc();
+        let store = TaxonomyStore::new(taxonomy);
+        let result = store.validate_category("Social Media");
+        assert_eq!(result.category.id, "social-media");
         assert!(result.fallback_reason.is_none());
     }
 
