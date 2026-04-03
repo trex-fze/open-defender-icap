@@ -299,6 +299,9 @@ Missed queue replay can leave orphan `waiting_content` rows. Keep `OD_PENDING_RE
 **Q: Local LLM is up, but no requests seem to reach it. Why?**  
 If jobs are still waiting for page content, the worker can requeue before invoking any provider. For local-first/hybrid deployments, use `OD_LLM_CONTENT_REQUIRED_MODE=auto` and `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all` (with `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2`) so classification can move forward when excerpt fetch repeatedly fails.
 
+**Q: Where can I see crawl outcomes (success/failed/blocked) for a URL?**  
+Check `logs/crawl4ai/crawl-audit.jsonl` on the host. Each line includes UTC timestamp, normalized key, URL, report (`success|failed|blocked`), reason, status code, duration, and truncated error detail. The compose stack binds this path via `../../logs:/app/logs`.
+
 **Q: Where is evidence tracked?**  
 Stage 7 checklists live in `docs/evidence/stage07-checklist.md`. Follow Stage 6 instructions for dashboards.
 

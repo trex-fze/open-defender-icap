@@ -110,6 +110,11 @@ Core variables used most often:
 - `OD_CACHE_CHANNEL`: Redis invalidation channel (default `od:cache:invalidate`)
 - `OPENAI_API_KEY`: credential used by `openai` fallback provider
 - `OD_LOG_DIR`: local worker log root (default compose value `/app/logs`, mounted from host `logs/`)
+- `CRAWL4AI_LOG_SUBDIR`: crawl service log subdirectory under `OD_LOG_DIR` (default `crawl4ai`)
+- `CRAWL4AI_AUDIT_LOG_FILE`: structured crawl audit file name (default `crawl-audit.jsonl`)
+- `CRAWL4AI_APP_LOG_FILE`: crawl service application log file name (default `crawl4ai-service.log`)
+- `CRAWL4AI_LOG_MAX_BYTES`: max bytes per crawl log file before rotation (default `20971520`)
+- `CRAWL4AI_LOG_BACKUP_COUNT`: rotated log file count to retain (default `10`)
 
 LLM failover safety controls (env overrides for `config/llm-worker.json` routing):
 
@@ -266,6 +271,9 @@ Use `down -v` only when you explicitly need a clean local data state.
     - `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all`
     - `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2`
   - This keeps content-aware classification when excerpt exists, but avoids infinite pending loops for API/non-renderable sites.
+- How do I understand Crawl4AI failures clearly?
+  - Read `logs/crawl4ai/crawl-audit.jsonl` on the host. Each entry contains timestamp, URL, report (`success|failed|blocked`), reason, status code, duration, and error details.
+  - `blocked` is used for anti-bot/access-denied style failures (e.g., HTTP 403/captcha/access denied); other crawl failures are labeled `failed`.
 
 ## 9) Additional relevant information
 

@@ -180,7 +180,7 @@ The workflow for an unclassified site emphasizes “content-first” verificatio
    - `ClassificationJob` with `requires_content=true`, `base_url`, and `trace_id` metadata.
 
 
-2. **Page Fetcher + Crawl4AI** – The page-fetcher worker consumes the `PageFetchJob`, invokes `services/crawl4ai-service` headless Chromium instance, extracts a homepage excerpt, and writes markdown/plain excerpt + metadata into `page_contents` (raw HTML bytes are not persisted). This path is strict Crawl4AI-only (no direct HTTP fallback). Failures/retries update `fetch_status` so operators can see if Crawl4AI is struggling.
+2. **Page Fetcher + Crawl4AI** – The page-fetcher worker consumes the `PageFetchJob`, invokes `services/crawl4ai-service` headless Chromium instance, extracts a homepage excerpt, and writes markdown/plain excerpt + metadata into `page_contents` (raw HTML bytes are not persisted). This path is strict Crawl4AI-only (no direct HTTP fallback). Failures/retries update `fetch_status`, and Crawl4AI also emits structured per-request audit logs (`logs/crawl4ai/crawl-audit.jsonl`) with `success|failed|blocked` reports and reasons for operator diagnostics.
 
 3. **LLM Worker Gating** – When the LLM worker reads the `requires_content` job, it updates `classification_requests` (`status = waiting_content`) and polls Postgres until fresh `page_contents` exist for that normalized key. If no content is ready, the worker requeues the job (or sleeps) instead of generating a metadata-only verdict.
 

@@ -224,6 +224,7 @@ services:
       dockerfile: deploy/docker/crawl4ai/Dockerfile
     restart: unless-stopped
     environment:
+      OD_LOG_DIR: ${OD_LOG_DIR:-/app/logs}
       CRAWL4AI_HEADLESS: ${CRAWL4AI_HEADLESS:-true}
       CRAWL4AI_BROWSER: ${CRAWL4AI_BROWSER:-chromium}
       CRAWL4AI_USER_AGENT: ${CRAWL4AI_USER_AGENT:-Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36}
@@ -235,6 +236,8 @@ services:
       CRAWL4AI_ENABLE_STEALTH: ${CRAWL4AI_ENABLE_STEALTH:-true}
       CRAWL4AI_SIMULATE_USER: ${CRAWL4AI_SIMULATE_USER:-true}
       CRAWL4AI_OVERRIDE_NAVIGATOR: ${CRAWL4AI_OVERRIDE_NAVIGATOR:-true}
+    volumes:
+      - ../../logs:/app/logs
     ports:
       - "8085:8085"
     healthcheck:
