@@ -50,6 +50,11 @@ impl ActivationState {
         });
     }
 
+    pub async fn refresh_from_db(&self, pool: &PgPool) -> Result<bool> {
+        let profile = ActivationProfile::load_from_db(pool).await?;
+        Ok(self.replace_if_new(profile).is_some())
+    }
+
     pub fn is_enabled(&self, category_id: &str, subcategory_id: Option<&str>) -> bool {
         let profile = self.inner.read();
         profile.is_enabled(category_id, subcategory_id)

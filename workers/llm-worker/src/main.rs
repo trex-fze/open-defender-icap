@@ -1584,6 +1584,7 @@ impl JobConsumer {
                 confidence: verdict.confidence,
                 recommended_action: action,
             }),
+            decision_source: None,
         };
         self.cache_publisher
             .publish(&job.normalized_key, &cache_entry, CACHE_TTL_SECONDS)

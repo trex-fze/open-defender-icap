@@ -73,6 +73,8 @@ pub struct PolicyDecision {
     pub action: PolicyAction,
     pub cache_hit: bool,
     pub verdict: Option<ClassificationVerdict>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

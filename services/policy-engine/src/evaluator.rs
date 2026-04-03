@@ -25,6 +25,7 @@ enum PolicySource {
     },
     Database {
         pool: PgPool,
+        activation_pool: PgPool,
         seed_path: Option<String>,
     },
 }
@@ -45,12 +46,17 @@ impl PolicyEvaluator {
     pub fn from_database(
         store: PolicyStore,
         pool: PgPool,
+        activation_pool: PgPool,
         seed_path: Option<String>,
         activation: Arc<ActivationState>,
     ) -> Self {
         Self {
             store: Arc::new(store),
-            source: PolicySource::Database { pool, seed_path },
+            source: PolicySource::Database {
+                pool,
+                activation_pool,
+                seed_path,
+            },
             activation,
         }
     }
@@ -74,7 +80,11 @@ impl PolicyEvaluator {
                 let doc = PolicyDocument::load_from_file(path)?;
                 self.store.update(doc)?;
             }
-            PolicySource::Database { pool, seed_path } => {
+            PolicySource::Database {
+                pool,
+                activation_pool,
+                seed_path,
+            } => {
                 if let Some(new_store) =
                     PolicyStore::load_from_db(pool, Arc::clone(&taxonomy)).await?
                 {
@@ -97,6 +107,7 @@ impl PolicyEvaluator {
                         )?;
                     }
                 }
+                self.activation.refresh_from_db(activation_pool).await?;
             }
         }
         Ok(())
@@ -137,6 +148,10 @@ impl PolicyEvaluator {
 
     pub fn rules(&self) -> Vec<policy_dsl::PolicyRule> {
         self.store.list_rules()
+    }
+
+    pub fn is_category_enabled(&self, category_id: &str) -> bool {
+        self.activation.is_enabled(category_id, None)
     }
 
     pub fn version(&self) -> String {

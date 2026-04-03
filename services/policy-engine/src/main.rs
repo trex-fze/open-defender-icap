@@ -70,14 +70,28 @@ impl AppState {
             return;
         };
 
+        let related = related_classification_lookup(&request.normalized_key);
         let row = sqlx::query(
             r#"SELECT primary_category, subcategory, risk_level, confidence::float8 AS confidence
                FROM classifications
-               WHERE normalized_key = $1 AND status = 'active'
-               ORDER BY updated_at DESC
+               WHERE status = 'active'
+                 AND (
+                    normalized_key = $1
+                    OR ($2::text IS NOT NULL AND normalized_key = $2)
+                    OR ($3::text IS NOT NULL AND normalized_key LIKE $3)
+                 )
+               ORDER BY
+                    CASE
+                        WHEN normalized_key = $1 THEN 0
+                        WHEN $2::text IS NOT NULL AND normalized_key = $2 THEN 1
+                        ELSE 2
+                    END,
+                    updated_at DESC
                LIMIT 1"#,
         )
         .bind(&request.normalized_key)
+        .bind(related.ancestor_domain_key)
+        .bind(related.descendant_like_pattern)
         .fetch_optional(pool)
         .await;
 
@@ -188,6 +202,7 @@ impl AppState {
                 confidence: 1.0,
                 recommended_action: action,
             }),
+            decision_source: Some("override".into()),
         })
     }
 }
@@ -264,6 +279,52 @@ fn non_empty_string(value: String) -> Option<String> {
     }
 }
 
+#[derive(Debug, Default)]
+struct RelatedClassificationLookup {
+    ancestor_domain_key: Option<String>,
+    descendant_like_pattern: Option<String>,
+}
+
+fn related_classification_lookup(normalized_key: &str) -> RelatedClassificationLookup {
+    if let Some(host) = normalized_key.strip_prefix("subdomain:") {
+        if let Some(registered) = derive_registered_domain(host) {
+            let ancestor = format!("domain:{}", registered);
+            if ancestor != normalized_key {
+                return RelatedClassificationLookup {
+                    ancestor_domain_key: Some(ancestor),
+                    descendant_like_pattern: None,
+                };
+            }
+        }
+        return RelatedClassificationLookup::default();
+    }
+
+    if let Some(host) = normalized_key.strip_prefix("domain:") {
+        let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        if !host.is_empty() {
+            return RelatedClassificationLookup {
+                ancestor_domain_key: None,
+                descendant_like_pattern: Some(format!("subdomain:%.{}", host)),
+            };
+        }
+    }
+
+    RelatedClassificationLookup::default()
+}
+
+fn derive_registered_domain(hostname: &str) -> Option<String> {
+    let trimmed = hostname.trim().trim_end_matches('.').to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let labels: Vec<&str> = trimmed.split('.').filter(|label| !label.is_empty()).collect();
+    if labels.len() <= 2 {
+        Some(trimmed)
+    } else {
+        Some(labels[labels.len() - 2..].join("."))
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::FmtSubscriber::builder()
@@ -335,6 +396,7 @@ async fn main() -> Result<()> {
             PolicyEvaluator::from_database(
                 store,
                 pool.clone(),
+                activation_pool.clone(),
                 Some(cfg.policy_file.clone()),
                 activation,
             ),
@@ -404,7 +466,21 @@ async fn handle_decision(
     }
 
     state.hydrate_request_hints(&mut payload).await;
-    let decision = state.evaluator.evaluate(&payload);
+    let mut simulation = state.evaluator.simulate(&payload);
+    let taxonomy_disabled = simulation
+        .decision
+        .verdict
+        .as_ref()
+        .map(|verdict| !state.evaluator.is_category_enabled(&verdict.primary_category))
+        .unwrap_or(false);
+    simulation.decision.decision_source = Some(if taxonomy_disabled {
+        "taxonomy_disabled".to_string()
+    } else if simulation.matched_rule_id.is_some() {
+        "policy_rule".to_string()
+    } else {
+        "default".to_string()
+    });
+    let decision = simulation.decision;
     Ok(Json(decision))
 }
 
@@ -825,6 +901,38 @@ mod tests {
         assert!(
             domain_scope_specificity("support.mozilla.org")
                 > domain_scope_specificity("mozilla.org")
+        );
+    }
+
+    #[test]
+    fn related_lookup_for_subdomain_prefers_registered_domain() {
+        let related = related_classification_lookup("subdomain:www.youtube.com");
+        assert_eq!(
+            related.ancestor_domain_key.as_deref(),
+            Some("domain:youtube.com")
+        );
+        assert!(related.descendant_like_pattern.is_none());
+    }
+
+    #[test]
+    fn related_lookup_for_domain_includes_descendant_pattern() {
+        let related = related_classification_lookup("domain:youtube.com");
+        assert!(related.ancestor_domain_key.is_none());
+        assert_eq!(
+            related.descendant_like_pattern.as_deref(),
+            Some("subdomain:%.youtube.com")
+        );
+    }
+
+    #[test]
+    fn derive_registered_domain_handles_multi_label_subdomain() {
+        assert_eq!(
+            derive_registered_domain("api.eu.example.com").as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            derive_registered_domain("example.com").as_deref(),
+            Some("example.com")
         );
     }
 }

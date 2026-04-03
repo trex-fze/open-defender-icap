@@ -125,6 +125,7 @@ impl PolicyStore {
                         action: rule.action.clone(),
                         cache_hit: false,
                         verdict: request.to_verdict(rule, canonical_category.as_deref()),
+                        decision_source: None,
                     },
                     matched_rule_id: Some(rule.id.clone()),
                 };
@@ -135,6 +136,7 @@ impl PolicyStore {
                 action: PolicyAction::Allow,
                 cache_hit: false,
                 verdict: request.to_verdict_default(canonical_category.as_deref()),
+                decision_source: None,
             },
             matched_rule_id: None,
         }

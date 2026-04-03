@@ -300,6 +300,7 @@ mod tests {
             action,
             cache_hit: false,
             verdict: None,
+            decision_source: None,
         }
     }
 
