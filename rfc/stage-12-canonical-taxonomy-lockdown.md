@@ -16,7 +16,7 @@ Without this control, policy behavior, analytics, and compliance reporting becom
 
 ## 2) Goals
 
-1. Introduce a fixed canonical taxonomy (40 top-level categories + approved subcategories).
+1. Introduce a fixed canonical taxonomy (41 top-level categories + approved subcategories).
 2. Make taxonomy structure read-only in production paths (UI + API).
 3. Enforce classification output validation against canonical taxonomy.
 4. Route non-matching labels to `Unknown / Unclassified` with explicit reason metadata.

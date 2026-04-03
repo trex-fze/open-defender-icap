@@ -11,7 +11,7 @@
 - [x] Create `config/canonical-taxonomy.json` with stable IDs.
 - [x] Include `Unknown / Unclassified` category and approved unknown subcategories.
 - [x] Add schema/consistency tests for canonical taxonomy file.
-- [x] Verify all 40 top-level categories and full subcategory lists are present.
+- [x] Verify all 41 top-level categories and full subcategory lists are present.
 
 ## Activation Profile Persistence
 

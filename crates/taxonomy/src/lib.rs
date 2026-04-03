@@ -95,8 +95,8 @@ impl CanonicalTaxonomy {
             }
         }
         anyhow::ensure!(
-            self.categories.len() == 40,
-            "expected 40 canonical categories, found {}",
+            self.categories.len() == 41,
+            "expected 41 canonical categories, found {}",
             self.categories.len()
         );
         anyhow::ensure!(
@@ -425,6 +425,10 @@ const CATEGORY_ALIAS_PAIRS: &[(&str, &str)] = &[
     ("fraud", "malware-phishing-fraud"),
     ("adult", "adult-sexual-content"),
     ("sexual content", "adult-sexual-content"),
+    ("advertising", "advertisements"),
+    ("ads", "advertisements"),
+    ("adtech", "advertisements"),
+    ("ad network", "advertisements"),
     ("unknown", "unknown-unclassified"),
 ];
 
@@ -443,6 +447,17 @@ const SUBCATEGORY_ALIAS_PAIRS: &[(&str, &str, &str)] = &[
         UNKNOWN_CATEGORY_ID,
         "unknown",
         UNKNOWN_DEFAULT_SUBCATEGORY_ID,
+    ),
+    (
+        "advertisements",
+        "advertisement",
+        "general-advertising",
+    ),
+    ("advertisements", "ads", "general-advertising"),
+    (
+        "advertisements",
+        "advertising network",
+        "general-advertising",
     ),
 ];
 
@@ -488,7 +503,7 @@ mod tests {
     fn canonical_taxonomy_file_is_valid() {
         let taxonomy =
             CanonicalTaxonomy::load(&canonical_path()).expect("canonical taxonomy should parse");
-        assert_eq!(taxonomy.categories.len(), 40);
+        assert_eq!(taxonomy.categories.len(), 41);
         assert!(taxonomy
             .categories
             .iter()
@@ -521,6 +536,23 @@ mod tests {
             let result = store.validate_labels("social-media", Some(input));
             assert_eq!(result.category.id, "social-media");
             assert_eq!(result.subcategory.id, "social-networks");
+            assert!(
+                result.fallback_reason.is_none(),
+                "alias should resolve: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolves_advertising_alias_variants() {
+        let taxonomy = CanonicalTaxonomy::load(&canonical_path())
+            .expect("canonical taxonomy should parse")
+            .into_arc();
+        let store = TaxonomyStore::new(taxonomy);
+        for input in ["advertising", "ads", "ad network"] {
+            let result = store.validate_labels(input, Some("advertisement"));
+            assert_eq!(result.category.id, "advertisements");
+            assert_eq!(result.subcategory.id, "general-advertising");
             assert!(
                 result.fallback_reason.is_none(),
                 "alias should resolve: {input}"

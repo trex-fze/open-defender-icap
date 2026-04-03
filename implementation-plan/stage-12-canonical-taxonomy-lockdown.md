@@ -39,7 +39,7 @@ No additional tasks remain in the Stage 12 scope.
    - stable IDs for category and subcategory entries
    - `Unknown / Unclassified` category with approved fallback subcategories
 3. Add schema validation test for this file (JSON structure + uniqueness rules).
-4. Add completeness test ensuring all 40 top-level categories are present.
+4. Add completeness test ensuring all 41 top-level categories are present.
 
 ### B. Activation Profile Data Model
 
@@ -130,7 +130,7 @@ Target code areas:
 Implementation steps:
 
 1. Remove/hide category/subcategory CRUD controls.
-2. Render full canonical taxonomy hierarchy (all 40 categories + all subcategories).
+2. Render full canonical taxonomy hierarchy (all 41 categories + all subcategories).
 3. Add checkbox per category and per subcategory.
 4. Add parent-child toggle behavior:
    - toggling category updates effective state of children in UI

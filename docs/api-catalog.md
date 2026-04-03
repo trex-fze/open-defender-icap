@@ -58,7 +58,7 @@ All routes require `X-Admin-Token` or a JWT with the listed roles. Pagination pa
 
 | Method | Path | Description | Roles | Request Schema | Response |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/taxonomy` | Returns the canonical taxonomy (40 categories + subcategories) with the current activation profile. Structure is read-only. | `policy-viewer`. | — | `{ version, updated_at, updated_by, categories: [{ id, name, enabled, locked, subcategories: [...] }] }` |
+| `GET` | `/api/v1/taxonomy` | Returns the canonical taxonomy (41 categories + subcategories) with the current activation profile. Structure is read-only. | `policy-viewer`. | — | `{ version, updated_at, updated_by, categories: [{ id, name, enabled, locked, subcategories: [...] }] }` |
 | `PUT` | `/api/v1/taxonomy/activation` | Saves checkbox state for every category/subcategory. IDs must match the canonical file and `Unknown / Unclassified` cannot be disabled. | `policy-editor` (`ROLE_TAXONOMY_EDIT`). | `ActivationUpdateRequest`: `{ version, categories: [{ id, enabled, subcategories: [{ id, enabled }] }] }`. Version must match the canonical taxonomy version. | `{ version, updated_at, updated_by }`. Also increments `taxonomy_activation_changes_total`. |
 
 > **Note:** Category/subcategory creation and deletion endpoints have been removed; taxonomy structure is governed solely by `config/canonical-taxonomy.json` and operator toggles only control allow/deny state.

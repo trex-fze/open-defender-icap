@@ -19,7 +19,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 2. **Install prerequisites**: Rust stable (>=1.80), Node LTS, Docker, docker-compose.
 3. **Bootstrap workspace**: `cargo check`, `npm install` inside `web-admin`, `docker compose -f deploy/docker/docker-compose.yml up --build`.
 4. **Run migrations**: `odctl migrate run all` (or `--target admin|policy`) to apply Postgres schema updates before starting services.
-5. **Review canonical taxonomy**: `config/canonical-taxonomy.json` now defines the complete category/subcategory tree. Operators only toggle allow/deny state via the Admin UI/API; no CLI seeding is required post-Stage 12.
+5. **Review canonical taxonomy**: `config/canonical-taxonomy.json` now defines the complete category/subcategory tree (including `advertisements/general-advertising`). Operators only toggle allow/deny state via the Admin UI/API; no CLI seeding is required post-Stage 12.
 
 ## 3. Operating the ICAP Adaptor
 - Config file: `config/icap.json` (host/port, preview size, Redis URL, policy endpoint, metrics host/port, cache invalidation channel, optional `job_queue`). `cache_channel` defaults to `od:cache:invalidate` and controls the Redis pub/sub topic used for cache flush notifications. When `job_queue` is configured, the adaptor publishes classification jobs to the specified Redis stream for Stage 4 LLM workers.

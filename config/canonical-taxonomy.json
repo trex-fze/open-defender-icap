@@ -1,5 +1,5 @@
 {
-  "version": "2026-03-25-draft-1",
+  "version": "2026-04-03-draft-2",
   "source": "stage-12-canonical-taxonomy-lockdown",
   "categories": [
     {
@@ -532,6 +532,13 @@
         { "id": "redirect-tracking-links", "name": "Redirect/tracking links" },
         { "id": "campaign-links", "name": "Campaign links" },
         { "id": "qr-redirect-services", "name": "QR redirect services" }
+      ]
+    },
+    {
+      "id": "advertisements",
+      "name": "Advertisements",
+      "subcategories": [
+        { "id": "general-advertising", "name": "General advertising" }
       ]
     },
     {
