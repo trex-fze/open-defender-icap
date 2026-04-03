@@ -39,9 +39,9 @@ const AppLayout = () => {
     <div className="app-shell">
       <aside className="sidebar">
         <div>
-          <h1>Open Defender</h1>
+          <h1>Open Defender - ICAP</h1>
           <p style={{ marginTop: '-0.5rem', color: '#6c7da5', fontSize: '0.9rem' }}>
-            Async Classification Control
+            AI-enhanced Web Security Platform
           </p>
         </div>
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1 }}>
