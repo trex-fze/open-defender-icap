@@ -55,40 +55,55 @@ type TaxonomyState = {
   isMock: boolean;
 };
 
+const UNKNOWN_CATEGORY_ID = 'unknown-unclassified';
+
+const sortCategories = (categories: TaxonomyCategoryRow[]): TaxonomyCategoryRow[] =>
+  [...categories].sort((left, right) => {
+    const leftUnknown = left.id === UNKNOWN_CATEGORY_ID;
+    const rightUnknown = right.id === UNKNOWN_CATEGORY_ID;
+    if (leftUnknown && !rightUnknown) return 1;
+    if (!leftUnknown && rightUnknown) return -1;
+    return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
+  });
+
 const mapResponse = (payload: ApiTaxonomyResponse): TaxonomyActivationState => ({
   version: payload.version,
   updatedAt: payload.updated_at,
   updatedBy: payload.updated_by,
-  categories: payload.categories.map((category) => ({
-    id: category.id,
-    name: category.name,
-    enabled: category.enabled,
-    locked: category.locked,
-    subcategories: category.subcategories.map((sub) => ({
-      id: sub.id,
-      name: sub.name,
-      enabled: sub.enabled,
-      locked: sub.locked,
+  categories: sortCategories(
+    payload.categories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      enabled: category.enabled,
+      locked: category.locked,
+      subcategories: category.subcategories.map((sub) => ({
+        id: sub.id,
+        name: sub.name,
+        enabled: sub.enabled,
+        locked: sub.locked,
+      })),
     })),
-  })),
+  ),
 });
 
 const fallbackData: TaxonomyActivationState = {
   version: taxonomyActivation.version,
   updatedAt: taxonomyActivation.updatedAt,
   updatedBy: taxonomyActivation.updatedBy,
-  categories: taxonomyActivation.categories.map((category) => ({
-    id: category.id,
-    name: category.name,
-    enabled: category.enabled,
-    locked: category.locked,
-    subcategories: category.subcategories.map((sub) => ({
-      id: sub.id,
-      name: sub.name,
-      enabled: sub.enabled,
-      locked: sub.locked,
+  categories: sortCategories(
+    taxonomyActivation.categories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      enabled: category.enabled,
+      locked: category.locked,
+      subcategories: category.subcategories.map((sub) => ({
+        id: sub.id,
+        name: sub.name,
+        enabled: sub.enabled,
+        locked: sub.locked,
+      })),
     })),
-  })),
+  ),
 };
 
 export const useTaxonomyData = () => {

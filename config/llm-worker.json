@@ -31,7 +31,7 @@
     "retryable_status_codes": [408, 429, 500, 502, 503, 504],
     "fallback_cooldown_secs": 30,
     "fallback_max_per_min": 30,
-    "stale_pending_minutes": 10,
+    "stale_pending_minutes": 0,
     "stale_pending_online_provider": "openai-fallback",
     "stale_pending_health_ttl_secs": 30,
     "stale_pending_max_per_min": 10,

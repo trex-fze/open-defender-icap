@@ -39,6 +39,8 @@ All routes require `X-Admin-Token` or a JWT with the listed roles. Pagination pa
 | `POST` | `/api/v1/overrides` | Create an override. | `policy-editor`. | `{ scope_type: "domain", scope_value, action: "allow"\|"block", reason?, created_by?, expires_at?, status? }`. | Newly created `OverrideRecord`. |
 | `PUT`/`DELETE` | `/api/v1/overrides/:id` | Update or delete an override. | `policy-editor`. | Same payload as create (for PUT). | Updated `OverrideRecord` or `204 No Content`. |
 
+Override precedence note: policy-engine evaluates active domain overrides before classification/policy rules. A domain override applies to both apex + subdomains, and when multiple overrides match, the most-specific scope wins.
+
 ### Authentication
 
 | Method | Path | Description | Auth | Request Schema | Response |

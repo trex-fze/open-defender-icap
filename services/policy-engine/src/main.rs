@@ -32,6 +32,12 @@ use tokio::net::TcpListener;
 use tracing::{debug, error, info, warn, Level};
 use uuid::Uuid;
 
+#[derive(Debug)]
+struct OverrideRecord {
+    scope_value: String,
+    action: String,
+}
+
 #[derive(Clone)]
 struct AppState {
     evaluator: Arc<PolicyEvaluator>,
@@ -117,6 +123,113 @@ impl AppState {
             }
         }
     }
+
+    async fn resolve_override_decision(
+        &self,
+        request: &DecisionRequest,
+    ) -> Option<common_types::PolicyDecision> {
+        let pool = self.classification_pool.as_ref()?;
+        let host = host_from_normalized_key(&request.normalized_key)?;
+
+        let rows = sqlx::query(
+            r#"SELECT scope_value, action, updated_at, created_at
+               FROM overrides
+               WHERE scope_type = 'domain'
+                 AND status = 'active'
+                 AND (expires_at IS NULL OR expires_at > NOW())
+               ORDER BY updated_at DESC, created_at DESC"#,
+        )
+        .fetch_all(pool)
+        .await
+        .ok()?;
+
+        let mut best: Option<(usize, OverrideRecord)> = None;
+        for row in rows {
+            let scope_value = row
+                .try_get::<String, _>("scope_value")
+                .ok()
+                .and_then(non_empty_string)?;
+            if !domain_scope_matches_host(&scope_value, &host) {
+                continue;
+            }
+            let action = row.try_get::<String, _>("action").ok()?;
+            let specificity = domain_scope_specificity(&scope_value);
+            let record = OverrideRecord {
+                scope_value,
+                action,
+            };
+            match &best {
+                Some((best_specificity, _)) if *best_specificity > specificity => {}
+                Some((best_specificity, _)) if *best_specificity == specificity => {}
+                _ => best = Some((specificity, record)),
+            }
+        }
+
+        let (_, matched) = best?;
+        let action = match matched.action.trim().to_ascii_lowercase().as_str() {
+            "allow" => common_types::PolicyAction::Allow,
+            "block" => common_types::PolicyAction::Block,
+            _ => return None,
+        };
+        debug!(
+            target = "svc-policy",
+            normalized_key = %request.normalized_key,
+            scope = %matched.scope_value,
+            action = %matched.action,
+            "applied domain override before policy evaluation"
+        );
+        Some(common_types::PolicyDecision {
+            action: action.clone(),
+            cache_hit: false,
+            verdict: Some(common_types::ClassificationVerdict {
+                primary_category: "override-manual".into(),
+                subcategory: format!("domain:{}", matched.scope_value),
+                risk_level: "low".into(),
+                confidence: 1.0,
+                recommended_action: action,
+            }),
+        })
+    }
+}
+
+fn host_from_normalized_key(normalized_key: &str) -> Option<String> {
+    let raw = normalized_key
+        .strip_prefix("domain:")
+        .or_else(|| normalized_key.strip_prefix("subdomain:"))?;
+    let host = raw.trim().trim_end_matches('.').to_ascii_lowercase();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host)
+    }
+}
+
+fn normalize_scope_host(scope_value: &str) -> Option<String> {
+    let lowered = scope_value.trim().to_ascii_lowercase();
+    let core = lowered.strip_prefix("*.").unwrap_or(lowered.as_str());
+    let host = core.trim_end_matches('.').to_string();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host)
+    }
+}
+
+fn domain_scope_matches_host(scope_value: &str, host: &str) -> bool {
+    let Some(scope_host) = normalize_scope_host(scope_value) else {
+        return false;
+    };
+    if host == scope_host {
+        return true;
+    }
+    let suffix = format!(".{}", scope_host);
+    host.ends_with(&suffix)
+}
+
+fn domain_scope_specificity(scope_value: &str) -> usize {
+    normalize_scope_host(scope_value)
+        .map(|host| host.len())
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Default)]
@@ -284,6 +397,10 @@ async fn handle_decision(
                 message: "normalized_key required".into(),
             }),
         ));
+    }
+
+    if let Some(decision) = state.resolve_override_decision(&payload).await {
+        return Ok(Json(decision));
     }
 
     state.hydrate_request_hints(&mut payload).await;
@@ -679,5 +796,35 @@ mod tests {
         assert_eq!(request.subcategory_hint.as_deref(), Some("general-news"));
         assert_eq!(request.risk_hint.as_deref(), Some("medium"));
         assert_eq!(request.confidence_hint, Some(0.7));
+    }
+
+    #[test]
+    fn extracts_host_from_domain_and_subdomain_keys() {
+        assert_eq!(
+            host_from_normalized_key("domain:mozilla.org"),
+            Some("mozilla.org".to_string())
+        );
+        assert_eq!(
+            host_from_normalized_key("subdomain:www.mozilla.org"),
+            Some("www.mozilla.org".to_string())
+        );
+        assert_eq!(host_from_normalized_key("url:https://mozilla.org"), None);
+    }
+
+    #[test]
+    fn domain_scope_matching_honors_subdomain_boundary() {
+        assert!(domain_scope_matches_host("mozilla.org", "mozilla.org"));
+        assert!(domain_scope_matches_host("mozilla.org", "www.mozilla.org"));
+        assert!(domain_scope_matches_host("*.mozilla.org", "www.mozilla.org"));
+        assert!(!domain_scope_matches_host("mozilla.org", "evilmozilla.org"));
+        assert!(!domain_scope_matches_host("mozilla.org", "mozilla.org.evil"));
+    }
+
+    #[test]
+    fn more_specific_domain_scope_has_higher_priority() {
+        assert!(
+            domain_scope_specificity("support.mozilla.org")
+                > domain_scope_specificity("mozilla.org")
+        );
     }
 }

@@ -490,6 +490,8 @@ Rules:
 
 ## 20.5 Domain Allow / Deny Overrides
 - Manual decisions are managed through `/api/v1/overrides` using `scope_type=domain` and `action=allow|block`.
+- Policy engine evaluates active, non-expired domain overrides before classification/policy rules.
+- Domain overrides apply to both apex and subdomain normalized keys; when multiple overrides match, most-specific scope wins.
 
 ## 20.6 Report APIs
 - `GET /api/v1/reports/ip-activity?ip=10.1.1.5&range=24h&metrics=top-blocked` returns aggregated data.

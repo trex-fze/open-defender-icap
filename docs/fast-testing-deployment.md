@@ -142,6 +142,17 @@ LLM failover safety controls (env overrides for `config/llm-worker.json` routing
 - `OD_PENDING_RECONCILE_STALE_MINUTES`: age threshold for reconciling stale pending rows (default `10`)
 - `OD_PENDING_RECONCILE_BATCH`: max pending rows reconciled per cycle (default `100`)
 
+Recommended local-first profile (current compose defaults):
+
+- `OD_LLM_FAILOVER_POLICY=safe`
+- `OD_LLM_STALE_PENDING_MINUTES=0`
+- `OD_LLM_CONTENT_REQUIRED_MODE=auto`
+- `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all`
+- `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2`
+- `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES=failed,unsupported,blocked`
+- `OD_LLM_METADATA_ONLY_FORCE_ACTION=Monitor`
+- `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE=0.4`
+
 Integration-script performance and reliability controls:
 
 - `INTEGRATION_BUILD=1|0`

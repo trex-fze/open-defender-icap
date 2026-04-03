@@ -196,10 +196,12 @@ The workflow for an unclassified site emphasizes “content-first” verificatio
 
 9. **Subsequent Requests** – After the LLM verdict lands (or an analyst overrides it), ICAP adaptor cache hits serve the real action immediately. The site stays blocked indefinitely until content is verified (security-first posture).
 
-### 3.3 Override Flow (Future)
-1. Admin defines override via API/UI/CLI (scope: user/IP/domain).
-2. Policy engine/ adaptor checks override store before policy evaluation.
-3. Overrides audit events emitted and TTL managed.
+### 3.3 Override Flow
+1. Admin defines override via API/UI/CLI (`scope_type=domain`, action `allow|block`).
+2. Policy engine checks active, non-expired overrides before classification/policy rules.
+3. Domain overrides apply to both apex domain and subdomains (`domain:mozilla.org` and `subdomain:www.mozilla.org`).
+4. If multiple overrides match, most-specific scope wins (longest hostname), then latest update timestamp.
+5. Overrides audit events emitted and ICAP cache invalidation keeps enforcement fresh.
 
 ## 4. Data Model Snapshot
 - `classifications` (normalized_key, taxonomy_version, activation-aware verdict fields, TTL).
