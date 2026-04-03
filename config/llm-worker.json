@@ -42,7 +42,11 @@
     "content_required_mode": "required",
     "metadata_only_allowed_for": "online",
     "metadata_only_fetch_failure_threshold": 2,
-    "metadata_only_no_content_statuses": ["failed", "unsupported", "blocked"]
+    "metadata_only_no_content_statuses": ["failed", "unsupported", "blocked"],
+    "pending_reconcile_enabled": true,
+    "pending_reconcile_interval_secs": 60,
+    "pending_reconcile_stale_minutes": 10,
+    "pending_reconcile_batch": 100
   },
   "metrics_host": "0.0.0.0",
   "metrics_port": 19015

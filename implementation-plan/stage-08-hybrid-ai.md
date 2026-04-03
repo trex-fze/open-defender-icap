@@ -60,3 +60,4 @@
   - `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD` (default `2`) and `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES` to trigger metadata fallback after repeated terminal fetch failures.
   - `OD_LLM_METADATA_ONLY_ALLOWED_FOR=online|all` to support offline-only provider deployments.
 - Added observability for metadata fallback reasons via `llm_metadata_only_reason_total` and `llm_fetch_failure_fallback_total`.
+- Added stale pending reconciliation controls (`OD_PENDING_RECONCILE_*`) to re-enqueue orphaned `waiting_content` keys and clear stale rows after classification.

@@ -132,6 +132,10 @@ LLM failover safety controls (env overrides for `config/llm-worker.json` routing
 - `OD_LLM_METADATA_ONLY_FORCE_ACTION`: force action when online call runs metadata-only (default `Monitor`)
 - `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`: cap confidence for metadata-only outputs (default `0.4`)
 - `OD_LLM_METADATA_ONLY_REQUEUE_FOR_CONTENT`: keep pending row and wait for excerpt after metadata-only persistence (default `true`)
+- `OD_PENDING_RECONCILE_ENABLED`: enable background stale pending reconciliation (default `true`)
+- `OD_PENDING_RECONCILE_INTERVAL_SECS`: reconcile loop interval in seconds (default `60`)
+- `OD_PENDING_RECONCILE_STALE_MINUTES`: age threshold for reconciling stale pending rows (default `10`)
+- `OD_PENDING_RECONCILE_BATCH`: max pending rows reconciled per cycle (default `100`)
 
 Integration-script performance and reliability controls:
 
@@ -253,6 +257,8 @@ Use `down -v` only when you explicitly need a clean local data state.
 - What if I run offline-only models?
   - Set `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all` so metadata-only fallback is available to offline providers too.
   - Conservative guardrails still apply (`OD_LLM_METADATA_ONLY_FORCE_ACTION`, `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`).
+- Why does a domain stay in Pending Sites even when it looks inactive?
+  - If a prior queue event was missed/restarted, the pending row can become orphaned. Keep `OD_PENDING_RECONCILE_ENABLED=true` so stale rows are auto-healed (re-enqueued or cleared).
 
 ## 9) Additional relevant information
 

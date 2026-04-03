@@ -5,7 +5,7 @@ use anyhow::{anyhow, Context, Result};
 use common_types::{ClassificationVerdict, PageFetchJob, PolicyAction, PolicyDecision};
 use redis::streams::{StreamReadOptions, StreamReadReply};
 use redis::AsyncCommands;
-use reqwest::{Client, RequestBuilder};
+use reqwest::{Client, RequestBuilder, Url};
 use schema::{LlmResponse, PromptPayload};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -138,6 +138,14 @@ struct RoutingConfig {
     pub metadata_only_fetch_failure_threshold: Option<usize>,
     #[serde(default)]
     pub metadata_only_no_content_statuses: Option<Vec<String>>,
+    #[serde(default)]
+    pub pending_reconcile_enabled: Option<bool>,
+    #[serde(default)]
+    pub pending_reconcile_interval_secs: Option<u64>,
+    #[serde(default)]
+    pub pending_reconcile_stale_minutes: Option<u64>,
+    #[serde(default)]
+    pub pending_reconcile_batch: Option<usize>,
 }
 
 impl WorkerConfig {
@@ -329,6 +337,30 @@ impl WorkerConfig {
             metadata_only_no_content_statuses,
         })
     }
+
+    fn resolve_pending_reconcile(&self) -> PendingReconcileRuntime {
+        let enabled = env_bool("OD_PENDING_RECONCILE_ENABLED")
+            .or(self.routing.pending_reconcile_enabled)
+            .unwrap_or(DEFAULT_PENDING_RECONCILE_ENABLED);
+        let interval_secs = env_u64("OD_PENDING_RECONCILE_INTERVAL_SECS")
+            .or(self.routing.pending_reconcile_interval_secs)
+            .unwrap_or(DEFAULT_PENDING_RECONCILE_INTERVAL_SECS)
+            .max(10);
+        let stale_minutes = env_u64("OD_PENDING_RECONCILE_STALE_MINUTES")
+            .or(self.routing.pending_reconcile_stale_minutes)
+            .unwrap_or(DEFAULT_PENDING_RECONCILE_STALE_MINUTES)
+            .max(1);
+        let batch = env_usize("OD_PENDING_RECONCILE_BATCH")
+            .or(self.routing.pending_reconcile_batch)
+            .unwrap_or(DEFAULT_PENDING_RECONCILE_BATCH)
+            .max(1);
+        PendingReconcileRuntime {
+            enabled,
+            interval_secs,
+            stale_minutes,
+            batch,
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -424,6 +456,10 @@ const DEFAULT_CONTENT_REQUIRED_MODE: &str = "required";
 const DEFAULT_METADATA_ONLY_ALLOWED_FOR: &str = "online";
 const DEFAULT_METADATA_ONLY_FETCH_FAILURE_THRESHOLD: usize = 2;
 const DEFAULT_METADATA_ONLY_NO_CONTENT_STATUSES: &[&str] = &["failed", "unsupported", "blocked"];
+const DEFAULT_PENDING_RECONCILE_ENABLED: bool = true;
+const DEFAULT_PENDING_RECONCILE_INTERVAL_SECS: u64 = 60;
+const DEFAULT_PENDING_RECONCILE_STALE_MINUTES: u64 = 10;
+const DEFAULT_PENDING_RECONCILE_BATCH: usize = 100;
 const HEALTHCHECK_PROMPT: &str = "Return JSON only with this exact shape: {\"primary_category\":\"unknown\",\"subcategory\":\"unclassified\",\"risk_level\":\"low\",\"confidence\":0.5,\"recommended_action\":\"Allow\"}.";
 
 #[derive(Debug, Clone, Copy)]
@@ -685,6 +721,14 @@ struct ProviderHealthState {
     healthy: bool,
 }
 
+#[derive(Debug, Clone)]
+struct PendingReconcileRuntime {
+    enabled: bool,
+    interval_secs: u64,
+    stale_minutes: u64,
+    batch: usize,
+}
+
 #[derive(Debug)]
 struct PageFetchState {
     latest_status: Option<String>,
@@ -822,6 +866,7 @@ async fn main() -> Result<()> {
     let online_context = cfg
         .resolve_online_context()
         .context("failed to resolve online context mode settings")?;
+    let pending_reconcile = cfg.resolve_pending_reconcile();
     info!(
         target = "svc-llm-worker",
         queue = %cfg.queue_name,
@@ -850,6 +895,10 @@ async fn main() -> Result<()> {
         metadata_only_force_action = ?online_context.metadata_only_force_action,
         metadata_only_max_confidence = online_context.metadata_only_max_confidence,
         metadata_only_requeue_for_content = online_context.metadata_only_requeue_for_content,
+        pending_reconcile_enabled = pending_reconcile.enabled,
+        pending_reconcile_interval_secs = pending_reconcile.interval_secs,
+        pending_reconcile_stale_minutes = pending_reconcile.stale_minutes,
+        pending_reconcile_batch = pending_reconcile.batch,
         "LLM worker initialized"
     );
 
@@ -912,6 +961,17 @@ async fn main() -> Result<()> {
     .await?;
     tokio::spawn(job_consumer.run());
 
+    if pending_reconcile.enabled {
+        let reconciler = PendingReconciler::new(
+            cfg.redis_url.clone(),
+            cfg.stream.clone(),
+            cfg.page_fetch_stream.clone(),
+            pool.clone(),
+            pending_reconcile,
+        )?;
+        tokio::spawn(reconciler.run());
+    }
+
     signal::ctrl_c().await?;
     Ok(())
 }
@@ -951,6 +1011,20 @@ struct CacheListener {
     channel: String,
 }
 
+struct PendingReconciler {
+    redis_url: String,
+    classification_stream: String,
+    page_fetch_stream: String,
+    pool: PgPool,
+    cfg: PendingReconcileRuntime,
+}
+
+#[derive(Debug)]
+struct PendingRow {
+    normalized_key: String,
+    base_url: Option<String>,
+}
+
 struct DecisionCachePublisher {
     client: redis::Client,
     channel: String,
@@ -985,6 +1059,169 @@ impl DecisionCachePublisher {
             .query_async::<_, ()>(&mut conn)
             .await?;
         Ok(())
+    }
+}
+
+impl PendingReconciler {
+    fn new(
+        redis_url: String,
+        classification_stream: String,
+        page_fetch_stream: String,
+        pool: PgPool,
+        cfg: PendingReconcileRuntime,
+    ) -> Result<Self> {
+        if redis_url.trim().is_empty() {
+            return Err(anyhow!("redis_url required for pending reconciler"));
+        }
+        Ok(Self {
+            redis_url,
+            classification_stream,
+            page_fetch_stream,
+            pool,
+            cfg,
+        })
+    }
+
+    async fn run(self) {
+        let mut ticker = tokio::time::interval(Duration::from_secs(self.cfg.interval_secs));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            if let Err(err) = self.reconcile_once().await {
+                warn!(target = "svc-llm-worker", %err, "pending reconciler cycle failed");
+            }
+        }
+    }
+
+    async fn reconcile_once(&self) -> Result<()> {
+        let rows = sqlx::query(
+            r#"
+            SELECT normalized_key, base_url
+            FROM classification_requests
+            WHERE status = 'waiting_content'
+              AND updated_at <= NOW() - make_interval(mins => $1)
+            ORDER BY updated_at ASC
+            LIMIT $2
+            "#,
+        )
+        .bind(self.cfg.stale_minutes as i32)
+        .bind(self.cfg.batch as i64)
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.is_empty() {
+            return Ok(());
+        }
+
+        let mut redis_conn = redis::Client::open(self.redis_url.clone())?
+            .get_async_connection()
+            .await?;
+
+        for row in rows {
+            let pending = PendingRow {
+                normalized_key: row.try_get::<String, _>("normalized_key")?,
+                base_url: row.try_get::<Option<String>, _>("base_url")?,
+            };
+
+            if self.is_classified(&pending.normalized_key).await? {
+                sqlx::query("DELETE FROM classification_requests WHERE normalized_key = $1")
+                    .bind(&pending.normalized_key)
+                    .execute(&self.pool)
+                    .await?;
+                info!(
+                    target = "svc-llm-worker",
+                    normalized_key = %pending.normalized_key,
+                    "reconciler cleared stale pending row for classified key"
+                );
+                continue;
+            }
+
+            let (entity_level, key_value) = match parse_normalized_key_parts(
+                &pending.normalized_key,
+            ) {
+                Some(parts) => parts,
+                None => {
+                    sqlx::query(
+                        "UPDATE classification_requests SET last_error = $2, updated_at = NOW() WHERE normalized_key = $1",
+                    )
+                    .bind(&pending.normalized_key)
+                    .bind("invalid normalized key")
+                    .execute(&self.pool)
+                    .await?;
+                    continue;
+                }
+            };
+
+            let (hostname, full_url, base_url) = derive_urls(
+                &pending.normalized_key,
+                key_value,
+                pending.base_url.as_deref(),
+            );
+            let trace_id = format!("reconcile-{}", Uuid::new_v4());
+            let class_job = ClassificationJobPayload {
+                normalized_key: pending.normalized_key.clone(),
+                entity_level: entity_level.to_string(),
+                hostname: hostname.clone(),
+                full_url: full_url.clone(),
+                trace_id: trace_id.clone(),
+                requires_content: true,
+                base_url: Some(base_url.clone()),
+                content_excerpt: None,
+                content_hash: None,
+                content_version: None,
+                content_language: None,
+            };
+            let fetch_job = PageFetchJob {
+                normalized_key: pending.normalized_key.clone(),
+                url: full_url,
+                hostname,
+                trace_id: Some(trace_id),
+                ttl_seconds: None,
+            };
+
+            let class_payload = serde_json::to_string(&class_job)?;
+            let fetch_payload = serde_json::to_string(&fetch_job)?;
+
+            redis::cmd("XADD")
+                .arg(&self.classification_stream)
+                .arg("*")
+                .arg("payload")
+                .arg(class_payload)
+                .query_async::<_, ()>(&mut redis_conn)
+                .await?;
+            redis::cmd("XADD")
+                .arg(&self.page_fetch_stream)
+                .arg("*")
+                .arg("payload")
+                .arg(fetch_payload)
+                .query_async::<_, ()>(&mut redis_conn)
+                .await?;
+
+            sqlx::query(
+                "UPDATE classification_requests SET updated_at = NOW(), last_error = NULL, base_url = $2 WHERE normalized_key = $1",
+            )
+            .bind(&pending.normalized_key)
+            .bind(base_url)
+            .execute(&self.pool)
+            .await?;
+
+            info!(
+                target = "svc-llm-worker",
+                normalized_key = %pending.normalized_key,
+                "reconciler re-enqueued stale pending key"
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn is_classified(&self, normalized_key: &str) -> Result<bool> {
+        let classified = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM classifications WHERE normalized_key = $1)",
+        )
+        .bind(normalized_key)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(classified)
     }
 }
 
@@ -2116,6 +2353,51 @@ fn is_online_provider(provider: &ResolvedProvider) -> bool {
     )
 }
 
+fn parse_normalized_key_parts(normalized_key: &str) -> Option<(&str, &str)> {
+    if let Some(rest) = normalized_key.strip_prefix("domain:") {
+        return Some(("domain", rest));
+    }
+    if let Some(rest) = normalized_key.strip_prefix("subdomain:") {
+        return Some(("subdomain", rest));
+    }
+    None
+}
+
+fn derive_urls(
+    normalized_key: &str,
+    key_value: &str,
+    base_url: Option<&str>,
+) -> (String, String, String) {
+    if let Some(base) = base_url.and_then(|value| normalize_base_url(value)) {
+        let hostname = Url::parse(&base)
+            .ok()
+            .and_then(|url| url.host_str().map(|host| host.to_string()))
+            .unwrap_or_else(|| key_value.to_string());
+        return (hostname, base.clone(), base);
+    }
+    let fallback = format!("https://{key_value}/");
+    let hostname = key_value.to_string();
+    info!(
+        target = "svc-llm-worker",
+        normalized_key,
+        derived_base_url = %fallback,
+        "using synthesized base URL for pending reconciliation"
+    );
+    (hostname, fallback.clone(), fallback)
+}
+
+fn normalize_base_url(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut url = Url::parse(trimmed).ok()?;
+    if url.path().is_empty() {
+        url.set_path("/");
+    }
+    Some(url.to_string())
+}
+
 async fn store_classification(
     pool: &PgPool,
     job: &ClassificationJobPayload,
@@ -2961,6 +3243,10 @@ mod tests {
                 metadata_only_allowed_for: None,
                 metadata_only_fetch_failure_threshold: None,
                 metadata_only_no_content_statuses: None,
+                pending_reconcile_enabled: None,
+                pending_reconcile_interval_secs: None,
+                pending_reconcile_stale_minutes: None,
+                pending_reconcile_batch: None,
             },
             metrics_host: "127.0.0.1".into(),
             metrics_port: 0,
