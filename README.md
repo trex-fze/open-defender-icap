@@ -299,6 +299,12 @@ Missed queue replay can leave orphan `waiting_content` rows. Keep `OD_PENDING_RE
 **Q: Local LLM is up, but no requests seem to reach it. Why?**  
 If jobs are still waiting for page content, the worker can requeue before invoking any provider. For local-first/hybrid deployments, use `OD_LLM_CONTENT_REQUIRED_MODE=auto` and `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all` (with `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2`) so classification can move forward when excerpt fetch repeatedly fails.
 
+**Q: What happens if local LLM returns invalid JSON for a domain?**  
+The worker attempts online verification using metadata-only context (domain key + taxonomy + strict prompt contract). If online verification is unavailable or fails, the key is terminalized as `unknown-unclassified / insufficient-evidence` so it does not loop in pending.
+
+**Q: Why did a site move to `unknown-unclassified / insufficient-evidence` automatically?**  
+This is the safe terminal fallback for repeated no-content/crawl failures or output-invalid verification failures. It prevents infinite `waiting_content` loops while preserving conservative policy enforcement.
+
 **Q: What is the recommended local-first fallback profile?**  
 Use `OD_LLM_FAILOVER_POLICY=safe`, disable stale online diversion (`OD_LLM_STALE_PENDING_MINUTES=0`), keep `OD_LLM_CONTENT_REQUIRED_MODE=auto`, and allow metadata fallback for all providers (`OD_LLM_METADATA_ONLY_ALLOWED_FOR=all`). This keeps local LLM first and only uses online fallback when local invocation fails.
 

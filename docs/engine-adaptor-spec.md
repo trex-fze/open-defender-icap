@@ -490,6 +490,13 @@ Rules:
 - Policy decision requests still evaluate on the observed key so fine-grained subdomain overrides remain effective.
 - Management views may expose both historical `recommended_action` and current `effective_action`/`effective_decision_source` to separate audit snapshots from live enforcement.
 
+## 20.3.2 Pending Hardening and Output-Invalid Fallback
+- Page fetch failures are persisted in `page_contents` with terminal `fetch_status`/`fetch_reason` values (`failed`, `blocked`, `unsupported`) so no-content progression has durable evidence.
+- LLM metadata-only fallback threshold (`metadata_only_fetch_failure_threshold`) uses persisted terminal fetch history; recommended defaults are `content_required_mode=auto`, `metadata_only_allowed_for=all`, and `metadata_only_requeue_for_content=false`.
+- If local provider output fails JSON/schema contract checks, worker attempts online metadata-only verification (domain key + taxonomy + strict prompt contract, no excerpt payload).
+- If online verification is unavailable or fails, worker persists terminal fallback classification `unknown-unclassified / insufficient-evidence` and clears pending.
+- Fallback provenance is captured in classification `flags` and metrics (`llm_primary_output_invalid_total`, `llm_online_verification_total`, `llm_terminal_insufficient_evidence_total`).
+
 ## 20.4 Overrides API
 - `POST /api/v1/overrides`, `GET /api/v1/overrides`, `DELETE /api/v1/overrides/{id}`. Includes scope (domain/user/ip), action, expiry.
 

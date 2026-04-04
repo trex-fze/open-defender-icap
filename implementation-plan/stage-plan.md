@@ -15,6 +15,7 @@ This roadmap mirrors the RFC tracker and captures actionable work items, owners,
 | 10. Frontend Management Parity (✅) | Management UI parity for policy/override/review/taxonomy/reporting/diagnostics and RBAC UX hardening | Frontend + Platform | Stages 5, 6, 7, 9 | Stage 10 RFC/plan, web-admin e2e evidence, operator workflow docs |
 | 11. RBAC and User/Group Management (✅) | IAM schema, effective-role auth resolver, users/groups/roles/service-accounts APIs, UI/CLI lifecycle flows | Platform Security + Backend + Frontend + DevTools | Stages 5, 10 | Stage 11 RFC/plan/checklist, authz matrix evidence, migration runbook |
 | 13. Domain-First Classification Scope (✅) | Canonical domain-key dedupe across pending, page fetch, and classification persistence while preserving subdomain override matching | Platform + Backend | Stages 2, 4, 9 | Stage 13 RFC/plan, migration 0015, ICAP smoke evidence (`www` + `api` -> single domain key) |
+| 14. Pending Hardening & Output-Invalid Fallback (✅) | Persist terminal crawl failures, avoid metadata requeue loops, online verification for local output-invalid errors, terminal insufficient-evidence fallback | Classification + Backend + SRE | Stages 4, 9, 13 | Stage 14 RFC/plan, llm-worker/page-fetcher test runs, runtime pending-loop reduction evidence |
 
 ## Current Focus
 
@@ -22,3 +23,4 @@ This roadmap mirrors the RFC tracker and captures actionable work items, owners,
 2. Maintain canonical taxonomy enforcement paths (prompt contract, alias mapping, persistence validation).
 3. Improve operator diagnostics and runbook automation around pending classifications and Crawl4AI health.
 4. Harden domain-first scope follow-ups (PSL registrable-domain derivation and collapse metrics).
+5. Execute stream consumer-group migration for restart-safe queue processing semantics.

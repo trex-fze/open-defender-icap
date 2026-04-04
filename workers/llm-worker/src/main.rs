@@ -601,6 +601,7 @@ struct InvocationFailure {
     class: InvocationFailureClass,
     status: Option<u16>,
     reason: String,
+    output_invalid: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1516,6 +1517,7 @@ impl JobConsumer {
             .context("failed to publish cache entry")?;
         if selected_context_mode == PromptContextMode::MetadataOnly
             && self.online_context.metadata_only_requeue_for_content
+            && selected_metadata_only_reason.as_deref() != Some("fetch_failed_threshold")
         {
             metrics::record_metadata_only_requeue();
             self.mark_pending(
@@ -1852,6 +1854,29 @@ impl JobConsumer {
         ))
     }
 
+    async fn prepare_online_verification_request(
+        &self,
+        base_job: &ClassificationJobPayload,
+        retry_instruction: Option<&str>,
+    ) -> Result<(
+        ClassificationJobPayload,
+        String,
+        PromptContextMode,
+        bool,
+        Option<String>,
+    )> {
+        let mut job = base_job.clone();
+        job.requires_content = false;
+        job.content_excerpt = None;
+        job.content_hash = None;
+        job.content_version = None;
+        job.content_language = None;
+        let context_mode = PromptContextMode::MetadataOnly;
+        let metadata_only_reason = Some("local_output_invalid_online_verification".to_string());
+        let prompt = build_prompt(&job, &self.taxonomy_prompt, retry_instruction, context_mode);
+        Ok((job, prompt, context_mode, false, metadata_only_reason))
+    }
+
     async fn invoke_with_fallback(
         &self,
         job: &ClassificationJobPayload,
@@ -1924,6 +1949,9 @@ impl JobConsumer {
                 ))
             }
             Err(err) => {
+                if err.output_invalid {
+                    metrics::record_primary_output_invalid();
+                }
                 error!(
                     target = "svc-llm-worker",
                     normalized_key = %job.normalized_key,
@@ -1937,6 +1965,17 @@ impl JobConsumer {
 
                 if !self.should_attempt_fallback(&err) {
                     metrics::record_fallback_skipped("policy_or_error_class");
+                    if err.output_invalid {
+                        metrics::record_online_verification("unavailable");
+                        metrics::record_terminal_insufficient_evidence();
+                        return Ok((
+                            synthesize_insufficient_evidence_verdict(),
+                            "terminal-insufficient-evidence".to_string(),
+                            PromptContextMode::MetadataOnly,
+                            false,
+                            Some("local_output_invalid_online_unavailable".to_string()),
+                        ));
+                    }
                     let reason = format!(
                         "primary provider failed and fallback skipped: {}",
                         err.reason
@@ -1955,6 +1994,17 @@ impl JobConsumer {
                     provider
                 } else {
                     metrics::record_fallback_skipped("fallback_not_configured");
+                    if err.output_invalid {
+                        metrics::record_online_verification("unavailable");
+                        metrics::record_terminal_insufficient_evidence();
+                        return Ok((
+                            synthesize_insufficient_evidence_verdict(),
+                            "terminal-insufficient-evidence".to_string(),
+                            PromptContextMode::MetadataOnly,
+                            false,
+                            Some("local_output_invalid_online_unavailable".to_string()),
+                        ));
+                    }
                     let reason =
                         format!("primary failed and fallback not configured: {}", err.reason);
                     return Err(RetryableJobError { reason }.into());
@@ -1964,6 +2014,17 @@ impl JobConsumer {
                     let mut budget = self.fallback_budget.lock().await;
                     if let Err(blocked_reason) = budget.allow_and_record(&self.failover) {
                         metrics::record_fallback_skipped(blocked_reason);
+                        if err.output_invalid {
+                            metrics::record_online_verification("skipped");
+                            metrics::record_terminal_insufficient_evidence();
+                            return Ok((
+                                synthesize_insufficient_evidence_verdict(),
+                                "terminal-insufficient-evidence".to_string(),
+                                PromptContextMode::MetadataOnly,
+                                false,
+                                Some("local_output_invalid_online_skipped".to_string()),
+                            ));
+                        }
                         let reason = format!(
                             "fallback blocked by {} after primary failure: {}",
                             blocked_reason, err.reason
@@ -1973,6 +2034,9 @@ impl JobConsumer {
                 }
 
                 metrics::record_fallback_attempt(&primary.name, &fallback.name, "primary_failed");
+                if err.output_invalid {
+                    metrics::record_online_verification("attempt");
+                }
                 info!(
                     target = "svc-llm-worker",
                     normalized_key = %job.normalized_key,
@@ -1988,12 +2052,19 @@ impl JobConsumer {
                     fallback_context_mode,
                     fallback_excerpt_sent,
                     fallback_metadata_reason,
-                ) = self
-                    .prepare_provider_request(job, fallback, retry_instruction)
-                    .await?;
+                ) = if err.output_invalid {
+                    self.prepare_online_verification_request(job, retry_instruction)
+                        .await?
+                } else {
+                    self.prepare_provider_request(job, fallback, retry_instruction)
+                        .await?
+                };
 
                 match invoke_llm(fallback, &fallback_job, &fallback_prompt).await {
                     Ok(response) => {
+                        if err.output_invalid {
+                            metrics::record_online_verification("success");
+                        }
                         info!(
                             target = "svc-llm-worker",
                             normalized_key = %job.normalized_key,
@@ -2010,6 +2081,9 @@ impl JobConsumer {
                     }
                     Err(fallback_err) => {
                         let classified = classify_invocation_failure(&fallback_err, &self.failover);
+                        if err.output_invalid {
+                            metrics::record_online_verification("failed");
+                        }
                         error!(
                             target = "svc-llm-worker",
                             normalized_key = %job.normalized_key,
@@ -2025,6 +2099,16 @@ impl JobConsumer {
                             "fallback provider failed after primary error: {}",
                             classified.reason
                         );
+                        if err.output_invalid {
+                            metrics::record_terminal_insufficient_evidence();
+                            return Ok((
+                                synthesize_insufficient_evidence_verdict(),
+                                "terminal-insufficient-evidence".to_string(),
+                                PromptContextMode::MetadataOnly,
+                                false,
+                                Some("local_output_invalid_online_failed".to_string()),
+                            ));
+                        }
                         match classified.class {
                             InvocationFailureClass::Retryable => {
                                 Err(RetryableJobError { reason }.into())
@@ -2106,6 +2190,9 @@ impl JobConsumer {
     }
 
     fn should_attempt_fallback(&self, failure: &InvocationFailure) -> bool {
+        if failure.output_invalid {
+            return true;
+        }
         match self.failover.policy {
             FailoverPolicy::Disabled => false,
             FailoverPolicy::Aggressive => true,
@@ -2160,6 +2247,7 @@ impl JobConsumer {
             SELECT text_excerpt, content_hash, fetch_version
             FROM page_contents
             WHERE normalized_key = $1
+              AND LOWER(fetch_status) = 'ok'
               AND expires_at > NOW()
             ORDER BY fetch_version DESC
             LIMIT 1
@@ -2609,12 +2697,16 @@ fn classify_invocation_failure(
     err: &anyhow::Error,
     failover: &FailoverRuntime,
 ) -> InvocationFailure {
+    let msg = err.to_string();
+    let lowered = msg.to_ascii_lowercase();
+    let output_invalid = is_output_invalid_message(&lowered);
     if let Some(req_err) = err.downcast_ref::<reqwest::Error>() {
         if req_err.is_timeout() || req_err.is_connect() || req_err.is_request() {
             return InvocationFailure {
                 class: InvocationFailureClass::Retryable,
                 status: None,
                 reason: req_err.to_string(),
+                output_invalid,
             };
         }
         if let Some(status) = req_err.status() {
@@ -2628,12 +2720,10 @@ fn classify_invocation_failure(
                 class,
                 status: Some(status_u16),
                 reason: req_err.to_string(),
+                output_invalid,
             };
         }
     }
-
-    let msg = err.to_string();
-    let lowered = msg.to_ascii_lowercase();
     let class = if lowered.contains("timed out")
         || lowered.contains("connection refused")
         || lowered.contains("temporarily unavailable")
@@ -2646,6 +2736,24 @@ fn classify_invocation_failure(
         class,
         status: None,
         reason: msg,
+        output_invalid,
+    }
+}
+
+fn is_output_invalid_message(lowered: &str) -> bool {
+    lowered.contains("did not contain valid json object")
+        || lowered.contains("invalid response format")
+        || lowered.contains("missing choices")
+        || lowered.contains("failed to parse")
+}
+
+fn synthesize_insufficient_evidence_verdict() -> LlmResponse {
+    LlmResponse {
+        primary_category: "unknown-unclassified".to_string(),
+        subcategory: "insufficient-evidence".to_string(),
+        risk_level: "low".to_string(),
+        confidence: 0.2,
+        recommended_action: PolicyAction::Monitor.to_string(),
     }
 }
 

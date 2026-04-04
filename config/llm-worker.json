@@ -38,7 +38,7 @@
     "online_context_mode": "required",
     "metadata_only_force_action": "Monitor",
     "metadata_only_max_confidence": 0.4,
-    "metadata_only_requeue_for_content": true,
+    "metadata_only_requeue_for_content": false,
     "content_required_mode": "auto",
     "metadata_only_allowed_for": "all",
     "metadata_only_fetch_failure_threshold": 2,

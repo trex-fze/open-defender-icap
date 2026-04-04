@@ -273,6 +273,9 @@ Use `down -v` only when you explicitly need a clean local data state.
 - What if I run offline-only models?
   - Set `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all` so metadata-only fallback is available to offline providers too.
   - Conservative guardrails still apply (`OD_LLM_METADATA_ONLY_FORCE_ACTION`, `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`).
+- What if local LLM returns invalid JSON for a key?
+  - Worker attempts online metadata-only verification automatically (domain key + taxonomy + strict prompt contract).
+  - If online verification is unavailable or fails, the key is terminalized as `unknown-unclassified / insufficient-evidence` and pending is cleared.
 - Why does a domain stay in Pending Sites even when it looks inactive?
   - If a prior queue event was missed/restarted, the pending row can become orphaned. Keep `OD_PENDING_RECONCILE_ENABLED=true` so stale rows are auto-healed (re-enqueued or cleared).
 - Local LLM is healthy but I still see no local requests — why?
@@ -282,6 +285,9 @@ Use `down -v` only when you explicitly need a clean local data state.
     - `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all`
     - `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2`
   - This keeps content-aware classification when excerpt exists, but avoids infinite pending loops for API/non-renderable sites.
+- Why did pending shrink but some keys moved to `unknown-unclassified / insufficient-evidence`?
+  - This is expected terminal fallback behavior after repeated terminal fetch failures or output-invalid verification failures.
+  - It is safer than keeping keys stuck in `waiting_content` forever and still preserves conservative policy handling.
 - How do I understand Crawl4AI failures clearly?
   - Read `logs/crawl4ai/crawl-audit.jsonl` on the host. Each entry contains timestamp, URL, report (`success|failed|blocked`), reason, status code, duration, and error details.
   - `blocked` is used for anti-bot/access-denied style failures (e.g., HTTP 403/captcha/access denied); other crawl failures are labeled `failed`.

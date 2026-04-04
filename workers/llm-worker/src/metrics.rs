@@ -236,6 +236,31 @@ static FETCH_FAILURE_FALLBACK: Lazy<IntCounterVec> = Lazy::new(|| {
     .unwrap()
 });
 
+static PRIMARY_OUTPUT_INVALID: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "llm_primary_output_invalid_total",
+        "Primary provider responses that failed JSON/schema contract checks"
+    )
+    .unwrap()
+});
+
+static ONLINE_VERIFICATION: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_online_verification_total",
+        "Online verification outcomes after local output-invalid failures",
+        &["result"]
+    )
+    .unwrap()
+});
+
+static TERMINAL_INSUFFICIENT_EVIDENCE: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "llm_terminal_insufficient_evidence_total",
+        "Classifications terminalized to unknown-unclassified/insufficient-evidence"
+    )
+    .unwrap()
+});
+
 pub fn record_job_started() {
     JOBS_STARTED.inc();
 }
@@ -360,6 +385,18 @@ pub fn record_fetch_failure_fallback(provider: &str, result: &str) {
     FETCH_FAILURE_FALLBACK
         .with_label_values(&[provider, result])
         .inc();
+}
+
+pub fn record_primary_output_invalid() {
+    PRIMARY_OUTPUT_INVALID.inc();
+}
+
+pub fn record_online_verification(result: &str) {
+    ONLINE_VERIFICATION.with_label_values(&[result]).inc();
+}
+
+pub fn record_terminal_insufficient_evidence() {
+    TERMINAL_INSUFFICIENT_EVIDENCE.inc();
 }
 
 async fn metrics_handler() -> String {

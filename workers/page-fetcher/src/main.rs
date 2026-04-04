@@ -101,6 +101,13 @@ struct CrawlApiResponse {
     metadata: Option<Value>,
 }
 
+#[derive(Debug)]
+struct FetchFailure {
+    fetch_status: String,
+    fetch_reason: String,
+    detail: String,
+}
+
 #[derive(Debug, Serialize)]
 struct CrawlRequestPayload {
     url: String,
@@ -232,7 +239,14 @@ impl PageFetcher {
         }
 
         let start = Instant::now();
-        let crawl_response = self.fetch_content(&job, &url).await?;
+        let crawl_response = match self.fetch_content(&job, &url).await {
+            Ok(response) => response,
+            Err(fetch_failure) => {
+                self.store_failure(&job, ttl_seconds, &fetch_failure).await?;
+                self.metrics.record_crawl_failure();
+                return Err(anyhow!(fetch_failure.detail));
+            }
+        };
         self.metrics
             .observe_fetch_latency(start.elapsed().as_secs_f64());
         self.store_content(&job, ttl_seconds, &crawl_response)
@@ -247,7 +261,7 @@ impl PageFetcher {
 
     async fn content_fresh(&self, normalized_key: &str) -> Result<bool> {
         let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM page_contents WHERE normalized_key = $1 AND expires_at > NOW())",
+            "SELECT EXISTS(SELECT 1 FROM page_contents WHERE normalized_key = $1 AND expires_at > NOW() AND LOWER(fetch_status) = 'ok')",
         )
         .bind(normalized_key)
         .fetch_one(&self.pool)
@@ -255,7 +269,11 @@ impl PageFetcher {
         Ok(exists)
     }
 
-    async fn fetch_content(&self, job: &PageFetchJob, url: &Url) -> Result<CrawlApiResponse> {
+    async fn fetch_content(
+        &self,
+        job: &PageFetchJob,
+        url: &Url,
+    ) -> std::result::Result<CrawlApiResponse, FetchFailure> {
         let payload = CrawlRequestPayload {
             url: url.to_string(),
             normalized_key: job.normalized_key.clone(),
@@ -272,20 +290,60 @@ impl PageFetcher {
             .json(&payload)
             .send()
             .await
-            .context("crawl service request failed")?;
+            .map_err(|err| FetchFailure {
+                fetch_status: "failed".into(),
+                fetch_reason: "crawl_service_unreachable".into(),
+                detail: format!("crawl service request failed: {err}"),
+            })?;
 
         if !response.status().is_success() {
             let body = response.text().await.unwrap_or_else(|_| "<empty>".into());
-            self.metrics.record_crawl_failure();
-            return Err(anyhow!("crawl service error: {}", body));
+            let (fetch_status, fetch_reason) = classify_crawl_failure(&body);
+            return Err(FetchFailure {
+                fetch_status,
+                fetch_reason,
+                detail: format!("crawl service error: {body}"),
+            });
         }
 
-        let parsed: CrawlApiResponse = response.json().await.context("invalid crawl payload")?;
+        let parsed: CrawlApiResponse = response.json().await.map_err(|err| FetchFailure {
+            fetch_status: "failed".into(),
+            fetch_reason: "invalid_crawl_payload".into(),
+            detail: format!("invalid crawl payload: {err}"),
+        })?;
         if parsed.status != "ok" {
-            self.metrics.record_crawl_failure();
-            return Err(anyhow!("crawl service returned status {}", parsed.status));
+            return Err(FetchFailure {
+                fetch_status: "failed".into(),
+                fetch_reason: "crawl_status_non_ok".into(),
+                detail: format!("crawl service returned status {}", parsed.status),
+            });
         }
         Ok(parsed)
+    }
+
+    async fn store_failure(
+        &self,
+        job: &PageFetchJob,
+        ttl_seconds: i32,
+        failure: &FetchFailure,
+    ) -> Result<()> {
+        let version = self.next_version(&job.normalized_key).await?;
+        sqlx::query(
+            r#"INSERT INTO page_contents
+                (id, normalized_key, fetch_version, content_type, content_hash,
+                 text_excerpt, char_count, byte_count, fetch_status, fetch_reason,
+                 ttl_seconds, fetched_at)
+             VALUES ($1, $2, $3, NULL, NULL, NULL, NULL, NULL, $4, $5, $6, NOW())"#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&job.normalized_key)
+        .bind(version)
+        .bind(&failure.fetch_status)
+        .bind(&failure.fetch_reason)
+        .bind(ttl_seconds)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     async fn store_content(
@@ -388,6 +446,28 @@ fn truncate_chars(value: &str, limit: usize) -> String {
         out.push(ch);
     }
     out
+}
+
+fn classify_crawl_failure(detail: &str) -> (String, String) {
+    let lowered = detail.to_ascii_lowercase();
+    if lowered.contains("anti_bot_or_access_denied")
+        || lowered.contains("http_403")
+        || lowered.contains("access denied")
+        || lowered.contains("captcha")
+        || lowered.contains("http_429")
+    {
+        return ("blocked".into(), "anti_bot_or_access_denied".into());
+    }
+    if lowered.contains("name_not_resolved") || lowered.contains("dns") {
+        return ("failed".into(), "dns_resolution_failed".into());
+    }
+    if lowered.contains("connection_refused") {
+        return ("failed".into(), "connection_refused".into());
+    }
+    if lowered.contains("timed out") || lowered.contains("timeout") {
+        return ("failed".into(), "timeout".into());
+    }
+    ("failed".into(), "crawl_failed".into())
 }
 
 fn entry_too_old(entry_id: &str, max_age_ms: u64) -> bool {
