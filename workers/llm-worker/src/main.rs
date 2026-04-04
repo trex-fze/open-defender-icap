@@ -1175,6 +1175,7 @@ impl PendingReconciler {
                 normalized_key: pending.normalized_key.clone(),
                 url: full_url,
                 hostname,
+                candidate_urls: vec![base_url.clone()],
                 trace_id: Some(trace_id),
                 ttl_seconds: None,
             };
@@ -1381,6 +1382,11 @@ impl JobConsumer {
                     normalized_key: job.normalized_key,
                     url: job.full_url,
                     hostname: job.hostname,
+                    candidate_urls: job
+                        .base_url
+                        .as_ref()
+                        .map(|value| vec![value.clone()])
+                        .unwrap_or_default(),
                     trace_id: Some(job.trace_id),
                     ttl_seconds: None,
                 };

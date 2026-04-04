@@ -128,6 +128,13 @@ struct FetchFailure {
     detail: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct CrawlAttempt {
+    url: String,
+    outcome: String,
+    reason: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct CrawlErrorDetail {
     report: Option<String>,
@@ -258,7 +265,6 @@ impl PageFetcher {
         self.metrics.record_job_started();
         let job: PageFetchJob = serde_json::from_str(payload)?;
         let ttl_seconds = job.ttl_seconds.unwrap_or(self.cfg.ttl_seconds);
-        let url = Url::parse(&job.url).context("job url invalid")?;
 
         if self.content_fresh(&job.normalized_key).await? {
             self.metrics.record_job_skipped();
@@ -284,45 +290,63 @@ impl PageFetcher {
             return Ok(());
         }
 
-        if is_likely_asset_host(&job.hostname, &self.cfg.unsupported_host_allowlist) {
-            let failure = FetchFailure {
-                fetch_status: "unsupported".into(),
-                fetch_reason: "asset_endpoint".into(),
-                detail: format!(
-                    "skipped crawl for likely asset host: {}",
-                    job.hostname
-                ),
-            };
-            self.store_failure(&job, ttl_seconds, &failure).await?;
-            self.metrics.record_asset_prefilter_skip();
-            info!(
-                target = "svc-page-fetcher",
-                key = job.normalized_key,
-                host = job.hostname,
-                "skipped crawl due to asset-host prefilter"
-            );
-            return Ok(());
+        let candidates = resolve_candidate_urls(&job)?;
+        let mut attempts: Vec<CrawlAttempt> = Vec::new();
+        let mut last_failure: Option<FetchFailure> = None;
+
+        for candidate in candidates {
+            let parsed = Url::parse(&candidate).context("candidate url invalid")?;
+            let host = parsed.host_str().unwrap_or_default();
+            if is_likely_asset_host(host, &self.cfg.unsupported_host_allowlist) {
+                self.metrics.record_asset_prefilter_skip();
+                attempts.push(CrawlAttempt {
+                    url: candidate,
+                    outcome: "unsupported".into(),
+                    reason: "asset_endpoint".into(),
+                });
+                continue;
+            }
+
+            let start = Instant::now();
+            match self.fetch_content(&job, &candidate).await {
+                Ok(response) => {
+                    self.metrics
+                        .observe_fetch_latency(start.elapsed().as_secs_f64());
+                    attempts.push(CrawlAttempt {
+                        url: candidate.clone(),
+                        outcome: "ok".into(),
+                        reason: "ok".into(),
+                    });
+                    self.store_content(&job, ttl_seconds, &response, &candidate, &attempts)
+                        .await?;
+                    info!(
+                        target = "svc-page-fetcher",
+                        key = job.normalized_key,
+                        resolved_url = candidate,
+                        attempts = attempts.len(),
+                        "stored crawl content"
+                    );
+                    return Ok(());
+                }
+                Err(fetch_failure) => {
+                    attempts.push(CrawlAttempt {
+                        url: candidate,
+                        outcome: fetch_failure.fetch_status.clone(),
+                        reason: fetch_failure.fetch_reason.clone(),
+                    });
+                    last_failure = Some(fetch_failure);
+                }
+            }
         }
 
-        let start = Instant::now();
-        let crawl_response = match self.fetch_content(&job, &url).await {
-            Ok(response) => response,
-            Err(fetch_failure) => {
-                self.store_failure(&job, ttl_seconds, &fetch_failure).await?;
-                self.metrics.record_crawl_failure();
-                return Err(anyhow!(fetch_failure.detail));
-            }
-        };
-        self.metrics
-            .observe_fetch_latency(start.elapsed().as_secs_f64());
-        self.store_content(&job, ttl_seconds, &crawl_response)
-            .await?;
-        info!(
-            target = "svc-page-fetcher",
-            key = job.normalized_key,
-            "stored crawl content"
-        );
-        Ok(())
+        let failure = last_failure.unwrap_or(FetchFailure {
+            fetch_status: "unsupported".into(),
+            fetch_reason: "all_candidates_filtered".into(),
+            detail: "all candidate URLs were filtered as non-page endpoints".into(),
+        });
+        self.store_failure(&job, ttl_seconds, &failure, &attempts).await?;
+        self.metrics.record_crawl_failure();
+        Err(anyhow!(failure.detail))
     }
 
     async fn content_fresh(&self, normalized_key: &str) -> Result<bool> {
@@ -366,7 +390,7 @@ impl PageFetcher {
     async fn fetch_content(
         &self,
         job: &PageFetchJob,
-        url: &Url,
+        url: &str,
     ) -> std::result::Result<CrawlApiResponse, FetchFailure> {
         let payload = CrawlRequestPayload {
             url: url.to_string(),
@@ -424,14 +448,16 @@ impl PageFetcher {
         job: &PageFetchJob,
         ttl_seconds: i32,
         failure: &FetchFailure,
+        attempts: &[CrawlAttempt],
     ) -> Result<()> {
         let version = self.next_version(&job.normalized_key).await?;
+        let attempt_summary = serde_json::to_string(attempts)?;
         sqlx::query(
             r#"INSERT INTO page_contents
                 (id, normalized_key, fetch_version, content_type, content_hash,
-                 text_excerpt, char_count, byte_count, fetch_status, fetch_reason,
-                 ttl_seconds, fetched_at)
-             VALUES ($1, $2, $3, NULL, NULL, NULL, NULL, NULL, $4, $5, $6, NOW())"#,
+                  text_excerpt, char_count, byte_count, fetch_status, fetch_reason,
+                  ttl_seconds, fetched_at, source_url, resolved_url, attempt_summary)
+             VALUES ($1, $2, $3, NULL, NULL, NULL, NULL, NULL, $4, $5, $6, NOW(), $7, NULL, $8)"#,
         )
         .bind(Uuid::new_v4())
         .bind(&job.normalized_key)
@@ -439,6 +465,8 @@ impl PageFetcher {
         .bind(&failure.fetch_status)
         .bind(&failure.fetch_reason)
         .bind(ttl_seconds)
+        .bind(&job.url)
+        .bind(&attempt_summary)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -449,6 +477,8 @@ impl PageFetcher {
         job: &PageFetchJob,
         ttl_seconds: i32,
         crawl: &CrawlApiResponse,
+        resolved_url: &str,
+        attempts: &[CrawlAttempt],
     ) -> Result<()> {
         use sha2::{Digest, Sha256};
 
@@ -462,13 +492,18 @@ impl PageFetcher {
         let hash = Sha256::digest(text_excerpt.as_bytes());
         let hash_hex = format!("{:x}", hash);
         let version = self.next_version(&job.normalized_key).await?;
+        let attempt_summary = serde_json::to_string(attempts)?;
+        let resolved_host = Url::parse(resolved_url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_string))
+            .unwrap_or_else(|| job.hostname.clone());
 
         sqlx::query(
             r#"INSERT INTO page_contents
                 (id, normalized_key, fetch_version, content_type, content_hash,
-                 text_excerpt, char_count, byte_count, fetch_status, fetch_reason,
-                 ttl_seconds, fetched_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ok', $9, $10, NOW())"#,
+                  text_excerpt, char_count, byte_count, fetch_status, fetch_reason,
+                  ttl_seconds, fetched_at, source_url, resolved_url, attempt_summary)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ok', $9, $10, NOW(), $11, $12, $13)"#,
         )
         .bind(Uuid::new_v4())
         .bind(&job.normalized_key)
@@ -478,8 +513,11 @@ impl PageFetcher {
         .bind(&text_excerpt)
         .bind(text_excerpt.chars().count() as i32)
         .bind(excerpt_bytes.len() as i32)
-        .bind(&job.hostname)
+        .bind(&resolved_host)
         .bind(ttl_seconds)
+        .bind(&job.url)
+        .bind(resolved_url)
+        .bind(&attempt_summary)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -613,6 +651,25 @@ fn is_likely_asset_host(hostname: &str, allowlist: &[String]) -> bool {
     })
 }
 
+fn resolve_candidate_urls(job: &PageFetchJob) -> Result<Vec<String>> {
+    let mut values = Vec::new();
+    values.push(job.url.clone());
+    values.extend(job.candidate_urls.clone());
+    let mut deduped = Vec::new();
+    for value in values {
+        if Url::parse(&value).is_err() {
+            continue;
+        }
+        if !deduped.contains(&value) {
+            deduped.push(value);
+        }
+    }
+    if deduped.is_empty() {
+        return Err(anyhow!("no valid candidate URLs in job payload"));
+    }
+    Ok(deduped)
+}
+
 fn entry_too_old(entry_id: &str, max_age_ms: u64) -> bool {
     let Some((millis, _)) = entry_id.split_once('-') else {
         return false;
@@ -678,5 +735,22 @@ mod tests {
             "cdn.allowed.example.com",
             &["allowed.example.com".to_string()]
         ));
+    }
+
+    #[test]
+    fn resolve_candidate_urls_preserves_order_and_dedupes() {
+        let job = PageFetchJob {
+            normalized_key: "domain:example.com".to_string(),
+            url: "https://example.com/".to_string(),
+            hostname: "example.com".to_string(),
+            candidate_urls: vec![
+                "https://example.com/".to_string(),
+                "https://www.example.com/".to_string(),
+            ],
+            trace_id: None,
+            ttl_seconds: None,
+        };
+        let resolved = resolve_candidate_urls(&job).expect("should resolve candidates");
+        assert_eq!(resolved, vec!["https://example.com/", "https://www.example.com/"]);
     }
 }

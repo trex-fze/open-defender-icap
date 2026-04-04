@@ -307,6 +307,8 @@ Use `down -v` only when you explicitly need a clean local data state.
   - Override resolution uses most-specific scope first, so the subdomain rule wins over the parent domain rule.
 - Why do pending/classification keys appear as `domain:example.com` even when I browse a subdomain?
   - Domain-first classification mode is enabled. Subdomain traffic is deduplicated into canonical domain keys for pending rows, page fetch jobs, and persisted classifications.
+  - Page fetch URL resolution is apex-first (`https://example.com/`, then `https://www.example.com/`, then observed host when suitable) to avoid empty excerpts from CDN/script hosts.
+  - Use Diagnostics Page Content Inspector fields (`source_url`, `resolved_url`, `attempt_summary`) to confirm what was tried and why no-content outcomes were recorded.
   - This reduces queue churn and classification delay; use subdomain Allow / Deny overrides when host-specific exceptions are needed.
 - How do I see override commands in odctl help?
   - Run `odctl --help` for top-level commands.

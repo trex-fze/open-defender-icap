@@ -514,6 +514,7 @@ impl Dispatcher {
                                     normalized_key: normalized_key.clone(),
                                     url: base_url.clone(),
                                     hostname: target.hostname.clone(),
+                                    candidate_urls: vec![base_url.clone()],
                                     trace_id: Some(trace_id.clone()),
                                     ttl_seconds: None,
                                 };

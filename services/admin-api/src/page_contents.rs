@@ -46,6 +46,9 @@ pub struct PageContentRecord {
     pub excerpt: Option<String>,
     pub excerpt_truncated: bool,
     pub excerpt_format: Option<String>,
+    pub source_url: Option<String>,
+    pub resolved_url: Option<String>,
+    pub attempt_summary: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,6 +62,7 @@ pub struct PageContentSummary {
     pub char_count: Option<i32>,
     pub byte_count: Option<i32>,
     pub content_hash: Option<String>,
+    pub resolved_url: Option<String>,
 }
 
 pub async fn get_page_content(
@@ -74,7 +78,7 @@ pub async fn get_page_content(
         sqlx::query(
             r#"SELECT normalized_key, fetch_version::bigint AS fetch_version, content_type, content_hash, char_count,
                 byte_count, fetch_status, fetch_reason, ttl_seconds, fetched_at, expires_at,
-                text_excerpt
+                text_excerpt, source_url, resolved_url, attempt_summary
             FROM page_contents
             WHERE normalized_key = $1 AND fetch_version = $2
             LIMIT 1"#,
@@ -87,7 +91,7 @@ pub async fn get_page_content(
         sqlx::query(
             r#"SELECT normalized_key, fetch_version::bigint AS fetch_version, content_type, content_hash, char_count,
                 byte_count, fetch_status, fetch_reason, ttl_seconds, fetched_at, expires_at,
-                text_excerpt
+                text_excerpt, source_url, resolved_url, attempt_summary
             FROM page_contents
             WHERE normalized_key = $1
             ORDER BY fetch_version DESC
@@ -123,7 +127,7 @@ pub async fn list_page_content_history(
     let limit = clamp_history_limit(params.limit);
     let rows = sqlx::query(
         r#"SELECT fetch_version::bigint AS fetch_version, fetch_status, fetch_reason, ttl_seconds,
-                fetched_at, expires_at, char_count, byte_count, content_hash
+                fetched_at, expires_at, char_count, byte_count, content_hash, resolved_url
             FROM page_contents
             WHERE normalized_key = $1
             ORDER BY fetch_version DESC
@@ -180,6 +184,9 @@ fn map_content_row(row: PgRow, excerpt_limit: usize) -> Result<PageContentRecord
         excerpt,
         excerpt_truncated,
         excerpt_format,
+        source_url: row.try_get::<Option<String>, _>("source_url")?,
+        resolved_url: row.try_get::<Option<String>, _>("resolved_url")?,
+        attempt_summary: row.try_get::<Option<String>, _>("attempt_summary")?,
     })
 }
 
@@ -194,6 +201,7 @@ fn map_summary_row(row: PgRow) -> Result<PageContentSummary, sqlx::Error> {
         char_count: row.try_get::<Option<i32>, _>("char_count")?,
         byte_count: row.try_get::<Option<i32>, _>("byte_count")?,
         content_hash: row.try_get::<Option<String>, _>("content_hash")?,
+        resolved_url: row.try_get::<Option<String>, _>("resolved_url")?,
     })
 }
 

@@ -1,9 +1,44 @@
 import { FormEvent, useState } from 'react';
 import { usePageContentInspector } from '../hooks/usePageContentInspector';
 
+type Attempt = {
+  url: string;
+  outcome: string;
+  reason: string;
+};
+
+const parseAttempts = (raw?: string): Attempt[] => {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is Attempt =>
+        item && typeof item.url === 'string' && typeof item.outcome === 'string' && typeof item.reason === 'string',
+    );
+  } catch {
+    return [];
+  }
+};
+
+const failureHint = (status: string, reason?: string) => {
+  if (status === 'unsupported' && reason === 'asset_endpoint') {
+    return 'Likely asset/CDN endpoint. Classification now uses apex/www candidates to find real page content.';
+  }
+  if (status === 'unsupported' && reason === 'no_content_endpoint') {
+    return 'Page returned minimal structural content. Try a homepage or product/docs path for richer evidence.';
+  }
+  if (status === 'blocked') {
+    return 'Destination appears protected by anti-bot controls; monitor fallback classification behavior and override if needed.';
+  }
+  return undefined;
+};
+
 export const DiagnosticsPageContentPage = () => {
   const { lookup, record, history, loading, error, canCallApi } = usePageContentInspector();
   const [key, setKey] = useState('domain:example.com');
+  const attempts = parseAttempts(record?.attempt_summary);
+  const hint = record ? failureHint(record.fetch_status, record.fetch_reason) : undefined;
 
   const onLookup = async (event: FormEvent) => {
     event.preventDefault();
@@ -65,6 +100,43 @@ export const DiagnosticsPageContentPage = () => {
           <p style={{ margin: '0.3rem 0' }}>
             <strong>Excerpt Format:</strong> {record.excerpt_format ?? 'unknown'}
           </p>
+          <p style={{ margin: '0.3rem 0' }}>
+            <strong>Source URL:</strong> {record.source_url ?? 'unknown'}
+          </p>
+          <p style={{ margin: '0.3rem 0' }}>
+            <strong>Resolved URL:</strong> {record.resolved_url ?? 'n/a'}
+          </p>
+          {hint ? (
+            <p style={{ margin: '0.6rem 0', color: 'var(--muted)' }}>
+              <strong>Hint:</strong> {hint}
+            </p>
+          ) : null}
+
+          {attempts.length > 0 ? (
+            <div style={{ marginTop: '0.9rem' }}>
+              <p className="section-title">Fetch Attempts</p>
+              <div className="table-wrapper" role="region" tabIndex={0} aria-label="Fetch attempts table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>URL</th>
+                      <th>Outcome</th>
+                      <th>Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attempts.map((attempt, index) => (
+                      <tr key={`${attempt.url}-${index}`}>
+                        <td>{attempt.url}</td>
+                        <td>{attempt.outcome}</td>
+                        <td>{attempt.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
           <pre
             style={{
@@ -90,9 +162,11 @@ export const DiagnosticsPageContentPage = () => {
                 <tr>
                   <th>Version</th>
                   <th>Status</th>
+                  <th>Reason</th>
                   <th>Fetched</th>
                   <th>Expires</th>
                   <th>Chars</th>
+                  <th>Resolved URL</th>
                 </tr>
               </thead>
               <tbody>
@@ -100,9 +174,11 @@ export const DiagnosticsPageContentPage = () => {
                   <tr key={row.fetch_version}>
                     <td>{row.fetch_version}</td>
                     <td>{row.fetch_status}</td>
+                    <td>{row.fetch_reason ?? '-'}</td>
                     <td>{new Date(row.fetched_at).toLocaleString()}</td>
                     <td>{new Date(row.expires_at).toLocaleString()}</td>
                     <td>{row.char_count ?? 0}</td>
+                    <td>{row.resolved_url ?? '-'}</td>
                   </tr>
                 ))}
               </tbody>

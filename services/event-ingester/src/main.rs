@@ -187,6 +187,7 @@ fn build_page_fetch_job(event: &Value) -> Option<PageFetchJob> {
         normalized_key: normalized.normalized_key,
         url: parsed.to_string(),
         hostname: normalized.hostname,
+        candidate_urls: Vec::new(),
         trace_id,
         ttl_seconds: ttl_override,
     })

@@ -92,6 +92,8 @@ pub struct PageFetchJob {
     pub normalized_key: String,
     pub url: String,
     pub hostname: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidate_urls: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -17,6 +17,9 @@ export type PageContentRecord = {
   excerpt?: string;
   excerpt_truncated: boolean;
   excerpt_format?: string;
+  source_url?: string;
+  resolved_url?: string;
+  attempt_summary?: string;
 };
 
 export type PageContentSummary = {
@@ -29,6 +32,7 @@ export type PageContentSummary = {
   char_count?: number;
   byte_count?: number;
   content_hash?: string;
+  resolved_url?: string;
 };
 
 export const usePageContentInspector = () => {

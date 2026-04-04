@@ -195,7 +195,11 @@ async fn handle_connection(
         decision.verdict.as_ref(),
     );
     let requires_pending = classification_required;
-    let base_url = derive_base_url(&normalized.full_url)
+    let fetch_candidates = build_fetch_candidates(&classification_key, &normalized);
+    let base_url = fetch_candidates
+        .first()
+        .cloned()
+        .or_else(|| derive_base_url(&normalized.full_url))
         .or_else(|| Some(fallback_base_url(&normalized.hostname)));
 
     let mut response_decision = decision.clone();
@@ -240,6 +244,7 @@ async fn handle_connection(
                     .clone()
                     .unwrap_or_else(|| normalized.full_url.clone()),
                 hostname: normalized.hostname.clone(),
+                candidate_urls: fetch_candidates.clone(),
                 trace_id: icap_req.trace_id.clone(),
                 ttl_seconds: None,
             };
@@ -452,6 +457,47 @@ fn fallback_base_url(hostname: &str) -> String {
     format!("https://{hostname}/")
 }
 
+fn build_fetch_candidates(classification_key: &str, normalized: &NormalizedTarget) -> Vec<String> {
+    if let Some(domain) = classification_key.strip_prefix("domain:") {
+        let mut candidates = vec![
+            format!("https://{domain}/"),
+            format!("https://www.{domain}/"),
+        ];
+        if let Some(observed) = derive_base_url(&normalized.full_url) {
+            if !is_likely_asset_host(&normalized.hostname) {
+                candidates.push(observed);
+            }
+        }
+        dedupe_preserve_order(candidates)
+    } else {
+        dedupe_preserve_order(
+            vec![derive_base_url(&normalized.full_url)
+                .unwrap_or_else(|| fallback_base_url(&normalized.hostname))],
+        )
+    }
+}
+
+fn is_likely_asset_host(hostname: &str) -> bool {
+    let lowered = hostname.to_ascii_lowercase();
+    lowered.split('.').any(|label| {
+        matches!(
+            label,
+            "cdn" | "cdns" | "img" | "images" | "image" | "static" | "assets" | "media" | "js"
+        )
+    })
+}
+
+fn dedupe_preserve_order(values: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for value in values {
+        if seen.insert(value.clone()) {
+            out.push(value);
+        }
+    }
+    out
+}
+
 async fn resolve_cached_decision(
     cache: &CacheClient,
     normalized_key: &str,
@@ -613,5 +659,40 @@ mod icap_response_tests {
             &PolicyAction::Allow,
             None
         ));
+    }
+
+    #[test]
+    fn domain_fetch_candidates_prefer_apex_then_www() {
+        let normalized = NormalizedTarget {
+            entity_level: EntityLevel::Subdomain,
+            normalized_key: "subdomain:cdn.weglot.com".into(),
+            hostname: "cdn.weglot.com".into(),
+            registered_domain: "weglot.com".into(),
+            full_url: "https://cdn.weglot.com/".into(),
+        };
+        let candidates = build_fetch_candidates("domain:weglot.com", &normalized);
+        assert_eq!(candidates[0], "https://weglot.com/");
+        assert_eq!(candidates[1], "https://www.weglot.com/");
+        assert_eq!(candidates.len(), 2);
+    }
+
+    #[test]
+    fn domain_fetch_candidates_include_observed_host_when_human_page() {
+        let normalized = NormalizedTarget {
+            entity_level: EntityLevel::Subdomain,
+            normalized_key: "subdomain:docs.example.com".into(),
+            hostname: "docs.example.com".into(),
+            registered_domain: "example.com".into(),
+            full_url: "https://docs.example.com/path".into(),
+        };
+        let candidates = build_fetch_candidates("domain:example.com", &normalized);
+        assert_eq!(
+            candidates,
+            vec![
+                "https://example.com/",
+                "https://www.example.com/",
+                "https://docs.example.com/"
+            ]
+        );
     }
 }
