@@ -209,7 +209,7 @@ For each category: definition, subcategories, sample site types, enterprise acti
 | users/groups/devices | Directory mirror | id, name, attributes, last_synced | (id) | 1y after deletion | IAM | sync tests |
 | ip_intelligence | Metadata per IP | ip, location, owner, device_refs | (ip) | 90d | Reporting | enrichment tests |
 | audit_events | Immutable audits | event_id, timestamp, actor, action, target, payload_hash, data JSONB | (timestamp), (actor), (action) | 2y | Security | hash chain |
-| reporting_aggregates | Precomputed stats | id, period_start, dimension (ip/user/device/category), metrics JSONB | (dimension,period_start) | 1y | Reporting | refresh tests |
+| reporting (live ES) | Real-time analytics | inferred action/domain/category coverage + trends | ES runtime mappings + mapped fields | retention by ILM | Reporting | traffic + status endpoint tests |
 | cli_operation_logs | CLI usage | id, operator_id, command, args_hash, result, timestamp | (operator_id,timestamp) | 1y | DevOps | CLI logging |
 | ui_action_audit | UI actions | id, user_id, route, action, payload, timestamp | (user_id,timestamp) | 1y | Product | UI audit tests |
 

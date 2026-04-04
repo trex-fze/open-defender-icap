@@ -3,82 +3,14 @@ use axum::{
     http::StatusCode,
     Extension, Json,
 };
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use sqlx::Row;
+use serde::Deserialize;
 use tracing::error;
-use uuid::Uuid;
 
 use crate::{
     auth::{require_roles, UserContext, ROLE_REPORTING_VIEW},
-    pagination::{PageOptions, Paged},
     reporting_es::{ReportingCoverageStatus, TrafficReportResponse},
     AppState,
 };
-
-#[derive(Debug, Deserialize)]
-pub struct ReportingQuery {
-    pub dimension: String,
-    pub page: Option<u32>,
-    pub page_size: Option<u32>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ReportingAggregate {
-    pub id: Uuid,
-    pub dimension: String,
-    pub period_start: DateTime<Utc>,
-    pub metrics: Value,
-    pub created_at: DateTime<Utc>,
-}
-
-pub async fn list_aggregates(
-    Extension(user): Extension<UserContext>,
-    State(state): State<AppState>,
-    Query(query): Query<ReportingQuery>,
-) -> Result<Json<Paged<ReportingAggregate>>, StatusCode> {
-    require_roles(&user, ROLE_REPORTING_VIEW)?;
-    let opts = PageOptions::new(query.page, query.page_size);
-    let dimension = query.dimension.trim();
-    if dimension.is_empty() {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    let total: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM reporting_aggregates WHERE dimension = $1")
-            .bind(dimension)
-            .fetch_one(state.pool())
-            .await
-            .map_err(map_db_error)?;
-    if total == 0 {
-        return Ok(Json(Paged::new(Vec::new(), 0, opts)));
-    }
-    let rows = sqlx::query(
-        "SELECT id, dimension, period_start, metrics, created_at
-            FROM reporting_aggregates
-            WHERE dimension = $1
-            ORDER BY period_start DESC
-            LIMIT $2 OFFSET $3",
-    )
-    .bind(dimension)
-    .bind(opts.page_size as i64)
-    .bind(opts.offset())
-    .fetch_all(state.pool())
-    .await
-    .map_err(map_db_error)?;
-
-    let data = rows
-        .into_iter()
-        .map(|row| ReportingAggregate {
-            id: row.get("id"),
-            dimension: row.get("dimension"),
-            period_start: row.get("period_start"),
-            metrics: row.get("metrics"),
-            created_at: row.get("created_at"),
-        })
-        .collect();
-    Ok(Json(Paged::new(data, total, opts)))
-}
 
 #[derive(Debug, Deserialize)]
 pub struct TrafficReportQuery {
@@ -126,9 +58,4 @@ pub async fn reporting_status(
         StatusCode::BAD_GATEWAY
     })?;
     Ok(Json(status))
-}
-
-fn map_db_error(err: sqlx::Error) -> StatusCode {
-    error!(target = "svc-admin", %err, "reporting query failed");
-    StatusCode::INTERNAL_SERVER_ERROR
 }

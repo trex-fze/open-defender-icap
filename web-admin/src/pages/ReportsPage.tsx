@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { useReportsData } from '../hooks/useReportsData';
 import { useReportingStatus } from '../hooks/useReportingStatus';
 import { useTrafficReportData } from '../hooks/useTrafficReportData';
 
@@ -23,14 +22,11 @@ const downloadCsv = (filename: string, rows: Array<Array<string | number>>) => {
 };
 
 export const ReportsPage = () => {
-  const [dimension, setDimension] = useState('category');
   const [range, setRange] = useState('24h');
   const [topN, setTopN] = useState(10);
 
-  const { data, loading, error, isMock } = useReportsData(dimension);
   const traffic = useTrafficReportData(range, topN);
   const reportingStatus = useReportingStatus(range);
-  const [report] = data;
 
   const trendRows = useMemo(() => {
     if (!traffic.data) return [] as { action: string; buckets: number; total: number }[];
@@ -52,12 +48,6 @@ export const ReportsPage = () => {
       ['section', 'key', 'value', 'meta'],
     ];
 
-    if (report) {
-      Object.entries(report.metrics).forEach(([action, value]) => {
-        rows.push(['aggregate', action, value, `${report.dimension}:${report.period}`]);
-      });
-    }
-
     const trafficData = traffic.data;
     if (trafficData) {
       trendRows.forEach((row) => {
@@ -71,7 +61,7 @@ export const ReportsPage = () => {
       });
     }
 
-    downloadCsv(`open-defender-reports-${dimension}-${range}.csv`, rows);
+    downloadCsv(`open-defender-reports-${range}.csv`, rows);
   };
 
   return (
@@ -79,7 +69,7 @@ export const ReportsPage = () => {
       <div className="page-header">
         <div>
           <p className="section-title">Reporting</p>
-          <h2 style={{ margin: 0 }}>Aggregates & KPIs</h2>
+          <h2 style={{ margin: 0 }}>Traffic Analytics</h2>
         </div>
         <button className="cta-button" onClick={exportCsv}>Export CSV</button>
       </div>
@@ -87,14 +77,6 @@ export const ReportsPage = () => {
       <div className="glass-panel">
         <p className="section-title">Filters</p>
         <div className="layout-grid">
-          <label>
-            <span style={{ display: 'block', marginBottom: '0.35rem' }}>Aggregate Dimension</span>
-            <select className="search-input" value={dimension} onChange={(event) => setDimension(event.target.value)}>
-              <option value="category">category</option>
-              <option value="action">action</option>
-              <option value="risk">risk</option>
-            </select>
-          </label>
           <label>
             <span style={{ display: 'block', marginBottom: '0.35rem' }}>Traffic Range</span>
             <select className="search-input" value={range} onChange={(event) => setRange(event.target.value)}>
@@ -119,18 +101,6 @@ export const ReportsPage = () => {
         </div>
       </div>
 
-      {error ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Failed to load aggregates: {error}</p>
-        </div>
-      ) : null}
-
-      {isMock ? (
-        <p className="section-title" style={{ color: '#fdd744', marginTop: '0.5rem' }}>
-          Mock stream (Admin API offline)
-        </p>
-      ) : null}
-
       {reportingStatus.data ? (
         <div className="glass-panel" style={{ marginTop: '1rem' }}>
           <p className="section-title">Data Quality ({reportingStatus.data.range})</p>
@@ -154,55 +124,6 @@ export const ReportsPage = () => {
           </div>
         </div>
       ) : null}
-
-      <div className="glass-panel">
-        {loading ? (
-          <div>
-            {Array.from({ length: 4 }).map((_, idx) => (
-              <div key={idx} className="skeleton" style={{ marginBottom: '0.75rem' }}></div>
-            ))}
-          </div>
-        ) : !report ? (
-          <div className="card">
-            <p className="section-title">No Aggregate Snapshots Yet</p>
-            <p style={{ margin: 0, color: 'var(--muted)' }}>
-              `reporting_aggregates` has no rows for this dimension. Run reporting backfill/rollup to populate KPI snapshots.
-            </p>
-          </div>
-        ) : (
-          <>
-            <p className="section-title">Dimension: {report.dimension}</p>
-            <div className="layout-grid" style={{ marginBottom: '1.5rem' }}>
-              {Object.entries(report.metrics).map(([action, value]) => (
-                <div key={action} className="kpi-card">
-                  <p className="section-title">{action}</p>
-                  <h3 style={{ margin: 0 }}>{Number(value).toLocaleString()}</h3>
-                </div>
-              ))}
-            </div>
-            <div className="table-wrapper" role="region" tabIndex={0} aria-label="Reports table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Dimension</th>
-                    <th>Period</th>
-                    <th>Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((item) => (
-                    <tr key={item.id}>
-                      <td>{item.dimension}</td>
-                      <td>{item.period}</td>
-                      <td>{new Date(item.createdAt).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </div>
 
       <div className="glass-panel">
         <p className="section-title">Traffic Summary</p>

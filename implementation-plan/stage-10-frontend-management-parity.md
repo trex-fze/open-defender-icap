@@ -84,7 +84,7 @@ Implement in five phases to reduce risk and keep a continuously usable UI:
 - [ ] `GET /api/v1/page-contents/:normalized_key`, `GET /api/v1/page-contents/:normalized_key/history`
 - [ ] `GET/DELETE /api/v1/cache-entries/:cache_key`
 - [ ] `GET /api/v1/cli-logs`
-- [ ] `GET /api/v1/reporting/aggregates`, `GET /api/v1/reporting/traffic`
+- [x] `GET /api/v1/reporting/traffic`, `GET /api/v1/reporting/status`
 
 ## 5) Test Plan
 

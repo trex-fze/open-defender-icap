@@ -234,10 +234,6 @@ enum ClassificationCmd {
 
 #[derive(Subcommand, Debug)]
 enum ReportCmd {
-    Summary {
-        #[clap(long, default_value = "category")]
-        dimension: String,
-    },
     Traffic {
         #[clap(long, default_value = "24h")]
         range: String,
@@ -245,6 +241,10 @@ enum ReportCmd {
         top: u32,
         #[clap(long)]
         bucket: Option<String>,
+    },
+    Status {
+        #[clap(long, default_value = "24h")]
+        range: String,
     },
 }
 
@@ -1178,22 +1178,6 @@ async fn handle_classification(
 
 async fn handle_report(cmd: &ReportCmd, client: &ApiClient, json: bool) -> Result<()> {
     match cmd {
-        ReportCmd::Summary { dimension } => {
-            let response: Paged<ReportingAggregate> = client
-                .get(
-                    "/api/v1/reporting/aggregates",
-                    &[("dimension", dimension.as_str()), ("page_size", "5")],
-                )
-                .await?;
-            if json {
-                print_json(&response)?;
-            } else {
-                println!("Dimension: {}", dimension);
-                for agg in response.data {
-                    println!("- {} :: {}", agg.period_start, agg.metrics);
-                }
-            }
-        }
         ReportCmd::Traffic { range, top, bucket } => {
             let mut params = vec![
                 ("range".to_string(), range.clone()),
@@ -1212,6 +1196,19 @@ async fn handle_report(cmd: &ReportCmd, client: &ApiClient, json: bool) -> Resul
                 print_json(&report)?;
             } else {
                 render_traffic_report(&report);
+            }
+        }
+        ReportCmd::Status { range } => {
+            let report: ReportingStatusResponse =
+                client.get("/api/v1/reporting/status", &[("range", range)]).await?;
+            if json {
+                print_json(&report)?;
+            } else {
+                println!("Reporting data quality ({})", report.range);
+                println!("Total docs       : {}", report.total_docs);
+                println!("Action coverage  : {}", report.action_docs);
+                println!("Category coverage: {}", report.category_docs);
+                println!("Domain coverage  : {}", report.domain_docs);
             }
         }
     }
@@ -2108,15 +2105,6 @@ struct ManualClassificationResponse {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct ReportingAggregate {
-    id: Uuid,
-    dimension: String,
-    period_start: String,
-    metrics: serde_json::Value,
-    created_at: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 struct LlmProviderSummary {
     name: String,
     provider_type: String,
@@ -2149,6 +2137,15 @@ struct TimeBucketResponse {
 struct TopEntryResponse {
     key: String,
     doc_count: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ReportingStatusResponse {
+    range: String,
+    total_docs: i64,
+    action_docs: i64,
+    category_docs: i64,
+    domain_docs: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

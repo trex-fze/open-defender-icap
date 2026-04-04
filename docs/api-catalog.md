@@ -69,7 +69,6 @@ Override precedence note: policy-engine evaluates active domain overrides before
 
 | Method | Path | Description | Query Params |
 | --- | --- | --- | --- |
-| `GET` | `/api/v1/reporting/aggregates` | Returns stored aggregates for dashboards. | `dimension` (required), `page`, `page_size`; paged response `{ data, meta }`. |
 | `GET` | `/api/v1/reporting/traffic` | Elastic-powered traffic summary with inferred-action/domain/category fallbacks when structured fields are sparse. | `range`, `top_n`, `bucket`. |
 | `GET` | `/api/v1/reporting/status` | Reporting data-quality coverage counters for the selected time range. | `range`; response includes `total_docs`, `action_docs`, `category_docs`, `domain_docs`. |
 

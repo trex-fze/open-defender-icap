@@ -519,10 +519,6 @@ async fn main() -> Result<()> {
             "/api/v1/taxonomy/subcategories/:id",
             put(taxonomy::block_subcategory_mutation).delete(taxonomy::block_subcategory_mutation),
         )
-        .route(
-            "/api/v1/reporting/aggregates",
-            get(reporting::list_aggregates),
-        )
         .route("/api/v1/reporting/traffic", get(reporting::traffic_summary))
         .route("/api/v1/reporting/status", get(reporting::reporting_status))
         .route(

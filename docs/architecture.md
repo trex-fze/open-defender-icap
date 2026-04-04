@@ -212,7 +212,7 @@ The workflow for an unclassified site emphasizes “content-first” verificatio
 ## 4. Data Model Snapshot
 - `classifications` (normalized_key, taxonomy_version, activation-aware verdict fields, TTL).
 - `policies` / `policy_rules` (compiled DSL, priorities, outcomes).
-- `overrides`, `audit_events`, `reporting_aggregates` (per Spec §20).
+- `overrides`, `audit_events` (reporting is served from live Elasticsearch analytics endpoints).
 - `page_contents` + `classification_requests` (Stage 9 content-aware pipeline storing Crawl4AI excerpts and pending keys).
 
 ## 5. Deployment Architecture

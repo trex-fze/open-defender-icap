@@ -29,7 +29,7 @@
 | Taxonomy | GET/POST/PUT/DELETE | `/api/v1/taxonomy/categories`, `/api/v1/taxonomy/subcategories` | CRUD wrappers around taxonomy tables from migration `0004`. | `policy-editor`, `policy-admin` |
 | Cache | GET | `/api/v1/cache-entries/:key` | Inspect cache entry (value, expires_at, source). | `policy-viewer`, `auditor` |
 | Cache | DELETE | `/api/v1/cache-entries/:key` | Purge cache entry + emit invalidation to Redis stream. | `policy-admin` |
-| Reporting | GET | `/api/v1/reporting/aggregates?dimension=category&period=day` | Returns metrics JSON from `reporting_aggregates` along with sparkline data. | `auditor`, `policy-admin` |
+| Reporting | GET | `/api/v1/reporting/traffic?range=24h&top_n=10` | Returns live Elasticsearch traffic trend + top blocked domains/categories with fallback semantics when sparse fields are present. | `auditor`, `policy-admin` |
 | CLI Logs | GET | `/api/v1/cli-logs?operator_id=alice@example.com` | Fetch `cli_operation_logs` for auditing CLI invocations. | `auditor`, `policy-admin` |
 
 Shared behaviors:
