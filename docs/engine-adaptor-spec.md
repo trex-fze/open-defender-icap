@@ -217,7 +217,7 @@ For each category: definition, subcategories, sample site types, enterprise acti
 - **In-process cache**: per adaptor instance LRU (size 10k) storing `CacheEntry` with TTL 5 min; stores structured verdicts; invalidated on Redis pub/sub messages.
 - **Redis cache**: Keys `verdict:{level}:{normalized_key}:policy{policy_version}`; values JSON (verdict + metadata). TTL 24 h default, 6 h for mixed-content, 4 h for low-confidence. Use Redis Cluster with replicas; sentinel for failover. Atomic writes with Lua script ensuring placeholder status not overwritten until classification completes. Placeholder entry fields: `status=pending`, `expires_at` short TTL 15 min.
 - **Persistence**: Postgres `classifications` table authoritative; includes TTL and `next_refresh_at` to trigger reclassification jobs. `classification_versions` retains diff, reason, actor.
-- **Canonicalization**: apply RFC 3986 normalization, punycode, lowercase, remove default ports, sort query params excluding tracking keys, limit path depth for caching strategy. Domain-level classification default; escalate to subdomain if subdomain matches dynamic list or heuristics; escalate to URL when path contains risky segments or override.
+- **Canonicalization**: apply RFC 3986 normalization, punycode, lowercase, remove default ports, sort query params excluding tracking keys, limit path depth for caching strategy. Classification scope is domain-first: subdomain traffic is canonicalized to `domain:<registered_domain>` for pending/content/classification persistence, while request-time override matching still evaluates the observed key.
 - **TTL rules**: extend on cache hits (sliding window) up to 72 h; low-confidence entries flagged for refresh at half TTL; model/taxonomy version change invalidates keys by prefix flush.
 - **Stale handling**: on TTL expiry, adaptor returns cached result but triggers background refresh if `next_refresh_at` passed; for critical categories TTL locked to 24 h to ensure quick updates.
 - **Auditability**: each cache mutation recorded with classification_id, previous version, actor (`system`, `llm-worker`, `admin`).
@@ -324,8 +324,8 @@ You will receive metadata such as:
 - tenant policy context (optional)
 
 Rules:
-1. Prefer domain-level classification unless URL-level evidence clearly changes the category.
-2. Use subdomain-level classification when subdomain meaningfully differs from parent domain.
+1. Use domain-first classification scope (`domain:<registered_domain>`) for persistence and queueing.
+2. Keep request-time decisions override-aware: subdomain Allow/Deny overrides remain valid and can supersede domain-level outcomes.
 3. Mark mixed_content=true for platforms that host many unrelated user-generated pages.
 4. Mark unknown=true when evidence is insufficient.
 5. Keep reason_summary under 40 words.
@@ -481,9 +481,14 @@ Rules:
 
 ## 20.3 Pending Classification Operations
 - `GET /api/v1/classifications/pending` returns keys blocked in `ContentPending`.
-- `POST /api/v1/classifications/{normalized_key}/pending` upserts pending state immediately from ICAP so UI visibility is not backlog-bound.
-- `POST /api/v1/classifications/{normalized_key}/manual-classify` accepts `{primary_category, subcategory, reason?}` and persists policy-computed action/risk/confidence.
+- `POST /api/v1/classifications/{normalized_key}/pending` upserts pending state immediately from ICAP so UI visibility is not backlog-bound. In domain-first scope, subdomain keys are promoted to canonical `domain:<registered_domain>`.
+- `POST /api/v1/classifications/{normalized_key}/manual-classify` accepts `{primary_category, subcategory, reason?}` and persists policy-computed action/risk/confidence. In domain-first scope, subdomain keys are promoted to canonical `domain:<registered_domain>`.
 - `POST /api/v1/classifications/{normalized_key}/unblock` remains for explicit manual action payloads.
+
+## 20.3.1 Domain-First Classification Scope
+- Classification persistence, pending queues, and page-content artifacts use canonical domain keys (`domain:<registered_domain>`) by default.
+- Policy decision requests still evaluate on the observed key so fine-grained subdomain overrides remain effective.
+- Management views may expose both historical `recommended_action` and current `effective_action`/`effective_decision_source` to separate audit snapshots from live enforcement.
 
 ## 20.4 Overrides API
 - `POST /api/v1/overrides`, `GET /api/v1/overrides`, `DELETE /api/v1/overrides/{id}`. Includes scope (domain/user/ip), action, expiry.

@@ -14,5 +14,6 @@ This tracker maps implementation stages to the authoritative specification in `d
 | 7. Testing & Ops | Full test suites, Docker/K8s deployment, evidence | Spec §§8, 24–31, 34–35 | ✅ Complete | Unit/integration/security/perf suites plus smoke artifacts and runbooks are established. |
 | 10. Frontend Management Parity | Full UI coverage for all existing management APIs and operational diagnostics | Spec §§13, 14, 18, 19, 23, 33 | ✅ Complete | Stage 10 parity scope delivered with operator runbook coverage. |
 | 11. RBAC and User/Group Management | Persistent IAM model, effective-role resolution, user/group/service-account lifecycle across API/UI/CLI | Spec §§8, 10, 13, 14, 23, 27 | ✅ Complete | Stage 11 IAM schema/resolver/UI/CLI flows delivered with authz smoke coverage. |
+| 13. Domain-First Classification Scope | Canonical domain-key dedupe for pending/classification/content paths while preserving subdomain override precision | Spec §§20.3, 20.3.1 | ✅ Complete | Canonical key helper, ICAP/Admin auto-promotion, migration 0015, and runtime smoke evidence delivered. |
 
 Detailed RFC addenda for implemented stages live under `rfc/`; use this tracker as the high-level status map against the master specification.

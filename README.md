@@ -311,6 +311,12 @@ Use Allow / Deny and create one active `block` override for the apex domain (for
 **Q: Can I set a different decision for one subdomain under a blocked domain?**  
 Yes. Add a more-specific override for that host (for example `safe.example.com`). Override matching uses most-specific scope first, so the specific subdomain rule wins over the parent domain rule.
 
+**Q: Why do Pending Sites / Classifications show `domain:example.com` when traffic came from `www.example.com`?**  
+The platform now runs in domain-first classification mode. Subdomain traffic is deduplicated to canonical `domain:<registered_domain>` keys for pending rows, page-content fetches, and persisted classifications to reduce queue latency.
+
+**Q: Can subdomain-specific controls still be applied?**  
+Yes. Allow / Deny overrides remain fine-grained and still accept both domain and subdomain scopes. A more-specific subdomain override wins over the parent domain override.
+
 **Q: How do I discover CLI commands for overrides (`odctl help`)?**  
 Run `odctl --help` for top-level commands, `odctl override --help` for override subcommands, and `odctl override create --help` for create flags. Example full-domain block command: `odctl override create --scope domain:example.com --action block --reason "Block entire domain"`.
 

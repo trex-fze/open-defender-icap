@@ -64,14 +64,14 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl seed policies [file] [name] [created_by]` | Load policy DSL file via Policy API | Defaults to `config/policies.json`, `name=default`; requires admin auth token. |
 | `odctl override update <id> <file>` | PUT override definition | JSON matches Admin API payload; invalidates caches instantly. |
 | `odctl page show --key <normalized>` | Inspect Crawl4AI excerpts and metadata | Useful when debugging LLM prompts; add `--json` for raw output. |
-| `odctl classification pending` | List sites blocked pending Crawl4AI + LLM verdict | Mirrors `/api/v1/classifications/pending`; shows latest status, base URL, timestamps. Pending rows now appear immediately when ICAP returns `ContentPending`. |
+| `odctl classification pending` | List sites blocked pending Crawl4AI + LLM verdict | Mirrors `/api/v1/classifications/pending`; shows latest status, base URL, timestamps. In domain-first mode, subdomain requests collapse into canonical `domain:<registered_domain>` pending rows. |
 | `odctl classification unblock --key <normalized> --action Allow ...` | Manually set a verdict to unblock/deny traffic (legacy/manual endpoint) | Sends `POST /api/v1/classifications/:key/unblock`; requires `policy-editor` role and records reason in audit log. |
 
 Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 OD_ADMIN_TOKEN=secret odctl policy reload`, `OD_ADMIN_TOKEN=secret odctl policy simulate request.json`.
 
 ## 7. React Admin UI
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
-- Routes: Dashboard, Investigations, Policies (+ draft create/publish), **Pending Sites** (manual classification with category/subcategory and policy-computed action), **Classifications** (classified/unclassified CRUD management), Allow / Deny list (domain overrides), Taxonomy (read-only canonical listing with checkbox activation toggles), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs).
+- Routes: Dashboard, Investigations, Policies (+ draft create/publish), **Pending Sites** (manual classification with category/subcategory and policy-computed action; subdomain inputs auto-promote to canonical domain key), **Classifications** (classified/unclassified CRUD management with both `Effective Action` and `Recorded Action` columns), Allow / Deny list (domain + subdomain overrides), Taxonomy (read-only canonical listing with checkbox activation toggles), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs).
 - Authentication: local username/password login screen; RBAC controls navigation after token issuance.
 - Build: `npm run build`; deploy static assets behind reverse proxy.
 - Operator runbook and screenshot checklist: `docs/runbooks/stage10-web-admin-operator-runbook.md`.
@@ -96,6 +96,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - **Docker build failures**: Clear `target/` and rebuild; ensure Rust toolchain matches required version.
 - **Crawl pending unclear**: inspect `logs/crawl4ai/crawl-audit.jsonl` and correlate failing URLs by `normalized_key`; repeated `blocked` or `failed` reasons indicate no-content fallback path should be used.
 - **Need override examples (domain + subdomain behavior)?** See FAQ entries in `README.md` and `docs/fast-testing-deployment.md` for UI + `odctl` examples, including full-domain block (`domain:example.com`) and most-specific subdomain precedence.
+- **Why does Pending show `domain:example.com` after browsing `www.example.com`?** Domain-first classification scope is enabled: ICAP deduplicates subdomain traffic into canonical domain keys for pending/classification/content artifacts. Use Allow / Deny subdomain overrides for host-specific exceptions.
 
 ## 10. Evidence & Reporting
 - Keep `rfc/` and `implementation-plan/` documents updated as work progresses.

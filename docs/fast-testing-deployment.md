@@ -291,6 +291,9 @@ Use `down -v` only when you explicitly need a clean local data state.
 - Can I set a different decision for one subdomain under a blocked domain?
   - Yes. Add a more-specific host override (for example `safe.example.com`).
   - Override resolution uses most-specific scope first, so the subdomain rule wins over the parent domain rule.
+- Why do pending/classification keys appear as `domain:example.com` even when I browse a subdomain?
+  - Domain-first classification mode is enabled. Subdomain traffic is deduplicated into canonical domain keys for pending rows, page fetch jobs, and persisted classifications.
+  - This reduces queue churn and classification delay; use subdomain Allow / Deny overrides when host-specific exceptions are needed.
 - How do I see override commands in odctl help?
   - Run `odctl --help` for top-level commands.
   - Run `odctl override --help` for override subcommands.
