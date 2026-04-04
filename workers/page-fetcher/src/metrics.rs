@@ -46,6 +46,22 @@ static CRAWL_FAILURES: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+static TERMINAL_SKIPS: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_fetch_terminal_cooldown_skips_total",
+        "Jobs skipped because a terminal fetch outcome is still within cooldown"
+    )
+    .unwrap()
+});
+
+static ASSET_PREFILTER_SKIPS: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_fetch_asset_prefilter_skips_total",
+        "Jobs skipped by asset-host prefilter before calling Crawl4AI"
+    )
+    .unwrap()
+});
+
 static FETCH_LATENCY: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "page_fetch_duration_seconds",
@@ -81,6 +97,14 @@ impl MetricsServer {
 
     pub fn record_crawl_failure(&self) {
         CRAWL_FAILURES.inc();
+    }
+
+    pub fn record_terminal_skip(&self) {
+        TERMINAL_SKIPS.inc();
+    }
+
+    pub fn record_asset_prefilter_skip(&self) {
+        ASSET_PREFILTER_SKIPS.inc();
     }
 
     pub fn observe_fetch_latency(&self, seconds: f64) {

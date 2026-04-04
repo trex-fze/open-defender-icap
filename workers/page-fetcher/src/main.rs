@@ -9,7 +9,7 @@ use redis::AsyncCommands;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use tokio::signal;
 use tokio::time::Instant;
 use tracing::{error, info, Level};
@@ -43,6 +43,14 @@ struct WorkerConfig {
     pub fetch_timeout_seconds: u64,
     #[serde(default = "default_pool_size")]
     pub database_pool_size: u32,
+    #[serde(default = "default_terminal_retry_cooldown_seconds")]
+    pub terminal_retry_cooldown_seconds: u64,
+    #[serde(default = "default_blocked_retry_cooldown_seconds")]
+    pub blocked_retry_cooldown_seconds: u64,
+    #[serde(default = "default_unsupported_retry_cooldown_seconds")]
+    pub unsupported_retry_cooldown_seconds: u64,
+    #[serde(default)]
+    pub unsupported_host_allowlist: Vec<String>,
 }
 
 fn default_queue() -> String {
@@ -89,6 +97,18 @@ const fn default_pool_size() -> u32 {
     5
 }
 
+const fn default_terminal_retry_cooldown_seconds() -> u64 {
+    21_600
+}
+
+const fn default_blocked_retry_cooldown_seconds() -> u64 {
+    21_600
+}
+
+const fn default_unsupported_retry_cooldown_seconds() -> u64 {
+    43_200
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct CrawlApiResponse {
@@ -106,6 +126,18 @@ struct FetchFailure {
     fetch_status: String,
     fetch_reason: String,
     detail: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CrawlErrorDetail {
+    report: Option<String>,
+    reason: Option<String>,
+    detail: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CrawlErrorEnvelope {
+    detail: Option<CrawlErrorDetail>,
 }
 
 #[derive(Debug, Serialize)]
@@ -238,6 +270,40 @@ impl PageFetcher {
             return Ok(());
         }
 
+        if self
+            .terminal_fetch_recently_recorded(&job.normalized_key)
+            .await?
+        {
+            self.metrics.record_terminal_skip();
+            self.metrics.record_job_skipped();
+            info!(
+                target = "svc-page-fetcher",
+                key = job.normalized_key,
+                "recent terminal fetch outcome still in cooldown; skipping"
+            );
+            return Ok(());
+        }
+
+        if is_likely_asset_host(&job.hostname, &self.cfg.unsupported_host_allowlist) {
+            let failure = FetchFailure {
+                fetch_status: "unsupported".into(),
+                fetch_reason: "asset_endpoint".into(),
+                detail: format!(
+                    "skipped crawl for likely asset host: {}",
+                    job.hostname
+                ),
+            };
+            self.store_failure(&job, ttl_seconds, &failure).await?;
+            self.metrics.record_asset_prefilter_skip();
+            info!(
+                target = "svc-page-fetcher",
+                key = job.normalized_key,
+                host = job.hostname,
+                "skipped crawl due to asset-host prefilter"
+            );
+            return Ok(());
+        }
+
         let start = Instant::now();
         let crawl_response = match self.fetch_content(&job, &url).await {
             Ok(response) => response,
@@ -269,6 +335,34 @@ impl PageFetcher {
         Ok(exists)
     }
 
+    async fn terminal_fetch_recently_recorded(&self, normalized_key: &str) -> Result<bool> {
+        let row = sqlx::query(
+            "SELECT LOWER(fetch_status) AS fetch_status, EXTRACT(EPOCH FROM (NOW() - fetched_at))::bigint AS age_seconds FROM page_contents WHERE normalized_key = $1 ORDER BY fetched_at DESC LIMIT 1",
+        )
+        .bind(normalized_key)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(false);
+        };
+
+        let status = row
+            .try_get::<Option<String>, _>("fetch_status")?
+            .unwrap_or_default();
+        let age_seconds = row
+            .try_get::<Option<i64>, _>("age_seconds")?
+            .unwrap_or(i64::MAX)
+            .max(0) as u64;
+
+        let cooldown = match status.as_str() {
+            "blocked" => self.cfg.blocked_retry_cooldown_seconds,
+            "unsupported" => self.cfg.unsupported_retry_cooldown_seconds,
+            "failed" => self.cfg.terminal_retry_cooldown_seconds,
+            _ => return Ok(false),
+        };
+        Ok(age_seconds <= cooldown)
+    }
+
     async fn fetch_content(
         &self,
         job: &PageFetchJob,
@@ -297,8 +391,12 @@ impl PageFetcher {
             })?;
 
         if !response.status().is_success() {
+            let status_code = response.status().as_u16();
             let body = response.text().await.unwrap_or_else(|_| "<empty>".into());
-            let (fetch_status, fetch_reason) = classify_crawl_failure(&body);
+            if let Some(failure) = parse_crawl_error_payload(&body) {
+                return Err(failure);
+            }
+            let (fetch_status, fetch_reason) = classify_crawl_failure(&body, Some(status_code));
             return Err(FetchFailure {
                 fetch_status,
                 fetch_reason,
@@ -448,13 +546,41 @@ fn truncate_chars(value: &str, limit: usize) -> String {
     out
 }
 
-fn classify_crawl_failure(detail: &str) -> (String, String) {
+fn parse_crawl_error_payload(payload: &str) -> Option<FetchFailure> {
+    let parsed = serde_json::from_str::<CrawlErrorEnvelope>(payload).ok()?;
+    let detail = parsed.detail?;
+    let report = detail.report?.to_ascii_lowercase();
+    let fetch_status = match report.as_str() {
+        "blocked" => "blocked",
+        "unsupported" => "unsupported",
+        _ => "failed",
+    }
+    .to_string();
+    let fetch_reason = detail.reason.unwrap_or_else(|| "crawl_failed".into());
+    let message = detail.detail.unwrap_or_else(|| "crawl service error".into());
+    Some(FetchFailure {
+        fetch_status,
+        fetch_reason,
+        detail: message,
+    })
+}
+
+fn classify_crawl_failure(detail: &str, status_code: Option<u16>) -> (String, String) {
     let lowered = detail.to_ascii_lowercase();
+    if matches!(status_code, Some(403)) {
+        return ("blocked".into(), "http_403".into());
+    }
+    if matches!(status_code, Some(429)) {
+        return ("blocked".into(), "http_429".into());
+    }
+    if lowered.contains("minimal_text") || lowered.contains("no_content_elements") {
+        return ("unsupported".into(), "no_content_endpoint".into());
+    }
     if lowered.contains("anti_bot_or_access_denied")
         || lowered.contains("http_403")
+        || lowered.contains("http_429")
         || lowered.contains("access denied")
         || lowered.contains("captcha")
-        || lowered.contains("http_429")
     {
         return ("blocked".into(), "anti_bot_or_access_denied".into());
     }
@@ -468,6 +594,23 @@ fn classify_crawl_failure(detail: &str) -> (String, String) {
         return ("failed".into(), "timeout".into());
     }
     ("failed".into(), "crawl_failed".into())
+}
+
+fn is_likely_asset_host(hostname: &str, allowlist: &[String]) -> bool {
+    if allowlist
+        .iter()
+        .any(|allowed| hostname.eq_ignore_ascii_case(allowed) || hostname.ends_with(&format!(".{allowed}")))
+    {
+        return false;
+    }
+    let lowered = hostname.to_ascii_lowercase();
+    let labels: Vec<&str> = lowered.split('.').collect();
+    labels.iter().any(|label| {
+        matches!(
+            *label,
+            "cdn" | "cdns" | "img" | "images" | "image" | "static" | "assets" | "media" | "js"
+        )
+    })
 }
 
 fn entry_too_old(entry_id: &str, max_age_ms: u64) -> bool {
@@ -506,5 +649,34 @@ mod tests {
         let markdown = format!("{}", "a".repeat(5_000));
         let excerpt = build_markdown_excerpt(&markdown, "", None, 1_000);
         assert!(excerpt.chars().count() <= 1_000);
+    }
+
+    #[test]
+    fn classify_crawl_failure_marks_structural_as_unsupported() {
+        let (status, reason) = classify_crawl_failure(
+            "crawl4ai returned unsuccessful result: Structural: minimal_text, no_content_elements",
+            Some(200),
+        );
+        assert_eq!(status, "unsupported");
+        assert_eq!(reason, "no_content_endpoint");
+    }
+
+    #[test]
+    fn parse_crawl_error_payload_uses_structured_fields() {
+        let payload = r#"{"detail":{"error_code":"CRAWL_OUTCOME_ERROR","report":"blocked","reason":"http_403","status_code":403,"detail":"blocked by anti-bot"}}"#;
+        let parsed = parse_crawl_error_payload(payload).expect("expected parsed failure");
+        assert_eq!(parsed.fetch_status, "blocked");
+        assert_eq!(parsed.fetch_reason, "http_403");
+    }
+
+    #[test]
+    fn asset_host_prefilter_detects_common_labels() {
+        assert!(is_likely_asset_host("cdn.fundraiseup.com", &[]));
+        assert!(is_likely_asset_host("js.stripe.com", &[]));
+        assert!(!is_likely_asset_host("www.mozilla.org", &[]));
+        assert!(!is_likely_asset_host(
+            "cdn.allowed.example.com",
+            &["allowed.example.com".to_string()]
+        ));
     }
 }

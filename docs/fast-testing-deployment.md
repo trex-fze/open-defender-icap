@@ -141,6 +141,12 @@ LLM failover safety controls (env overrides for `config/llm-worker.json` routing
 - `OD_PENDING_RECONCILE_INTERVAL_SECS`: reconcile loop interval in seconds (default `60`)
 - `OD_PENDING_RECONCILE_STALE_MINUTES`: age threshold for reconciling stale pending rows (default `10`)
 - `OD_PENDING_RECONCILE_BATCH`: max pending rows reconciled per cycle (default `100`)
+- `config/page-fetcher.json.terminal_retry_cooldown_seconds`: cooldown for retrying recently failed keys (default `21600`)
+- `config/page-fetcher.json.blocked_retry_cooldown_seconds`: cooldown for retrying recently blocked keys (default `21600`)
+- `config/page-fetcher.json.unsupported_retry_cooldown_seconds`: cooldown for retrying `unsupported` keys such as asset endpoints (default `43200`)
+- `config/page-fetcher.json.unsupported_host_allowlist`: host/domain allowlist to bypass asset-host prefilter
+- `CRAWL4AI_WAIT_UNTIL`: Playwright wait mode used by crawl4ai (`load` recommended for anti-bot challenge pages)
+- `CRAWL4AI_DELAY_BEFORE_RETURN_HTML`: post-load delay seconds before HTML extraction (default `0.2`)
 
 Recommended local-first profile (current compose defaults):
 
@@ -290,7 +296,9 @@ Use `down -v` only when you explicitly need a clean local data state.
   - It is safer than keeping keys stuck in `waiting_content` forever and still preserves conservative policy handling.
 - How do I understand Crawl4AI failures clearly?
   - Read `logs/crawl4ai/crawl-audit.jsonl` on the host. Each entry contains timestamp, URL, report (`success|failed|blocked`), reason, status code, duration, and error details.
-  - `blocked` is used for anti-bot/access-denied style failures (e.g., HTTP 403/captcha/access denied); other crawl failures are labeled `failed`.
+  - `blocked` is reserved for explicit anti-bot/access-denied failures (for example HTTP 403/429, captcha/challenge pages).
+  - `unsupported` is used for non-page/asset-like endpoints (for example CDN JS/image hosts with minimal structural content) so anti-bot metrics are not inflated.
+  - page-fetcher enforces terminal cooldowns for `failed|blocked|unsupported` rows to prevent repeated churn on the same key.
 - How do I block an entire domain including subdomains?
   - In Allow / Deny, create one active `block` override for the apex domain (for example `example.com`).
   - That single override applies to the apex plus all subdomains (`www.example.com`, `api.example.com`, and deeper hosts).

@@ -31,6 +31,13 @@ def str_env(key: str, default: str) -> str:
     return value or default
 
 
+def float_env(key: str, default: float) -> float:
+    try:
+        return float(os.getenv(key, str(default)))
+    except ValueError:
+        return default
+
+
 def optional_env(key: str) -> Optional[str]:
     value = os.getenv(key)
     if value is None:
@@ -64,6 +71,14 @@ class CrawlResponse(BaseModel):
     metadata: dict
 
 
+class CrawlErrorPayload(BaseModel):
+    error_code: str
+    report: str
+    reason: str
+    status_code: Optional[int]
+    detail: str
+
+
 @lru_cache(maxsize=1)
 def browser_config() -> BrowserConfig:
     user_agent = str_env(
@@ -88,8 +103,8 @@ def crawler_run_config() -> CrawlerRunConfig:
         cache_mode=CacheMode.BYPASS,
         scan_full_page=True,
         process_iframes=True,
-        wait_until="networkidle",
-        delay_before_return_html=0.2,
+        wait_until=str_env("CRAWL4AI_WAIT_UNTIL", "load"),
+        delay_before_return_html=float_env("CRAWL4AI_DELAY_BEFORE_RETURN_HTML", 0.2),
         locale=str_env("CRAWL4AI_LOCALE", "en-US"),
         timezone_id=optional_env("CRAWL4AI_TIMEZONE"),
         simulate_user=bool_env("CRAWL4AI_SIMULATE_USER", "true"),
@@ -169,12 +184,15 @@ def classify_report(detail: str, status_code: Optional[int]) -> tuple[str, str]:
     text = (detail or "").lower()
     if status_code == 403:
         return "blocked", "http_403"
+    if status_code == 429:
+        return "blocked", "http_429"
+    if "minimal_text" in text or "no_content_elements" in text:
+        return "unsupported", "no_content_endpoint"
     blocked_markers = [
         "blocked by anti-bot",
         "access denied",
         "captcha",
         "forbidden",
-        "minimal_text, no_content_elements",
     ]
     if any(marker in text for marker in blocked_markers):
         return "blocked", "anti_bot_or_access_denied"
@@ -301,7 +319,16 @@ async def crawl_endpoint(request: CrawlRequest):
             exc.status_code,
             exc.duration_ms,
         )
-        raise HTTPException(status_code=502, detail=exc.detail) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=CrawlErrorPayload(
+                error_code="CRAWL_OUTCOME_ERROR",
+                report=exc.report,
+                reason=exc.reason,
+                status_code=exc.status_code,
+                detail=truncate_detail(exc.detail),
+            ).model_dump(),
+        ) from exc
     except Exception as exc:  # pragma: no cover - defensive
         detail = str(exc)
         report, reason = classify_report(detail, None)
@@ -319,7 +346,16 @@ async def crawl_endpoint(request: CrawlRequest):
             request.normalized_key,
             request.url,
         )
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=CrawlErrorPayload(
+                error_code="CRAWL_EXECUTION_ERROR",
+                report=report,
+                reason=reason,
+                status_code=None,
+                detail=truncate_detail(detail),
+            ).model_dump(),
+        ) from exc
     return crawl_result
 
 

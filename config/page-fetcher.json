@@ -11,5 +11,9 @@
   "max_html_bytes": 524288,
   "ttl_seconds": 21600,
   "fetch_timeout_seconds": 60,
-  "database_pool_size": 5
+  "database_pool_size": 5,
+  "terminal_retry_cooldown_seconds": 21600,
+  "blocked_retry_cooldown_seconds": 21600,
+  "unsupported_retry_cooldown_seconds": 43200,
+  "unsupported_host_allowlist": []
 }
