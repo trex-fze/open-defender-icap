@@ -475,15 +475,21 @@ Rules:
 - **Tests**: UT for validation, IT for policy precedence, Smoke for cached flows.
 
 ## 20.2 Classification Management
-- `GET /api/v1/classifications?state=all|classified|unclassified&q=&limit=` lists management rows for the Classifications UI.
+- `GET /api/v1/classifications?state=all|classified|unclassified&q=&limit=&cursor=` lists management rows for the Classifications UI and returns cursor envelope `{ data, meta }`.
 - `PATCH /api/v1/classifications/{normalized_key}` updates category/subcategory and recomputes action via policy engine.
 - `DELETE /api/v1/classifications/{normalized_key}` removes classification/pending/page-content state and invalidates caches.
 
 ## 20.3 Pending Classification Operations
-- `GET /api/v1/classifications/pending` returns keys blocked in `ContentPending`.
+- `GET /api/v1/classifications/pending?status=&limit=&cursor=` returns keys blocked in `ContentPending` using cursor envelope `{ data, meta }`.
 - `POST /api/v1/classifications/{normalized_key}/pending` upserts pending state immediately from ICAP so UI visibility is not backlog-bound. In domain-first scope, subdomain keys are promoted to canonical `domain:<registered_domain>`.
 - `POST /api/v1/classifications/{normalized_key}/manual-classify` accepts `{primary_category, subcategory, reason?}` and persists policy-computed action/risk/confidence. In domain-first scope, subdomain keys are promoted to canonical `domain:<registered_domain>`.
 - `POST /api/v1/classifications/{normalized_key}/unblock` remains for explicit manual action payloads.
+
+## 20.3.3 Cursor Pagination Contract (Admin High-Volume Lists)
+- Converted list routes accept `limit` (default 50, clamp 1..200) and optional opaque `cursor`.
+- Converted list routes return `{ data, meta }` where `meta={ limit, has_more, next_cursor, prev_cursor }`.
+- `next_cursor` is emitted when `has_more=true`; clients continue pagination by sending `cursor=<next_cursor>`.
+- Invalid cursors return `400` (`INVALID_CURSOR` where endpoint uses ApiError).
 
 ## 20.3.1 Domain-First Classification Scope
 - Classification persistence, pending queues, and page-content artifacts use canonical domain keys (`domain:<registered_domain>`) by default.
@@ -498,7 +504,7 @@ Rules:
 - Fallback provenance is captured in classification `flags` and metrics (`llm_primary_output_invalid_total`, `llm_online_verification_total`, `llm_terminal_insufficient_evidence_total`).
 
 ## 20.4 Overrides API
-- `POST /api/v1/overrides`, `GET /api/v1/overrides`, `DELETE /api/v1/overrides/{id}`. Includes scope (domain/user/ip), action, expiry.
+- `POST /api/v1/overrides`, `GET /api/v1/overrides?limit=&cursor=`, `DELETE /api/v1/overrides/{id}`. Includes scope (domain/user/ip), action, expiry.
 
 ## 20.5 Domain Allow / Deny Overrides
 - Manual decisions are managed through `/api/v1/overrides` using `scope_type=domain` and `action=allow|block`.
@@ -510,7 +516,10 @@ Rules:
 - Provide endpoints for other dashboards (user/device, category trend, override stats).
 
 ## 20.7 Audit Query API
-- `GET /api/v1/audit-events?actor=user&action=override.create&from=...&to=...`.
+- `GET /api/v1/iam/users?limit=&cursor=` returns IAM users as cursor-paged `{ data, meta }`.
+- `GET /api/v1/iam/groups?limit=&cursor=` returns IAM groups as cursor-paged `{ data, meta }`.
+- `GET /api/v1/iam/service-accounts?limit=&cursor=` returns service accounts as cursor-paged `{ data, meta }`.
+- `GET /api/v1/iam/audit?limit=&cursor=` returns IAM mutation evidence as cursor-paged `{ data, meta }`.
 
 ## 20.8 Cache Inspection API
 - `GET /api/v1/cache/{key}` returns cache entry; `DELETE /api/v1/cache/{key}` invalidates.

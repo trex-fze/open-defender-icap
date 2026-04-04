@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { PaginationControls } from '../components/PaginationControls';
 import { useClassificationsData, type ClassificationStateFilter } from '../hooks/useClassificationsData';
 import { useClassificationActions } from '../hooks/useClassificationActions';
 import { useTaxonomyData } from '../hooks/useTaxonomyData';
@@ -13,8 +14,12 @@ export const ClassificationsPage = () => {
   const [subcategoryId, setSubcategoryId] = useState('');
   const [reason, setReason] = useState('Operator classification correction');
   const [message, setMessage] = useState<string | undefined>();
+  const [limit, setLimit] = useState(50);
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
 
-  const { data, loading, error, refresh } = useClassificationsData(stateFilter, search);
+  const { data, meta, loading, error, refresh } = useClassificationsData(stateFilter, search, cursor, limit);
+  const paginationMeta = meta ?? { has_more: false, next_cursor: undefined };
   const { updateClassification, deleteClassification, busyKey, error: actionError, canCallApi } =
     useClassificationActions();
   const { data: taxonomy, loading: taxonomyLoading, error: taxonomyError, isMock: taxonomyMock } = useTaxonomyData();
@@ -29,6 +34,11 @@ export const ClassificationsPage = () => {
   const selectedRow = selectedKey ? data.find((item) => item.normalized_key === selectedKey) : undefined;
   const selectedCategory = taxonomyCategories.find((category) => category.id === categoryId);
   const selectedSubcategory = selectedCategory?.subcategories.find((sub) => sub.id === subcategoryId);
+
+  useEffect(() => {
+    setCursor(undefined);
+    setCursorStack([]);
+  }, [stateFilter, search, limit]);
 
   const canEdit = Boolean(selectedRow && selectedCategory && selectedSubcategory) && !taxonomyLoading && !taxonomyMock;
 
@@ -120,6 +130,27 @@ export const ClassificationsPage = () => {
             <input className="search-input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="domain:tiktok.com or social-media" />
           </label>
         </div>
+        <PaginationControls
+          limit={limit}
+          loading={loading}
+          hasMore={Boolean(paginationMeta.next_cursor) && paginationMeta.has_more}
+          canGoBack={cursorStack.length > 0}
+          onPrev={() => {
+            setCursorStack((prev) => {
+              if (prev.length === 0) return prev;
+              const next = [...prev];
+              const previousCursor = next.pop();
+              setCursor(previousCursor || undefined);
+              return next;
+            });
+          }}
+          onNext={() => {
+            if (!paginationMeta.next_cursor) return;
+            setCursorStack((prev) => [...prev, cursor ?? '']);
+            setCursor(paginationMeta.next_cursor);
+          }}
+          onLimitChange={(nextLimit) => setLimit(nextLimit)}
+        />
       </div>
 
       {selectedRow ? (

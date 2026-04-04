@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { adminGetJson, type AdminApiContext } from '../api/adminClient';
 import { overrides } from '../data/mockData';
+import type { CursorMeta, CursorPaged } from '../types/pagination';
 import { queryKeys } from './queryKeys';
 import { useAdminApi } from './useAdminApi';
 
@@ -18,6 +19,7 @@ export type OverrideRow = {
 
 type OverrideState = {
   data: OverrideRow[];
+  meta: CursorMeta;
   loading: boolean;
   error?: string;
   isMock: boolean;
@@ -44,6 +46,7 @@ const fallbackRows: OverrideRow[] = overrides.map((item) => ({
   expiresAt: undefined,
   expires: item.expires,
 }));
+const fallbackMeta: CursorMeta = { limit: 50, has_more: false };
 
 const mapOverride = (record: ApiOverrideRecord): OverrideRow => ({
   id: record.id,
@@ -59,19 +62,23 @@ const mapOverride = (record: ApiOverrideRecord): OverrideRow => ({
     : 'never',
 });
 
-export const useOverridesData = () => {
+export const useOverridesData = (cursor?: string, limit = 50) => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
   const enabled = Boolean(baseUrl && canCallApi);
 
   const query = useQuery({
-    queryKey: queryKeys.overrides(baseUrl),
+    queryKey: queryKeys.overrides(baseUrl, cursor ?? '', limit),
     enabled,
     queryFn: async () => {
-      const body = await adminGetJson<ApiOverrideRecord[]>(
+      const body = await adminGetJson<CursorPaged<ApiOverrideRecord>>(
         { baseUrl, canCallApi, headers } as AdminApiContext,
         '/api/v1/overrides',
+        { limit, cursor },
       );
-      return body.map(mapOverride);
+      return {
+        data: body.data.map(mapOverride),
+        meta: body.meta,
+      };
     },
   });
 
@@ -80,16 +87,18 @@ export const useOverridesData = () => {
   };
 
   const state: OverrideState = !enabled
-    ? { data: fallbackRows, loading: false, isMock: true }
+    ? { data: fallbackRows, meta: fallbackMeta, loading: false, isMock: true }
     : query.isError
       ? {
           data: fallbackRows,
+          meta: fallbackMeta,
           loading: false,
           error: query.error instanceof Error ? query.error.message : 'Failed to fetch overrides',
           isMock: true,
         }
       : {
-          data: query.data ?? fallbackRows,
+          data: query.data?.data ?? fallbackRows,
+          meta: query.data?.meta ?? fallbackMeta,
           loading: query.isLoading,
           isMock: false,
         };

@@ -539,6 +539,24 @@ tr:hover td {
   gap: 1.5rem;
 }
 
+.pagination-controls {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.pagination-select {
+  min-width: 90px;
+}
+
+.pagination-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .card {
   background: rgba(12, 18, 32, 0.7);
   border-radius: 1.25rem;

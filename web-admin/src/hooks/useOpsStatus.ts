@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { adminGetJson, type AdminApiContext } from '../api/adminClient';
+import type { CursorPaged } from '../types/pagination';
 import { useAdminApi } from './useAdminApi';
 
 type PendingRecord = {
@@ -45,7 +46,7 @@ export const useOpsStatus = () => {
       setLoading(true);
       setError(undefined);
       try {
-        const pending = await adminGetJson<PendingRecord[]>(
+        const pending = await adminGetJson<CursorPaged<PendingRecord>>(
           { baseUrl, canCallApi, headers } as AdminApiContext,
           '/api/v1/classifications/pending',
           { limit: 500 },
@@ -71,7 +72,7 @@ export const useOpsStatus = () => {
 
         if (!cancelled) {
           setData({
-            pendingCount: pending.length,
+            pendingCount: pending.data.length,
             llmProviderNames: providers.map((item) => item.name),
             source,
           });

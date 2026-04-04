@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
+import { PaginationControls } from '../components/PaginationControls';
 import { useOverrideActions } from '../hooks/useOverrideActions';
 import { useOverridesData } from '../hooks/useOverridesData';
 
@@ -6,7 +7,11 @@ const ACTION_OPTIONS = ['allow', 'block'];
 const STATUS_OPTIONS = ['active', 'inactive', 'expired', 'revoked'];
 
 export const OverridesPage = () => {
-  const { data, loading, error, isMock, refresh, canCallApi } = useOverridesData();
+  const [limit, setLimit] = useState(50);
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const { data, meta, loading, error, isMock, refresh, canCallApi } = useOverridesData(cursor, limit);
+  const paginationMeta = meta ?? { has_more: false, next_cursor: undefined };
   const { createOverride, updateOverride, deleteOverride, busy, error: actionError } = useOverrideActions();
 
   const [editingId, setEditingId] = useState<string | undefined>();
@@ -197,6 +202,31 @@ export const OverridesPage = () => {
       </form>
 
       <div className="glass-panel">
+        <PaginationControls
+          limit={limit}
+          loading={loading}
+          hasMore={Boolean(paginationMeta.next_cursor) && paginationMeta.has_more}
+          canGoBack={cursorStack.length > 0}
+          onPrev={() => {
+            setCursorStack((prev) => {
+              if (prev.length === 0) return prev;
+              const next = [...prev];
+              const previousCursor = next.pop();
+              setCursor(previousCursor || undefined);
+              return next;
+            });
+          }}
+          onNext={() => {
+            if (!paginationMeta.next_cursor) return;
+            setCursorStack((prev) => [...prev, cursor ?? '']);
+            setCursor(paginationMeta.next_cursor);
+          }}
+          onLimitChange={(nextLimit) => {
+            setLimit(nextLimit);
+            setCursor(undefined);
+            setCursorStack([]);
+          }}
+        />
         {loading ? (
           <div>
             {Array.from({ length: 4 }).map((_, idx) => (

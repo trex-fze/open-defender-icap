@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
+import { PaginationControls } from '../components/PaginationControls';
 import { PendingClassification, usePendingClassifications } from '../hooks/usePendingClassifications';
 import { usePendingActions } from '../hooks/usePendingActions';
 import { useTaxonomyData } from '../hooks/useTaxonomyData';
 
 export const PendingClassificationsPage = () => {
-  const { data, loading, error, isMock, refresh, canCallApi } = usePendingClassifications();
+  const [limit, setLimit] = useState(50);
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const { data, meta, loading, error, isMock, refresh, canCallApi } = usePendingClassifications(undefined, cursor, limit);
+  const paginationMeta = meta ?? { has_more: false, next_cursor: undefined };
   const {
     data: taxonomy,
     loading: taxonomyLoading,
@@ -39,6 +44,11 @@ export const PendingClassificationsPage = () => {
     !isMock &&
     !isTaxonomyMock &&
     !taxonomyLoading;
+
+  useEffect(() => {
+    setCursor(undefined);
+    setCursorStack([]);
+  }, [limit]);
 
   useEffect(() => {
     if (!selectedRecord) {
@@ -189,6 +199,27 @@ export const PendingClassificationsPage = () => {
       ) : null}
 
       <div className="glass-panel">
+        <PaginationControls
+          limit={limit}
+          loading={loading}
+          hasMore={Boolean(paginationMeta.next_cursor) && paginationMeta.has_more}
+          canGoBack={cursorStack.length > 0}
+          onPrev={() => {
+            setCursorStack((prev) => {
+              if (prev.length === 0) return prev;
+              const next = [...prev];
+              const previousCursor = next.pop();
+              setCursor(previousCursor || undefined);
+              return next;
+            });
+          }}
+          onNext={() => {
+            if (!paginationMeta.next_cursor) return;
+            setCursorStack((prev) => [...prev, cursor ?? '']);
+            setCursor(paginationMeta.next_cursor);
+          }}
+          onLimitChange={setLimit}
+        />
         {loading ? (
           <div>
             {Array.from({ length: 5 }).map((_, idx) => (

@@ -21,7 +21,7 @@ use auth::{
     ROLE_OVERRIDES_DELETE, ROLE_OVERRIDES_VIEW, ROLE_OVERRIDES_WRITE,
 };
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, HeaderValue, Method, Request, StatusCode},
     middleware,
     response::Response,
@@ -44,6 +44,7 @@ use uuid::Uuid;
 use ::taxonomy::{CanonicalTaxonomy, TaxonomyStore};
 use cache::CacheInvalidator;
 use metrics::ReviewMetrics;
+use pagination::{cursor_limit, decode_cursor, encode_cursor, CursorPaged};
 use reporting_es::{ElasticReportingClient, ReportingConfig};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -707,12 +708,30 @@ async fn metrics_endpoint(
 async fn list_overrides(
     Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
-) -> Result<Json<Vec<OverrideRecord>>, StatusCode> {
+    Query(query): Query<OverrideListQuery>,
+) -> Result<Json<CursorPaged<OverrideRecord>>, StatusCode> {
     require_roles(&user, ROLE_OVERRIDES_VIEW)?;
+
+    let limit = cursor_limit(query.limit);
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(decode_cursor::<OverrideCursor>)
+        .transpose()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let cursor_created_at = cursor.as_ref().map(|c| c.created_at);
+    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+
     let rows = sqlx::query(
         r#"SELECT id, scope_type, scope_value, action, reason, created_by, expires_at, status, created_at, updated_at
-        FROM overrides ORDER BY created_at DESC LIMIT 200"#,
+        FROM overrides
+        WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2))
+        ORDER BY created_at DESC, id DESC
+        LIMIT $3"#,
     )
+    .bind(cursor_created_at)
+    .bind(cursor_id)
+    .bind((limit + 1) as i64)
     .fetch_all(&state.pool)
     .await
     .map_err(|err| {
@@ -728,7 +747,23 @@ async fn list_overrides(
         })?);
     }
 
-    Ok(Json(overrides))
+    let has_more = overrides.len() > limit as usize;
+    if has_more {
+        overrides.truncate(limit as usize);
+    }
+    let next_cursor = if has_more {
+        overrides.last().and_then(|row| {
+            encode_cursor(&OverrideCursor {
+                created_at: row.created_at,
+                id: row.id,
+            })
+            .ok()
+        })
+    } else {
+        None
+    };
+
+    Ok(Json(CursorPaged::new(overrides, limit, has_more, next_cursor)))
 }
 
 async fn create_override(
@@ -983,6 +1018,18 @@ struct OverrideUpsertRequest {
     created_by: Option<String>,
     expires_at: Option<DateTime<Utc>>,
     status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OverrideListQuery {
+    limit: Option<u32>,
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct OverrideCursor {
+    created_at: DateTime<Utc>,
+    id: Uuid,
 }
 
 #[derive(Debug, Serialize)]

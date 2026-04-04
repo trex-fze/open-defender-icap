@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { adminGetJson, type AdminApiContext } from '../api/adminClient';
+import type { CursorMeta, CursorPaged } from '../types/pagination';
 import { queryKeys } from './queryKeys';
 import { useAdminApi } from './useAdminApi';
 
@@ -19,23 +20,34 @@ export type ClassificationRecord = {
   updated_at: string;
 };
 
-export const useClassificationsData = (state: ClassificationStateFilter, q: string) => {
+const emptyMeta: CursorMeta = {
+  limit: 50,
+  has_more: false,
+};
+
+export const useClassificationsData = (
+  state: ClassificationStateFilter,
+  q: string,
+  cursor: string | undefined,
+  limit: number,
+) => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
   const enabled = Boolean(baseUrl && canCallApi);
 
   const query = useQuery({
-    queryKey: queryKeys.classifications(baseUrl, state, q),
+    queryKey: queryKeys.classifications(baseUrl, state, q, cursor ?? '', limit),
     enabled,
     queryFn: async () =>
-      adminGetJson<ClassificationRecord[]>(
+      adminGetJson<CursorPaged<ClassificationRecord>>(
         { baseUrl, canCallApi, headers } as AdminApiContext,
         '/api/v1/classifications',
-        { state, q, limit: 250 },
+        { state, q, limit, cursor },
       ),
   });
 
   return {
-    data: query.data ?? [],
+    data: query.data?.data ?? [],
+    meta: query.data?.meta ?? emptyMeta,
     loading: query.isLoading,
     error: query.error instanceof Error ? query.error.message : undefined,
     refresh: query.refetch,

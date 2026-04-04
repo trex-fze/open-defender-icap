@@ -1,5 +1,8 @@
 use crate::auth::{require_roles, PrincipalType, UserContext, ROLE_IAM_ADMIN, ROLE_IAM_VIEW};
-use crate::{ApiError, AppState};
+use crate::{
+    pagination::{cursor_limit, decode_cursor, encode_cursor, CursorPaged},
+    ApiError, AppState,
+};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
@@ -1139,13 +1142,33 @@ pub struct GroupDetails {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AuditQuery {
-    #[serde(default = "default_audit_limit")]
-    pub limit: i64,
+pub struct ListQuery {
+    pub limit: Option<u32>,
+    pub cursor: Option<String>,
 }
 
-fn default_audit_limit() -> i64 {
-    100
+#[derive(Debug, Deserialize, Serialize)]
+struct UserCursor {
+    created_at: sqlx::types::chrono::DateTime<Utc>,
+    id: Uuid,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct GroupCursor {
+    name: String,
+    id: Uuid,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ServiceAccountCursor {
+    name: String,
+    id: Uuid,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct AuditCursor {
+    created_at: sqlx::types::chrono::DateTime<Utc>,
+    id: Uuid,
 }
 
 #[derive(Clone, Debug)]
@@ -1206,10 +1229,49 @@ pub struct WhoAmIResponse {
 pub async fn list_users_route(
     State(state): State<AppState>,
     Extension(user): Extension<UserContext>,
-) -> Result<Json<Vec<UserDetails>>, (StatusCode, Json<ApiError>)> {
+    Query(query): Query<ListQuery>,
+) -> Result<Json<CursorPaged<UserDetails>>, (StatusCode, Json<ApiError>)> {
     require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+
+    let limit = cursor_limit(query.limit);
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(decode_cursor::<UserCursor>)
+        .transpose()
+        .map_err(|message| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new("INVALID_CURSOR", message)),
+            )
+        })?;
+
+    let cursor_created_at = cursor.as_ref().map(|c| c.created_at);
+    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+
     let iam = state.iam();
-    let users = iam.list_users().await.map_err(map_iam_error)?;
+    let users = sqlx::query_as::<_, IamUserRecord>(
+        r#"
+        SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
+        FROM iam_users
+        WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2))
+        ORDER BY created_at DESC, id DESC
+        LIMIT $3
+    "#,
+    )
+    .bind(cursor_created_at)
+    .bind(cursor_id)
+    .bind((limit + 1) as i64)
+    .fetch_all(iam.pool())
+    .await
+    .map_err(|err| map_iam_error(map_db_error(err)))?;
+
+    let has_more = users.len() > limit as usize;
+    let mut users = users;
+    if has_more {
+        users.truncate(limit as usize);
+    }
+
     let mut results = Vec::with_capacity(users.len());
     for record in users {
         let roles = iam.user_roles(record.id).await.map_err(map_iam_error)?;
@@ -1232,7 +1294,20 @@ pub async fn list_users_route(
             groups,
         });
     }
-    Ok(Json(results))
+
+    let next_cursor = if has_more {
+        results.last().and_then(|last| {
+            encode_cursor(&UserCursor {
+                created_at: last.user.created_at,
+                id: last.user.id,
+            })
+            .ok()
+        })
+    } else {
+        None
+    };
+
+    Ok(Json(CursorPaged::new(results, limit, has_more, next_cursor)))
 }
 
 pub async fn create_user_route(
@@ -1356,10 +1431,48 @@ pub async fn delete_user_route(
 pub async fn list_groups_route(
     State(state): State<AppState>,
     Extension(user): Extension<UserContext>,
-) -> Result<Json<Vec<GroupDetails>>, (StatusCode, Json<ApiError>)> {
+    Query(query): Query<ListQuery>,
+) -> Result<Json<CursorPaged<GroupDetails>>, (StatusCode, Json<ApiError>)> {
     require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let limit = cursor_limit(query.limit);
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(decode_cursor::<GroupCursor>)
+        .transpose()
+        .map_err(|message| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new("INVALID_CURSOR", message)),
+            )
+        })?;
+    let cursor_name = cursor
+        .as_ref()
+        .map(|c| c.name.clone())
+        .unwrap_or_default();
+    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+
     let iam = state.iam();
-    let groups = iam.list_groups().await.map_err(map_iam_error)?;
+    let groups = sqlx::query_as::<_, IamGroupRecord>(
+        r#"
+        SELECT id, name, description, status, created_at, updated_at
+        FROM iam_groups
+        WHERE ($1::text = '' OR (name, id) > ($1, $2))
+        ORDER BY name ASC, id ASC
+        LIMIT $3
+    "#,
+    )
+    .bind(&cursor_name)
+    .bind(cursor_id)
+    .bind((limit + 1) as i64)
+    .fetch_all(iam.pool())
+    .await
+    .map_err(|err| map_iam_error(map_db_error(err)))?;
+    let has_more = groups.len() > limit as usize;
+    let mut groups = groups;
+    if has_more {
+        groups.truncate(limit as usize);
+    }
     let mut results = Vec::with_capacity(groups.len());
     for group in groups {
         let members = iam
@@ -1373,7 +1486,20 @@ pub async fn list_groups_route(
             roles,
         });
     }
-    Ok(Json(results))
+
+    let next_cursor = if has_more {
+        results.last().and_then(|last| {
+            encode_cursor(&GroupCursor {
+                name: last.group.name.clone(),
+                id: last.group.id,
+            })
+            .ok()
+        })
+    } else {
+        None
+    };
+
+    Ok(Json(CursorPaged::new(results, limit, has_more, next_cursor)))
 }
 
 pub async fn create_group_route(
@@ -1642,10 +1768,48 @@ pub async fn list_roles_route(
 pub async fn list_service_accounts_route(
     State(state): State<AppState>,
     Extension(user): Extension<UserContext>,
-) -> Result<Json<Vec<ServiceAccountDetails>>, (StatusCode, Json<ApiError>)> {
+    Query(query): Query<ListQuery>,
+) -> Result<Json<CursorPaged<ServiceAccountDetails>>, (StatusCode, Json<ApiError>)> {
     require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let limit = cursor_limit(query.limit);
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(decode_cursor::<ServiceAccountCursor>)
+        .transpose()
+        .map_err(|message| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new("INVALID_CURSOR", message)),
+            )
+        })?;
+    let cursor_name = cursor
+        .as_ref()
+        .map(|c| c.name.clone())
+        .unwrap_or_default();
+    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+
     let iam = state.iam();
-    let accounts = iam.list_service_accounts().await.map_err(map_iam_error)?;
+    let accounts = sqlx::query_as::<_, ServiceAccountRecord>(
+        r#"
+        SELECT id, name, description, status, token_hint, created_at, last_rotated_at
+        FROM iam_service_accounts
+        WHERE ($1::text = '' OR (name, id) > ($1, $2))
+        ORDER BY name ASC, id ASC
+        LIMIT $3
+    "#,
+    )
+    .bind(&cursor_name)
+    .bind(cursor_id)
+    .bind((limit + 1) as i64)
+    .fetch_all(iam.pool())
+    .await
+    .map_err(|err| map_iam_error(map_db_error(err)))?;
+    let has_more = accounts.len() > limit as usize;
+    let mut accounts = accounts;
+    if has_more {
+        accounts.truncate(limit as usize);
+    }
     let mut results = Vec::with_capacity(accounts.len());
     for account in accounts {
         let roles = iam
@@ -1654,7 +1818,20 @@ pub async fn list_service_accounts_route(
             .map_err(map_iam_error)?;
         results.push(ServiceAccountDetails { account, roles });
     }
-    Ok(Json(results))
+
+    let next_cursor = if has_more {
+        results.last().and_then(|last| {
+            encode_cursor(&ServiceAccountCursor {
+                name: last.account.name.clone(),
+                id: last.account.id,
+            })
+            .ok()
+        })
+    } else {
+        None
+    };
+
+    Ok(Json(CursorPaged::new(results, limit, has_more, next_cursor)))
 }
 
 pub async fn get_service_account_route(
@@ -1769,16 +1946,59 @@ pub async fn whoami_route(
 pub async fn list_audit_route(
     State(state): State<AppState>,
     Extension(user): Extension<UserContext>,
-    Query(query): Query<AuditQuery>,
-) -> Result<Json<Vec<IamAuditRecord>>, (StatusCode, Json<ApiError>)> {
+    Query(query): Query<ListQuery>,
+) -> Result<Json<CursorPaged<IamAuditRecord>>, (StatusCode, Json<ApiError>)> {
     require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
-    let limit = query.limit.clamp(1, 500);
-    let events = state
-        .iam()
-        .list_iam_audit(limit)
-        .await
-        .map_err(map_iam_error)?;
-    Ok(Json(events))
+    let limit = cursor_limit(query.limit);
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(decode_cursor::<AuditCursor>)
+        .transpose()
+        .map_err(|message| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new("INVALID_CURSOR", message)),
+            )
+        })?;
+    let cursor_created_at = cursor.as_ref().map(|c| c.created_at);
+    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+
+    let events = sqlx::query_as::<_, IamAuditRecord>(
+        r#"
+        SELECT id, actor, action, target_type, target_id, payload, created_at
+        FROM iam_audit_events
+        WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2))
+        ORDER BY created_at DESC, id DESC
+        LIMIT $3
+    "#,
+    )
+    .bind(cursor_created_at)
+    .bind(cursor_id)
+    .bind((limit + 1) as i64)
+    .fetch_all(state.iam().pool())
+    .await
+    .map_err(|err| map_iam_error(map_db_error(err)))?;
+
+    let has_more = events.len() > limit as usize;
+    let mut events = events;
+    if has_more {
+        events.truncate(limit as usize);
+    }
+
+    let next_cursor = if has_more {
+        events.last().and_then(|last| {
+            encode_cursor(&AuditCursor {
+                created_at: last.created_at,
+                id: last.id,
+            })
+            .ok()
+        })
+    } else {
+        None
+    };
+
+    Ok(Json(CursorPaged::new(events, limit, has_more, next_cursor)))
 }
 
 #[derive(Debug, Deserialize)]

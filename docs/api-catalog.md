@@ -29,13 +29,13 @@ This reference lists every HTTP endpoint exposed by the services in this reposit
 
 ## Admin API (`admin-api`)
 
-All routes require `X-Admin-Token` or a JWT with the listed roles. Pagination parameters follow the pattern `?page=<int>&page_size=<int>` unless otherwise stated.
+All routes require `X-Admin-Token` or a JWT with the listed roles. High-volume list endpoints use cursor pagination: `?limit=<int>&cursor=<opaque>` and return `{ data, meta }` where `meta` contains `limit`, `has_more`, and `next_cursor`. Existing policy/reporting list routes continue to use `page`/`page_size`.
 
 ### Overrides
 
 | Method | Path | Description | Roles | Request Schema | Response |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/overrides` | List override records (filters via query: `scope_type`, `status`, `search`). | `policy-viewer`. | — | Paged list of `OverrideRecord`. |
+| `GET` | `/api/v1/overrides` | List override records. | `policy-viewer`. | Cursor pagination query: `limit`, `cursor`. | Cursor-paged list of `OverrideRecord`. |
 | `POST` | `/api/v1/overrides` | Create an override. | `policy-editor`. | `{ scope_type: "domain", scope_value, action: "allow"\|"block", reason?, created_by?, expires_at?, status? }`. | Newly created `OverrideRecord`. |
 | `PUT`/`DELETE` | `/api/v1/overrides/:id` | Update or delete an override. | `policy-editor`. | Same payload as create (for PUT). | Updated `OverrideRecord` or `204 No Content`. |
 
@@ -77,14 +77,14 @@ Override precedence note: policy-engine evaluates active domain overrides before
 | Method | Path | Description | Notes |
 | --- | --- | --- | --- |
 | `GET`/`DELETE` | `/api/v1/cache-entries/:cache_key` | Inspect or evict cache entries (ICAP adaptor cache). | Use normalized key (e.g., `domain:example.com`). |
-| `GET` | `/api/v1/cli-logs` | Retrieve CLI audit log entries. | Query: `operator_id`, `limit` (default 50). |
+| `GET` | `/api/v1/cli-logs` | Retrieve CLI audit log entries. | Cursor pagination; query supports `operator_id`, `limit`, `cursor`; response is `{ data, meta }`. |
 | `GET` | `/api/v1/page-contents/:normalized_key` | Fetch latest Crawl4AI homepage excerpt for operator diagnostics. | Query: `version`, `max_excerpt`. Response includes `excerpt_format` (currently `markdown`) plus hash/ttl/language/fetch metadata. |
 | `GET` | `/api/v1/page-contents/:normalized_key/history` | List prior crawl versions. | Query: `limit` (default 5). |
-| `GET` | `/api/v1/classifications/pending` | List sites blocked pending content-aware classification. | `policy-viewer`; query `status`, `limit`; returns pending records (`normalized_key`, `status`, `base_url`, timestamps). Rows can auto-exit pending after terminal fallback (`unknown-unclassified/insufficient-evidence`) when repeated fetch/output failures occur. |
+| `GET` | `/api/v1/classifications/pending` | List sites blocked pending content-aware classification. | `policy-viewer`; cursor pagination with optional `status`, `limit`, `cursor`; returns pending records (`normalized_key`, `status`, `base_url`, timestamps). Rows can auto-exit pending after terminal fallback (`unknown-unclassified/insufficient-evidence`) when repeated fetch/output failures occur. |
 | `POST` | `/api/v1/classifications/:normalized_key/pending` | Upsert a pending row for a key (used by ICAP for immediate queue visibility). | `policy-editor` (service token); body `{ status?, base_url? }`; returns `202 Accepted`. In domain-first mode subdomain keys are auto-promoted to canonical `domain:<registered_domain>`. |
 | `POST` | `/api/v1/classifications/:normalized_key/manual-classify` | Manually classify a pending site with taxonomy category/subcategory only. | `policy-editor`; body `{ primary_category, subcategory, reason? }`; persists policy-computed action/risk/confidence and invalidates caches. In domain-first mode subdomain keys are auto-promoted to canonical `domain:<registered_domain>`. |
 | `POST` | `/api/v1/classifications/:normalized_key/unblock` | Legacy/manual endpoint that accepts explicit action/risk/confidence payloads. | `policy-editor`; body `{ action, primary_category, subcategory, risk_level, confidence?, reason? }`; persists and invalidates caches. |
-| `GET` | `/api/v1/classifications` | List classified and/or unclassified keys for management UI. | `policy-viewer`; query `state=all|classified|unclassified`, `q`, `limit`; returns unified state/category/action rows including historical `recommended_action` plus current `effective_action` and `effective_decision_source` for classified rows. `flags` may include terminal fallback provenance (`local_parse_failed`, online verification result, insufficient-evidence terminal reason). |
+| `GET` | `/api/v1/classifications` | List classified and/or unclassified keys for management UI. | `policy-viewer`; cursor pagination with query `state=all|classified|unclassified`, `q`, `limit`, `cursor`; returns unified state/category/action rows including historical `recommended_action` plus current `effective_action` and `effective_decision_source` for classified rows. `flags` may include terminal fallback provenance (`local_parse_failed`, online verification result, insufficient-evidence terminal reason). |
 | `PATCH` | `/api/v1/classifications/:normalized_key` | Update classification taxonomy labels for a key. | `policy-editor`; body `{ primary_category, subcategory, reason? }`; recomputes action via policy engine. |
 | `DELETE` | `/api/v1/classifications/:normalized_key` | Remove classification/pending/page-content state for a key and invalidate cache. | `policy-editor`; returns `204 No Content`. |
 | `GET` | `/health/ready`, `/health/live` | Health probes. | — |
@@ -94,19 +94,19 @@ Override precedence note: policy-engine evaluates active domain overrides before
 
 | Method | Path | Description | Roles |
 | --- | --- | --- | --- |
-| `GET`/`POST` | `/api/v1/iam/users` | List or create IAM users (email + optional OIDC subject). | `iam:manage` (policy-admin). |
+| `GET`/`POST` | `/api/v1/iam/users` | List or create IAM users (email + optional OIDC subject). | `iam:manage` (policy-admin). `GET` is cursor paginated (`limit`, `cursor`) and returns `{ data, meta }`. |
 | `GET`/`PUT`/`DELETE` | `/api/v1/iam/users/:id` | Fetch, update, or disable a user. | `iam:manage` for mutations, `iam:view` for reads. |
 | `POST`/`DELETE` | `/api/v1/iam/users/:id/roles` | Assign or revoke role bindings for a user. | `iam:manage`. |
-| `GET`/`POST` | `/api/v1/iam/groups` | List/create groups (name + description). | `iam:view` / `iam:manage`. |
+| `GET`/`POST` | `/api/v1/iam/groups` | List/create groups (name + description). | `iam:view` / `iam:manage`. `GET` is cursor paginated (`limit`, `cursor`) and returns `{ data, meta }`. |
 | `GET`/`PUT`/`DELETE` | `/api/v1/iam/groups/:id` | Inspect or update a group. | `iam:manage` for writes, `iam:view` for reads. |
 | `POST`/`DELETE` | `/api/v1/iam/groups/:id/members` | Add/remove members from a group. | `iam:manage`. |
 | `POST`/`DELETE` | `/api/v1/iam/groups/:id/roles` | Assign or revoke role bindings for a group. | `iam:manage`. |
 | `GET` | `/api/v1/iam/roles` | List builtin roles and permissions. | `iam:view`. |
-| `GET`/`POST` | `/api/v1/iam/service-accounts` | List or create service accounts (returns hashed token + rotate endpoint). | `iam:view` / `iam:manage`. |
+| `GET`/`POST` | `/api/v1/iam/service-accounts` | List or create service accounts (returns hashed token + rotate endpoint). | `iam:view` / `iam:manage`. `GET` is cursor paginated (`limit`, `cursor`) and returns `{ data, meta }`. |
 | `POST` | `/api/v1/iam/service-accounts/:id/rotate` | Rotate a service-account token (optionally replacing roles). | `iam:manage`. |
 | `DELETE` | `/api/v1/iam/service-accounts/:id` | Disable a service account. | `iam:manage`. |
 | `GET` | `/api/v1/iam/whoami` | Introspect the caller’s effective roles and permissions. | Any authenticated caller. |
-| `GET` | `/api/v1/iam/audit` | Paginated IAM audit log (mutations + metadata). | `iam:view` (policy-admin or auditor). |
+| `GET` | `/api/v1/iam/audit` | Paginated IAM audit log (mutations + metadata). | `iam:view` (policy-admin or auditor). Cursor pagination with `limit` and `cursor`; response is `{ data, meta }`. |
 
 ---
 

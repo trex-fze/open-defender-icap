@@ -6,6 +6,7 @@ import {
   adminPostJson,
   type AdminApiContext,
 } from '../api/adminClient';
+import { PaginationControls } from '../components/PaginationControls';
 import { useAdminApi } from '../hooks/useAdminApi';
 import type {
   IamAuditRecord,
@@ -15,6 +16,7 @@ import type {
   ServiceAccountDetails,
   ServiceAccountWithToken,
 } from '../types/iam';
+import type { CursorMeta, CursorPaged } from '../types/pagination';
 
 const tabs = [
   { path: 'users', label: 'Users' },
@@ -96,6 +98,9 @@ const IamUsersPanel = () => {
   const api = useAdminApi();
   const { roles } = useIamRoles();
   const [users, setUsers] = useState<IamUserDetails[]>([]);
+  const [meta, setMeta] = useState<CursorMeta>({ limit: 50, has_more: false });
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [selectedRole, setSelectedRole] = useState<Record<string, string>>({});
@@ -112,14 +117,19 @@ const IamUsersPanel = () => {
     setLoading(true);
     setError(undefined);
     try {
-      const data = await adminGetJson<IamUserDetails[]>(api as AdminApiContext, '/api/v1/iam/users');
-      setUsers(data);
+      const body = await adminGetJson<CursorPaged<IamUserDetails>>(
+        api as AdminApiContext,
+        '/api/v1/iam/users',
+        { limit: meta.limit, cursor },
+      );
+      setUsers(body.data);
+      setMeta(body.meta);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load users');
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, cursor, meta.limit]);
 
   useEffect(() => {
     loadUsers();
@@ -235,6 +245,31 @@ const IamUsersPanel = () => {
         <button className="cta-button" disabled={!api.canCallApi}>Invite User</button>
       </form>
       {error && <div className="error-banner">{error}</div>}
+      <PaginationControls
+        limit={meta.limit}
+        loading={loading}
+        hasMore={Boolean(meta.next_cursor) && meta.has_more}
+        canGoBack={cursorStack.length > 0}
+        onPrev={() => {
+          setCursorStack((prev) => {
+            if (prev.length === 0) return prev;
+            const next = [...prev];
+            const previousCursor = next.pop();
+            setCursor(previousCursor || undefined);
+            return next;
+          });
+        }}
+        onNext={() => {
+          if (!meta.next_cursor) return;
+          setCursorStack((prev) => [...prev, cursor ?? '']);
+          setCursor(meta.next_cursor);
+        }}
+        onLimitChange={(nextLimit) => {
+          setMeta((prev) => ({ ...prev, limit: nextLimit }));
+          setCursor(undefined);
+          setCursorStack([]);
+        }}
+      />
       <div className="table-wrapper" role="region" tabIndex={0} aria-label="Users table">
         {loading ? (
           <p className="muted">Loading users…</p>
@@ -330,6 +365,9 @@ const IamGroupsPanel = () => {
   const { roles: roleCatalog } = useIamRoles();
   const [groups, setGroups] = useState<IamGroupDetails[]>([]);
   const [directory, setDirectory] = useState<IamUserDetails[]>([]);
+  const [meta, setMeta] = useState<CursorMeta>({ limit: 50, has_more: false });
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [form, setForm] = useState({ name: '', description: '' });
@@ -341,20 +379,29 @@ const IamGroupsPanel = () => {
     setLoading(true);
     setError(undefined);
     try {
-      const data = await adminGetJson<IamGroupDetails[]>(api as AdminApiContext, '/api/v1/iam/groups');
-      setGroups(data);
+      const body = await adminGetJson<CursorPaged<IamGroupDetails>>(
+        api as AdminApiContext,
+        '/api/v1/iam/groups',
+        { limit: meta.limit, cursor },
+      );
+      setGroups(body.data);
+      setMeta(body.meta);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load groups');
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, cursor, meta.limit]);
 
   const loadDirectory = useCallback(async () => {
     if (!api.canCallApi) return;
     try {
-      const data = await adminGetJson<IamUserDetails[]>(api as AdminApiContext, '/api/v1/iam/users');
-      setDirectory(data);
+      const body = await adminGetJson<CursorPaged<IamUserDetails>>(
+        api as AdminApiContext,
+        '/api/v1/iam/users',
+        { limit: 200 },
+      );
+      setDirectory(body.data);
     } catch {
       // no-op
     }
@@ -478,6 +525,31 @@ const IamGroupsPanel = () => {
         <button className="cta-button" disabled={!api.canCallApi}>Create Group</button>
       </form>
       {error && <div className="error-banner">{error}</div>}
+      <PaginationControls
+        limit={meta.limit}
+        loading={loading}
+        hasMore={Boolean(meta.next_cursor) && meta.has_more}
+        canGoBack={cursorStack.length > 0}
+        onPrev={() => {
+          setCursorStack((prev) => {
+            if (prev.length === 0) return prev;
+            const next = [...prev];
+            const previousCursor = next.pop();
+            setCursor(previousCursor || undefined);
+            return next;
+          });
+        }}
+        onNext={() => {
+          if (!meta.next_cursor) return;
+          setCursorStack((prev) => [...prev, cursor ?? '']);
+          setCursor(meta.next_cursor);
+        }}
+        onLimitChange={(nextLimit) => {
+          setMeta((prev) => ({ ...prev, limit: nextLimit }));
+          setCursor(undefined);
+          setCursorStack([]);
+        }}
+      />
       <div className="table-wrapper" role="region" tabIndex={0} aria-label="Groups table">
         {loading ? (
           <p className="muted">Loading groups…</p>
@@ -646,6 +718,9 @@ const IamServiceAccountsPanel = () => {
   const api = useAdminApi();
   const { roles } = useIamRoles();
   const [accounts, setAccounts] = useState<ServiceAccountDetails[]>([]);
+  const [meta, setMeta] = useState<CursorMeta>({ limit: 50, has_more: false });
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [lastToken, setLastToken] = useState<ServiceAccountWithToken>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
@@ -656,17 +731,19 @@ const IamServiceAccountsPanel = () => {
     setLoading(true);
     setError(undefined);
     try {
-      const data = await adminGetJson<ServiceAccountDetails[]>(
+      const body = await adminGetJson<CursorPaged<ServiceAccountDetails>>(
         api as AdminApiContext,
         '/api/v1/iam/service-accounts',
+        { limit: meta.limit, cursor },
       );
-      setAccounts(data);
+      setAccounts(body.data);
+      setMeta(body.meta);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load service accounts');
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, cursor, meta.limit]);
 
   useEffect(() => {
     loadAccounts();
@@ -783,6 +860,31 @@ const IamServiceAccountsPanel = () => {
         </div>
       )}
       {error && <div className="error-banner">{error}</div>}
+      <PaginationControls
+        limit={meta.limit}
+        loading={loading}
+        hasMore={Boolean(meta.next_cursor) && meta.has_more}
+        canGoBack={cursorStack.length > 0}
+        onPrev={() => {
+          setCursorStack((prev) => {
+            if (prev.length === 0) return prev;
+            const next = [...prev];
+            const previousCursor = next.pop();
+            setCursor(previousCursor || undefined);
+            return next;
+          });
+        }}
+        onNext={() => {
+          if (!meta.next_cursor) return;
+          setCursorStack((prev) => [...prev, cursor ?? '']);
+          setCursor(meta.next_cursor);
+        }}
+        onLimitChange={(nextLimit) => {
+          setMeta((prev) => ({ ...prev, limit: nextLimit }));
+          setCursor(undefined);
+          setCursorStack([]);
+        }}
+      />
       <div className="table-wrapper" role="region" tabIndex={0} aria-label="Service accounts table">
         {loading ? (
           <p className="muted">Loading service accounts…</p>
@@ -842,6 +944,9 @@ const IamServiceAccountsPanel = () => {
 const IamAuditPanel = () => {
   const api = useAdminApi();
   const [events, setEvents] = useState<IamAuditRecord[]>([]);
+  const [meta, setMeta] = useState<CursorMeta>({ limit: 100, has_more: false });
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -850,18 +955,19 @@ const IamAuditPanel = () => {
     setLoading(true);
     setError(undefined);
     try {
-      const data = await adminGetJson<IamAuditRecord[]>(
+      const body = await adminGetJson<CursorPaged<IamAuditRecord>>(
         api as AdminApiContext,
         '/api/v1/iam/audit',
-        { limit: 200 },
+        { limit: meta.limit, cursor },
       );
-      setEvents(data);
+      setEvents(body.data);
+      setMeta(body.meta);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load audit events');
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, cursor, meta.limit]);
 
   useEffect(() => {
     loadEvents();
@@ -879,6 +985,31 @@ const IamAuditPanel = () => {
         </button>
       </header>
       {error && <div className="error-banner">{error}</div>}
+      <PaginationControls
+        limit={meta.limit}
+        loading={loading}
+        hasMore={Boolean(meta.next_cursor) && meta.has_more}
+        canGoBack={cursorStack.length > 0}
+        onPrev={() => {
+          setCursorStack((prev) => {
+            if (prev.length === 0) return prev;
+            const next = [...prev];
+            const previousCursor = next.pop();
+            setCursor(previousCursor || undefined);
+            return next;
+          });
+        }}
+        onNext={() => {
+          if (!meta.next_cursor) return;
+          setCursorStack((prev) => [...prev, cursor ?? '']);
+          setCursor(meta.next_cursor);
+        }}
+        onLimitChange={(nextLimit) => {
+          setMeta((prev) => ({ ...prev, limit: nextLimit }));
+          setCursor(undefined);
+          setCursorStack([]);
+        }}
+      />
       <div className="table-wrapper" role="region" tabIndex={0} aria-label="Audit log table">
         {loading ? (
           <p className="muted">Loading events…</p>

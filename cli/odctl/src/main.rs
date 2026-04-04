@@ -128,7 +128,12 @@ enum PolicyCmd {
 
 #[derive(Subcommand, Debug)]
 enum OverrideCmd {
-    List,
+    List {
+        #[clap(long, default_value_t = 50)]
+        limit: u32,
+        #[clap(long)]
+        cursor: Option<String>,
+    },
     Create {
         #[clap(long, help = "Scope in the form domain:<hostname> (domain-only mode)")]
         scope: String,
@@ -206,6 +211,8 @@ enum ClassificationCmd {
         #[clap(long, default_value_t = 50)]
         limit: u32,
         #[clap(long)]
+        cursor: Option<String>,
+        #[clap(long)]
         status: Option<String>,
     },
     Unblock {
@@ -248,6 +255,8 @@ enum LogsCmd {
         operator: Option<String>,
         #[clap(long, default_value_t = 50)]
         limit: u32,
+        #[clap(long)]
+        cursor: Option<String>,
     },
 }
 
@@ -274,7 +283,12 @@ enum IamCmd {
 
 #[derive(Subcommand, Debug)]
 enum IamUsersCmd {
-    List,
+    List {
+        #[clap(long, default_value_t = 50)]
+        limit: u32,
+        #[clap(long)]
+        cursor: Option<String>,
+    },
     Create {
         #[clap(long)]
         email: String,
@@ -300,7 +314,12 @@ enum IamUsersCmd {
 
 #[derive(Subcommand, Debug)]
 enum IamGroupsCmd {
-    List,
+    List {
+        #[clap(long, default_value_t = 50)]
+        limit: u32,
+        #[clap(long)]
+        cursor: Option<String>,
+    },
     Create {
         #[clap(long)]
         name: String,
@@ -337,7 +356,12 @@ enum IamRolesCmd {
 
 #[derive(Subcommand, Debug)]
 enum IamServiceAccountCmd {
-    List,
+    List {
+        #[clap(long, default_value_t = 50)]
+        limit: u32,
+        #[clap(long)]
+        cursor: Option<String>,
+    },
     Create {
         #[clap(long)]
         name: String,
@@ -847,12 +871,22 @@ async fn handle_policy(cmd: &PolicyCmd, client: &ApiClient, json: bool) -> Resul
 
 async fn handle_override(cmd: &OverrideCmd, client: &ApiClient, json: bool) -> Result<()> {
     match cmd {
-        OverrideCmd::List => {
-            let response: Vec<OverrideRecord> = client.get("/api/v1/overrides", &[]).await?;
+        OverrideCmd::List { limit, cursor } => {
+            let mut params = vec![("limit".to_string(), limit.to_string())];
+            if let Some(value) = cursor {
+                params.push(("cursor".to_string(), value.clone()));
+            }
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let response: CursorPaged<OverrideRecord> =
+                client.get("/api/v1/overrides", &refs).await?;
             if json {
                 print_json(&response)?;
             } else {
                 let rows = response
+                    .data
                     .into_iter()
                     .map(|item| {
                         vec![
@@ -865,6 +899,7 @@ async fn handle_override(cmd: &OverrideCmd, client: &ApiClient, json: bool) -> R
                     })
                     .collect();
                 print_table(&["ID", "Scope", "Action", "Status", "Expires"], rows);
+                print_next_cursor(response.meta.next_cursor.as_deref());
             }
         }
         OverrideCmd::Create {
@@ -1061,23 +1096,31 @@ async fn handle_classification(
     json: bool,
 ) -> Result<()> {
     match cmd {
-        ClassificationCmd::Pending { limit, status } => {
+        ClassificationCmd::Pending {
+            limit,
+            cursor,
+            status,
+        } => {
             let mut params = vec![("limit".to_string(), limit.to_string())];
             if let Some(s) = status {
                 params.push(("status".to_string(), s.clone()));
+            }
+            if let Some(value) = cursor {
+                params.push(("cursor".to_string(), value.clone()));
             }
             let refs: Vec<(&str, &str)> = params
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect();
-            let records: Vec<PendingClassificationRecord> =
+            let records: CursorPaged<PendingClassificationRecord> =
                 client.get("/api/v1/classifications/pending", &refs).await?;
             if json {
                 print_json(&records)?;
-            } else if records.is_empty() {
+            } else if records.data.is_empty() {
                 println!("No pending classifications");
             } else {
                 let rows: Vec<Vec<String>> = records
+                    .data
                     .iter()
                     .map(|row| {
                         vec![
@@ -1089,6 +1132,7 @@ async fn handle_classification(
                     })
                     .collect();
                 print_table(&["Key", "Status", "Base URL", "Updated"], rows);
+                print_next_cursor(records.meta.next_cursor.as_deref());
             }
         }
         ClassificationCmd::Unblock {
@@ -1176,20 +1220,29 @@ async fn handle_report(cmd: &ReportCmd, client: &ApiClient, json: bool) -> Resul
 
 async fn handle_logs(cmd: &LogsCmd, client: &ApiClient, json: bool) -> Result<()> {
     match cmd {
-        LogsCmd::Cli { operator, limit } => {
+        LogsCmd::Cli {
+            operator,
+            limit,
+            cursor,
+        } => {
             let mut params = vec![("limit".to_string(), limit.to_string())];
             if let Some(op) = operator {
                 params.push(("operator_id".to_string(), op.clone()));
+            }
+            if let Some(value) = cursor {
+                params.push(("cursor".to_string(), value.clone()));
             }
             let param_refs: Vec<(&str, &str)> = params
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect();
-            let response: Vec<CliLogRecord> = client.get("/api/v1/cli-logs", &param_refs).await?;
+            let response: CursorPaged<CliLogRecord> =
+                client.get("/api/v1/cli-logs", &param_refs).await?;
             if json {
                 print_json(&response)?;
             } else {
                 let rows = response
+                    .data
                     .into_iter()
                     .map(|log| {
                         vec![
@@ -1202,6 +1255,7 @@ async fn handle_logs(cmd: &LogsCmd, client: &ApiClient, json: bool) -> Result<()
                     })
                     .collect();
                 print_table(&["ID", "Operator", "Command", "Result", "Created"], rows);
+                print_next_cursor(response.meta.next_cursor.as_deref());
             }
         }
     }
@@ -1259,14 +1313,23 @@ async fn handle_iam(cmd: &IamCmd, client: &ApiClient, json: bool) -> Result<()> 
 
 async fn handle_iam_users(cmd: &IamUsersCmd, client: &ApiClient, json: bool) -> Result<()> {
     match cmd {
-        IamUsersCmd::List => {
-            let users: Vec<IamUserDetails> = client.get("/api/v1/iam/users", &[]).await?;
+        IamUsersCmd::List { limit, cursor } => {
+            let mut params = vec![("limit".to_string(), limit.to_string())];
+            if let Some(value) = cursor {
+                params.push(("cursor".to_string(), value.clone()));
+            }
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let users: CursorPaged<IamUserDetails> = client.get("/api/v1/iam/users", &refs).await?;
             if json {
                 print_json(&users)?;
-            } else if users.is_empty() {
+            } else if users.data.is_empty() {
                 println!("No users found");
             } else {
                 let rows = users
+                    .data
                     .iter()
                     .map(|user| {
                         vec![
@@ -1278,6 +1341,7 @@ async fn handle_iam_users(cmd: &IamUsersCmd, client: &ApiClient, json: bool) -> 
                     })
                     .collect();
                 print_table(&["ID", "Email", "Status", "Roles"], rows);
+                print_next_cursor(users.meta.next_cursor.as_deref());
             }
         }
         IamUsersCmd::Create {
@@ -1330,14 +1394,24 @@ async fn handle_iam_users(cmd: &IamUsersCmd, client: &ApiClient, json: bool) -> 
 
 async fn handle_iam_groups(cmd: &IamGroupsCmd, client: &ApiClient, json: bool) -> Result<()> {
     match cmd {
-        IamGroupsCmd::List => {
-            let groups: Vec<IamGroupDetails> = client.get("/api/v1/iam/groups", &[]).await?;
+        IamGroupsCmd::List { limit, cursor } => {
+            let mut params = vec![("limit".to_string(), limit.to_string())];
+            if let Some(value) = cursor {
+                params.push(("cursor".to_string(), value.clone()));
+            }
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let groups: CursorPaged<IamGroupDetails> =
+                client.get("/api/v1/iam/groups", &refs).await?;
             if json {
                 print_json(&groups)?;
-            } else if groups.is_empty() {
+            } else if groups.data.is_empty() {
                 println!("No groups found");
             } else {
                 let rows = groups
+                    .data
                     .iter()
                     .map(|group| {
                         vec![
@@ -1349,6 +1423,7 @@ async fn handle_iam_groups(cmd: &IamGroupsCmd, client: &ApiClient, json: bool) -
                     })
                     .collect();
                 print_table(&["ID", "Name", "Members", "Roles"], rows);
+                print_next_cursor(groups.meta.next_cursor.as_deref());
             }
         }
         IamGroupsCmd::Create { name, description } => {
@@ -1443,15 +1518,24 @@ async fn handle_iam_service_accounts(
     json: bool,
 ) -> Result<()> {
     match cmd {
-        IamServiceAccountCmd::List => {
-            let accounts: Vec<ServiceAccountDetails> =
-                client.get("/api/v1/iam/service-accounts", &[]).await?;
+        IamServiceAccountCmd::List { limit, cursor } => {
+            let mut params = vec![("limit".to_string(), limit.to_string())];
+            if let Some(value) = cursor {
+                params.push(("cursor".to_string(), value.clone()));
+            }
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let accounts: CursorPaged<ServiceAccountDetails> =
+                client.get("/api/v1/iam/service-accounts", &refs).await?;
             if json {
                 print_json(&accounts)?;
-            } else if accounts.is_empty() {
+            } else if accounts.data.is_empty() {
                 println!("No service accounts found");
             } else {
                 let rows = accounts
+                    .data
                     .iter()
                     .map(|entry| {
                         vec![
@@ -1468,6 +1552,7 @@ async fn handle_iam_service_accounts(
                     })
                     .collect();
                 print_table(&["ID", "Name", "Status", "Roles", "Token Hint"], rows);
+                print_next_cursor(accounts.meta.next_cursor.as_deref());
             }
         }
         IamServiceAccountCmd::Create {
@@ -1700,6 +1785,12 @@ fn print_table(headers: &[&str], rows: Vec<Vec<String>>) {
     }
 }
 
+fn print_next_cursor(cursor: Option<&str>) {
+    if let Some(value) = cursor {
+        println!("next_cursor: {}", value);
+    }
+}
+
 fn render_page_content(record: &PageContentRecord) {
     println!("Normalized Key : {}", record.normalized_key);
     println!("Fetch Version  : {}", record.fetch_version);
@@ -1853,6 +1944,20 @@ struct PageMeta {
     page_size: u32,
     total: i64,
     has_more: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CursorPaged<T> {
+    data: Vec<T>,
+    meta: CursorMeta,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CursorMeta {
+    limit: u32,
+    has_more: bool,
+    next_cursor: Option<String>,
+    prev_cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

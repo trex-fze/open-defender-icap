@@ -1,5 +1,6 @@
 use crate::{
     auth::{require_roles, UserContext, ROLE_POLICY_EDIT, ROLE_POLICY_VIEW},
+    pagination::{cursor_limit, decode_cursor, encode_cursor, CursorPaged},
     ApiError, AppState,
 };
 use axum::{
@@ -18,7 +19,14 @@ use tracing::{error, warn};
 pub struct ClassificationListQuery {
     pub state: Option<String>,
     pub q: Option<String>,
-    pub limit: Option<i64>,
+    pub limit: Option<u32>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ClassificationCursor {
+    updated_at: DateTime<Utc>,
+    normalized_key: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -71,11 +79,11 @@ pub async fn list(
     Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
     Query(query): Query<ClassificationListQuery>,
-) -> Result<Json<Vec<ClassificationListRecord>>, (StatusCode, Json<ApiError>)> {
+) -> Result<Json<CursorPaged<ClassificationListRecord>>, (StatusCode, Json<ApiError>)> {
     require_roles(&user, ROLE_POLICY_VIEW)
         .map_err(|status| (status, Json(ApiError::forbidden())))?;
 
-    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    let limit = cursor_limit(query.limit);
     let state_filter = query
         .state
         .as_deref()
@@ -84,85 +92,123 @@ pub async fn list(
     let q = query.q.unwrap_or_default();
     let q_like = format!("%{}%", q.trim().to_ascii_lowercase());
 
-    let mut out = Vec::new();
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(decode_cursor::<ClassificationCursor>)
+        .transpose()
+        .map_err(|message| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new("INVALID_CURSOR", message)),
+            )
+        })?;
 
-    if state_filter == "all" || state_filter == "classified" {
-        let rows = sqlx::query(
-            r#"SELECT normalized_key, primary_category, subcategory, risk_level,
-                      recommended_action, confidence::float8 AS confidence, status, updated_at
+    let cursor_updated_at = cursor.as_ref().map(|c| c.updated_at);
+    let cursor_key = cursor
+        .as_ref()
+        .map(|c| c.normalized_key.clone())
+        .unwrap_or_default();
+
+    let rows = sqlx::query(
+        r#"WITH combined AS (
+               SELECT normalized_key,
+                      'classified'::text AS state,
+                      primary_category,
+                      subcategory,
+                      risk_level,
+                      recommended_action,
+                      confidence::float8 AS confidence,
+                      status,
+                      updated_at
                FROM classifications
-               WHERE status = 'active' AND LOWER(normalized_key) LIKE $1
-               ORDER BY updated_at DESC
-               LIMIT $2"#,
-        )
-        .bind(&q_like)
-        .bind(limit)
-        .fetch_all(state.pool())
-        .await
-        .map_err(db_error)?;
-
-        out.extend(rows.into_iter().map(|row| {
-            ClassificationListRecord {
-                normalized_key: row.get("normalized_key"),
-                state: "classified".to_string(),
-                primary_category: row.get("primary_category"),
-                subcategory: row.get("subcategory"),
-                risk_level: row.get("risk_level"),
-                recommended_action: row
-                    .try_get::<Option<String>, _>("recommended_action")
-                    .ok()
-                    .flatten()
-                    .as_deref()
-                    .and_then(parse_policy_action),
-                effective_action: None,
-                effective_decision_source: None,
-                confidence: row
-                    .try_get::<Option<f64>, _>("confidence")
-                    .ok()
-                    .flatten()
-                    .map(|v| v as f32),
-                status: row.get("status"),
-                updated_at: row.get("updated_at"),
-            }
-        }));
-    }
-
-    if state_filter == "all" || state_filter == "unclassified" {
-        let rows = sqlx::query(
-            r#"SELECT cr.normalized_key, cr.status, cr.updated_at
+               WHERE status = 'active'
+                 AND LOWER(normalized_key) LIKE $1
+                 AND ($2 = 'all' OR $2 = 'classified')
+               UNION ALL
+               SELECT cr.normalized_key,
+                      'unclassified'::text AS state,
+                      NULL::text AS primary_category,
+                      NULL::text AS subcategory,
+                      NULL::text AS risk_level,
+                      NULL::text AS recommended_action,
+                      NULL::float8 AS confidence,
+                      cr.status,
+                      cr.updated_at
                FROM classification_requests cr
-               LEFT JOIN classifications c ON c.normalized_key = cr.normalized_key AND c.status = 'active'
-               WHERE c.normalized_key IS NULL AND LOWER(cr.normalized_key) LIKE $1
-               ORDER BY cr.updated_at DESC
-               LIMIT $2"#,
-        )
-        .bind(&q_like)
-        .bind(limit)
-        .fetch_all(state.pool())
-        .await
-        .map_err(db_error)?;
+               LEFT JOIN classifications c
+                 ON c.normalized_key = cr.normalized_key
+                AND c.status = 'active'
+               WHERE c.normalized_key IS NULL
+                 AND LOWER(cr.normalized_key) LIKE $1
+                 AND ($2 = 'all' OR $2 = 'unclassified')
+           )
+           SELECT normalized_key,
+                  state,
+                  primary_category,
+                  subcategory,
+                  risk_level,
+                  recommended_action,
+                  confidence,
+                  status,
+                  updated_at
+           FROM combined
+           WHERE ($3::timestamptz IS NULL OR (updated_at, normalized_key) < ($3, $4))
+           ORDER BY updated_at DESC, normalized_key DESC
+           LIMIT $5"#,
+    )
+    .bind(&q_like)
+    .bind(&state_filter)
+    .bind(cursor_updated_at)
+    .bind(&cursor_key)
+    .bind((limit + 1) as i64)
+    .fetch_all(state.pool())
+    .await
+    .map_err(db_error)?;
 
-        out.extend(rows.into_iter().map(|row| ClassificationListRecord {
+    let mut out: Vec<ClassificationListRecord> = rows
+        .into_iter()
+        .map(|row| ClassificationListRecord {
             normalized_key: row.get("normalized_key"),
-            state: "unclassified".to_string(),
-            primary_category: None,
-            subcategory: None,
-            risk_level: None,
-            recommended_action: None,
+            state: row.get("state"),
+            primary_category: row.get("primary_category"),
+            subcategory: row.get("subcategory"),
+            risk_level: row.get("risk_level"),
+            recommended_action: row
+                .try_get::<Option<String>, _>("recommended_action")
+                .ok()
+                .flatten()
+                .as_deref()
+                .and_then(parse_policy_action),
             effective_action: None,
             effective_decision_source: None,
-            confidence: None,
+            confidence: row
+                .try_get::<Option<f64>, _>("confidence")
+                .ok()
+                .flatten()
+                .map(|v| v as f32),
             status: row.get("status"),
             updated_at: row.get("updated_at"),
-        }));
-    }
+        })
+        .collect();
 
-    out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    if out.len() > limit as usize {
+    let has_more = out.len() > limit as usize;
+    if has_more {
         out.truncate(limit as usize);
     }
     enrich_effective_decisions(&state, &mut out).await;
-    Ok(Json(out))
+    let next_cursor = if has_more {
+        out.last().and_then(|last| {
+            encode_cursor(&ClassificationCursor {
+                updated_at: last.updated_at,
+                normalized_key: last.normalized_key.clone(),
+            })
+            .ok()
+        })
+    } else {
+        None
+    };
+    Ok(Json(CursorPaged::new(out, limit, has_more, next_cursor)))
 }
 
 async fn enrich_effective_decisions(state: &AppState, out: &mut [ClassificationListRecord]) {

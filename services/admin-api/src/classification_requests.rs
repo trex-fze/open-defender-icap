@@ -1,5 +1,6 @@
 use crate::{
     auth::{require_roles, UserContext, ROLE_POLICY_EDIT, ROLE_POLICY_VIEW},
+    pagination::{cursor_limit, decode_cursor, encode_cursor, CursorPaged},
     ApiError, AppState,
 };
 use ::taxonomy::FallbackReason;
@@ -18,7 +19,14 @@ use tracing::{error, warn};
 #[derive(Debug, Deserialize)]
 pub struct PendingQuery {
     pub status: Option<String>,
-    pub limit: Option<i64>,
+    pub limit: Option<u32>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PendingCursor {
+    updated_at: DateTime<Utc>,
+    normalized_key: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -87,32 +95,45 @@ pub async fn list_pending(
     Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
     Query(query): Query<PendingQuery>,
-) -> Result<Json<Vec<PendingClassificationRecord>>, (StatusCode, Json<ApiError>)> {
+) -> Result<Json<CursorPaged<PendingClassificationRecord>>, (StatusCode, Json<ApiError>)> {
     require_roles(&user, ROLE_POLICY_VIEW)
         .map_err(|status| (status, Json(ApiError::forbidden())))?;
-    let limit = query.limit.unwrap_or(50).clamp(1, 500);
-    let mut sql = String::from(
-        "SELECT normalized_key, status, base_url, last_error, requested_at, updated_at \
-         FROM classification_requests",
-    );
-    if query.status.is_some() {
-        sql.push_str(" WHERE status = $1 ORDER BY updated_at DESC LIMIT $2");
-    } else {
-        sql.push_str(" ORDER BY updated_at DESC LIMIT $1");
-    }
+    let limit = cursor_limit(query.limit);
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(decode_cursor::<PendingCursor>)
+        .transpose()
+        .map_err(|message| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new("INVALID_CURSOR", message)),
+            )
+        })?;
 
-    let rows = if let Some(status) = &query.status {
-        sqlx::query(&sql)
-            .bind(status)
-            .bind(limit)
-            .fetch_all(state.pool())
-            .await
-    } else {
-        sqlx::query(&sql).bind(limit).fetch_all(state.pool()).await
-    };
+    let cursor_updated_at = cursor.as_ref().map(|c| c.updated_at);
+    let cursor_key = cursor
+        .as_ref()
+        .map(|c| c.normalized_key.clone())
+        .unwrap_or_default();
 
-    let rows = rows.map_err(db_error)?;
-    let records = rows
+    let rows = sqlx::query(
+        r#"SELECT normalized_key, status, base_url, last_error, requested_at, updated_at
+           FROM classification_requests
+           WHERE ($1::text IS NULL OR status = $1)
+             AND ($2::timestamptz IS NULL OR (updated_at, normalized_key) < ($2, $3))
+           ORDER BY updated_at DESC, normalized_key DESC
+           LIMIT $4"#,
+    )
+    .bind(query.status.as_deref())
+    .bind(cursor_updated_at)
+    .bind(&cursor_key)
+    .bind((limit + 1) as i64)
+    .fetch_all(state.pool())
+    .await
+    .map_err(db_error)?;
+
+    let mut records: Vec<PendingClassificationRecord> = rows
         .into_iter()
         .map(|row| PendingClassificationRecord {
             normalized_key: row.get("normalized_key"),
@@ -123,7 +144,22 @@ pub async fn list_pending(
             updated_at: row.get("updated_at"),
         })
         .collect();
-    Ok(Json(records))
+    let has_more = records.len() > limit as usize;
+    if has_more {
+        records.truncate(limit as usize);
+    }
+    let next_cursor = if has_more {
+        records.last().and_then(|last| {
+            encode_cursor(&PendingCursor {
+                updated_at: last.updated_at,
+                normalized_key: last.normalized_key.clone(),
+            })
+            .ok()
+        })
+    } else {
+        None
+    };
+    Ok(Json(CursorPaged::new(records, limit, has_more, next_cursor)))
 }
 
 pub async fn manual_unblock(
