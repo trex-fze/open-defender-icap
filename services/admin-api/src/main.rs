@@ -524,6 +524,7 @@ async fn main() -> Result<()> {
             get(reporting::list_aggregates),
         )
         .route("/api/v1/reporting/traffic", get(reporting::traffic_summary))
+        .route("/api/v1/reporting/status", get(reporting::reporting_status))
         .route(
             "/api/v1/cache-entries/:cache_key",
             get(cache_entries_api::get_entry).delete(cache_entries_api::delete_entry),

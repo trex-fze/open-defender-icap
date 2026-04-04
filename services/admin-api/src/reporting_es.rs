@@ -121,6 +121,27 @@ impl ElasticReportingClient {
         let size = top_n.clamp(1, 50);
         let body = json!({
             "size": 0,
+            "track_total_hits": true,
+            "runtime_mappings": {
+                "effective_action": {
+                    "type": "keyword",
+                    "script": {
+                        "source": "if (doc.containsKey('recommended_action.keyword') && !doc['recommended_action.keyword'].empty) { emit(doc['recommended_action.keyword'].value); } else if (doc.containsKey('recommended_action_inferred.keyword') && !doc['recommended_action_inferred.keyword'].empty) { emit(doc['recommended_action_inferred.keyword'].value); } else if (doc.containsKey('http.response.status_code') && !doc['http.response.status_code'].empty && doc['http.response.status_code'].value >= 400) { emit('block'); } else { emit('allow'); }"
+                    }
+                },
+                "effective_domain": {
+                    "type": "keyword",
+                    "script": {
+                        "source": "if (doc.containsKey('destination.domain.keyword') && !doc['destination.domain.keyword'].empty) { emit(doc['destination.domain.keyword'].value); } else if (doc.containsKey('url.full.keyword') && !doc['url.full.keyword'].empty) { String u = doc['url.full.keyword'].value; int start = u.indexOf('://'); int from = start >= 0 ? start + 3 : 0; int end = u.indexOf('/', from); String host = end > from ? u.substring(from, end) : u.substring(from); int colon = host.indexOf(':'); if (colon > 0) { host = host.substring(0, colon); } if (host.length() > 0) emit(host); }"
+                    }
+                },
+                "effective_category": {
+                    "type": "keyword",
+                    "script": {
+                        "source": "if (doc.containsKey('category.keyword') && !doc['category.keyword'].empty) { emit(doc['category.keyword'].value); } else { emit('unknown-unclassified'); }"
+                    }
+                }
+            },
             "query": {
                 "range": {
                     "@timestamp": {
@@ -131,7 +152,7 @@ impl ElasticReportingClient {
             },
             "aggs": {
                 "actions": {
-                    "terms": { "field": "recommended_action.keyword", "size": 5 },
+                    "terms": { "field": "effective_action", "size": 5 },
                     "aggs": {
                         "per_interval": {
                             "date_histogram": {
@@ -143,13 +164,13 @@ impl ElasticReportingClient {
                     }
                 },
                 "top_blocked": {
-                    "filter": { "term": { "recommended_action.keyword": "block" } },
+                    "filter": { "term": { "effective_action": "block" } },
                     "aggs": {
-                        "urls": { "terms": { "field": "url.full.keyword", "size": size } }
+                        "urls": { "terms": { "field": "effective_domain", "size": size } }
                     }
                 },
                 "top_categories": {
-                    "terms": { "field": "category.keyword", "size": size }
+                    "terms": { "field": "effective_category", "size": size }
                 }
             }
         });
@@ -173,6 +194,81 @@ impl ElasticReportingClient {
             allow_block_trend,
             top_blocked_domains,
             top_categories,
+        })
+    }
+
+    pub async fn coverage_status(&self, range: Option<&str>) -> Result<ReportingCoverageStatus> {
+        let range = range
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&self.default_range);
+        let body = json!({
+            "size": 0,
+            "track_total_hits": true,
+            "query": {
+                "range": {
+                    "@timestamp": {
+                        "gte": format!("now-{}", range),
+                        "lte": "now"
+                    }
+                }
+            },
+            "aggs": {
+                "has_action": {
+                    "filter": {
+                        "bool": {
+                            "should": [
+                                { "exists": { "field": "recommended_action" } },
+                                { "exists": { "field": "recommended_action_inferred" } }
+                            ],
+                            "minimum_should_match": 1
+                        }
+                    }
+                },
+                "has_category": { "filter": { "exists": { "field": "category" } } },
+                "has_domain": {
+                    "filter": {
+                        "bool": {
+                            "should": [
+                                { "exists": { "field": "destination.domain" } },
+                                { "exists": { "field": "url.full" } }
+                            ],
+                            "minimum_should_match": 1
+                        }
+                    }
+                }
+            }
+        });
+
+        let url = format!("/{}/_search", self.index_pattern);
+        let full_url = format!("{}{}", self.base_url, url);
+        let mut req = self.client.post(&full_url).json(&body);
+        req = self.attach_auth(req);
+        let response = req.send().await?.error_for_status()?;
+        let payload: Value = response.json().await?;
+
+        let total = payload
+            .pointer("/hits/total/value")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let action_docs = payload
+            .pointer("/aggregations/has_action/doc_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let category_docs = payload
+            .pointer("/aggregations/has_category/doc_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let domain_docs = payload
+            .pointer("/aggregations/has_domain/doc_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+
+        Ok(ReportingCoverageStatus {
+            range: range.to_string(),
+            total_docs: total,
+            action_docs,
+            category_docs,
+            domain_docs,
         })
     }
 
@@ -295,6 +391,15 @@ pub struct TrafficReportResponse {
     pub allow_block_trend: Vec<ActionSeries>,
     pub top_blocked_domains: Vec<TopEntry>,
     pub top_categories: Vec<TopEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReportingCoverageStatus {
+    pub range: String,
+    pub total_docs: i64,
+    pub action_docs: i64,
+    pub category_docs: i64,
+    pub domain_docs: i64,
 }
 
 #[derive(Debug, Serialize)]

@@ -25,11 +25,38 @@
             "ip": { "type": "ip" }
           }
         },
+        "destination": {
+          "properties": {
+            "domain": { "type": "keyword" }
+          }
+        },
+        "http": {
+          "properties": {
+            "request": {
+              "properties": {
+                "method": { "type": "keyword" }
+              }
+            },
+            "response": {
+              "properties": {
+                "status_code": { "type": "integer" }
+              }
+            }
+          }
+        },
+        "proxy": {
+          "properties": {
+            "result_code": { "type": "keyword" }
+          }
+        },
         "url": {
           "properties": {
             "full": { "type": "keyword", "ignore_above": 2048 }
           }
         },
+        "normalized_key": { "type": "keyword" },
+        "recommended_action_inferred": { "type": "keyword" },
+        "traffic_class": { "type": "keyword" },
         "user": {
           "properties": {
             "id": { "type": "keyword" }

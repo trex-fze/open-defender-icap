@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useReportsData } from '../hooks/useReportsData';
+import { useReportingStatus } from '../hooks/useReportingStatus';
 import { useTrafficReportData } from '../hooks/useTrafficReportData';
 
 const toCsvValue = (value: string | number) => {
@@ -28,6 +29,7 @@ export const ReportsPage = () => {
 
   const { data, loading, error, isMock } = useReportsData(dimension);
   const traffic = useTrafficReportData(range, topN);
+  const reportingStatus = useReportingStatus(range);
   const [report] = data;
 
   const trendRows = useMemo(() => {
@@ -38,6 +40,12 @@ export const ReportsPage = () => {
       total: series.buckets.reduce((sum, item) => sum + item.doc_count, 0),
     }));
   }, [traffic.data]);
+
+  const hasTrafficData =
+    Boolean(traffic.data) &&
+    ((traffic.data?.allow_block_trend.length ?? 0) > 0 ||
+      (traffic.data?.top_blocked_domains.length ?? 0) > 0 ||
+      (traffic.data?.top_categories.length ?? 0) > 0);
 
   const exportCsv = () => {
     const rows: Array<Array<string | number>> = [
@@ -123,12 +131,43 @@ export const ReportsPage = () => {
         </p>
       ) : null}
 
+      {reportingStatus.data ? (
+        <div className="glass-panel" style={{ marginTop: '1rem' }}>
+          <p className="section-title">Data Quality ({reportingStatus.data.range})</p>
+          <div className="layout-grid">
+            <div className="kpi-card">
+              <p className="section-title">Total docs</p>
+              <h3 style={{ margin: 0 }}>{reportingStatus.data.total_docs.toLocaleString()}</h3>
+            </div>
+            <div className="kpi-card">
+              <p className="section-title">Action coverage</p>
+              <h3 style={{ margin: 0 }}>{reportingStatus.data.action_docs.toLocaleString()}</h3>
+            </div>
+            <div className="kpi-card">
+              <p className="section-title">Category coverage</p>
+              <h3 style={{ margin: 0 }}>{reportingStatus.data.category_docs.toLocaleString()}</h3>
+            </div>
+            <div className="kpi-card">
+              <p className="section-title">Domain coverage</p>
+              <h3 style={{ margin: 0 }}>{reportingStatus.data.domain_docs.toLocaleString()}</h3>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="glass-panel">
-        {loading || !report ? (
+        {loading ? (
           <div>
             {Array.from({ length: 4 }).map((_, idx) => (
               <div key={idx} className="skeleton" style={{ marginBottom: '0.75rem' }}></div>
             ))}
+          </div>
+        ) : !report ? (
+          <div className="card">
+            <p className="section-title">No Aggregate Snapshots Yet</p>
+            <p style={{ margin: 0, color: 'var(--muted)' }}>
+              `reporting_aggregates` has no rows for this dimension. Run reporting backfill/rollup to populate KPI snapshots.
+            </p>
           </div>
         ) : (
           <>
@@ -180,6 +219,15 @@ export const ReportsPage = () => {
             <p style={{ color: 'var(--muted)' }}>
               Range: {traffic.data.range}, Bucket: {traffic.data.bucket_interval}
             </p>
+            {!hasTrafficData ? (
+              <div className="card">
+                <p className="section-title">No Reportable Traffic Fields</p>
+                <p style={{ margin: 0, color: 'var(--muted)' }}>
+                  Traffic exists but report fields are sparse for this range. Ensure ingest enrichment is active and wait for fresh events.
+                </p>
+              </div>
+            ) : null}
+
             <div className="layout-grid" style={{ marginBottom: '1rem' }}>
               {trendRows.map((row) => (
                 <div key={row.action} className="kpi-card">

@@ -16,4 +16,5 @@ export const queryKeys = {
   reportingAggregates: (baseUrl: string, dimension: string) => ['reporting-aggregates', baseUrl, dimension] as const,
   reportingTraffic: (baseUrl: string, range: string, topN: number, bucket?: string) =>
     ['reporting-traffic', baseUrl, range, topN, bucket ?? 'auto'] as const,
+  reportingStatus: (baseUrl: string, range: string) => ['reporting-status', baseUrl, range] as const,
 };

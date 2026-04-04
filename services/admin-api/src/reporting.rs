@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::{
     auth::{require_roles, UserContext, ROLE_REPORTING_VIEW},
     pagination::{PageOptions, Paged},
-    reporting_es::TrafficReportResponse,
+    reporting_es::{ReportingCoverageStatus, TrafficReportResponse},
     AppState,
 };
 
@@ -109,6 +109,23 @@ pub async fn traffic_summary(
             StatusCode::BAD_GATEWAY
         })?;
     Ok(Json(report))
+}
+
+pub async fn reporting_status(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Query(query): Query<TrafficReportQuery>,
+) -> Result<Json<ReportingCoverageStatus>, StatusCode> {
+    require_roles(&user, ROLE_REPORTING_VIEW)?;
+    let client = state
+        .reporting_client()
+        .ok_or(StatusCode::NOT_IMPLEMENTED)?;
+    let range = query.range.as_deref();
+    let status = client.coverage_status(range).await.map_err(|err| {
+        error!(target = "svc-admin", %err, "failed to fetch reporting coverage status");
+        StatusCode::BAD_GATEWAY
+    })?;
+    Ok(Json(status))
 }
 
 fn map_db_error(err: sqlx::Error) -> StatusCode {
