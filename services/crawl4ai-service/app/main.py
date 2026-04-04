@@ -39,6 +39,11 @@ def optional_env(key: str) -> Optional[str]:
     return value or None
 
 
+def log_level_env(key: str, default: str = "INFO") -> int:
+    value = str_env(key, default).upper()
+    return logging._nameToLevel.get(value, logging.INFO)
+
+
 class CrawlRequest(BaseModel):
     url: HttpUrl
     normalized_key: str = Field(..., min_length=1)
@@ -156,7 +161,7 @@ def configure_file_logging() -> None:
         audit_handler.setFormatter(logging.Formatter("%(message)s"))
         audit_logger.addHandler(audit_handler)
     audit_logger.propagate = False
-    logger.setLevel(logging.INFO)
+    logger.setLevel(log_level_env("CRAWL4AI_LOG_LEVEL", "INFO"))
     audit_logger.setLevel(logging.INFO)
 
 
@@ -227,7 +232,7 @@ async def log_browser_profile() -> None:
     ua = to_string_or_none(getattr(cfg, "user_agent", None)) or "unset"
     if len(ua) > 160:
         ua = ua[:160]
-    logger.warning(
+    logger.info(
         "crawl browser profile browser=%s headless=%s viewport=%sx%s locale=%s timezone=%s accept_language=%s ua=%s",
         to_string_or_none(getattr(cfg, "browser_type", None)) or "chromium",
         to_string_or_none(getattr(cfg, "headless", None)) or "true",
@@ -248,7 +253,7 @@ async def health_check():
 
 @app.post("/crawl", response_model=CrawlResponse)
 async def crawl_endpoint(request: CrawlRequest):
-    logger.warning(
+    logger.info(
         "crawl request received normalized_key=%s url=%s",
         request.normalized_key,
         request.url,
@@ -267,6 +272,13 @@ async def crawl_endpoint(request: CrawlRequest):
             redirected_url=(crawl_result.metadata or {}).get("redirected_url"),
             content_type=crawl_result.content_type,
         )
+        logger.info(
+            "crawl request outcome normalized_key=%s url=%s report=success reason=ok status_code=%s duration_ms=%s",
+            request.normalized_key,
+            request.url,
+            crawl_result.status_code,
+            int((perf_counter() - started) * 1000),
+        )
     except HTTPException:
         raise
     except CrawlOutcomeError as exc:
@@ -279,13 +291,15 @@ async def crawl_endpoint(request: CrawlRequest):
             status_code=exc.status_code,
             error_detail=exc.detail,
         )
-        logger.warning(
-            "crawl request outcome normalized_key=%s url=%s report=%s reason=%s status_code=%s",
+        log_fn = logger.warning if exc.report == "failed" else logger.info
+        log_fn(
+            "crawl request outcome normalized_key=%s url=%s report=%s reason=%s status_code=%s duration_ms=%s",
             request.normalized_key,
             request.url,
             exc.report,
             exc.reason,
             exc.status_code,
+            exc.duration_ms,
         )
         raise HTTPException(status_code=502, detail=exc.detail) from exc
     except Exception as exc:  # pragma: no cover - defensive
