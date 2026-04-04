@@ -9,7 +9,7 @@ use axum::{
     Extension, Json,
 };
 use chrono::{DateTime, Utc};
-use common_types::{PolicyAction, PolicyDecision};
+use common_types::{normalizer::canonical_classification_key, PolicyAction, PolicyDecision};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgPool, Row};
@@ -144,6 +144,9 @@ pub async fn manual_unblock(
         ));
     }
 
+    let applied_key =
+        canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+
     let taxonomy_store = state.taxonomy_store();
     let sub_input = if payload.subcategory.trim().is_empty() {
         None
@@ -169,7 +172,7 @@ pub async fn manual_unblock(
 
     let record = persist_manual_classification(
         state.pool(),
-        &normalized_key,
+        &applied_key,
         &payload,
         &user.actor,
         &validated.category.id,
@@ -183,14 +186,17 @@ pub async fn manual_unblock(
     .map_err(db_error)?;
 
     if let Err(err) = sqlx::query("DELETE FROM classification_requests WHERE normalized_key = $1")
-        .bind(&normalized_key)
+        .bind(&applied_key)
         .execute(state.pool())
         .await
     {
-        error!(target = "svc-admin", %err, key = %normalized_key, "failed to clear classification request");
+        error!(target = "svc-admin", %err, key = %applied_key, "failed to clear classification request");
     }
 
-    state.invalidate_cache_key(&normalized_key).await;
+    state.invalidate_cache_key(&applied_key).await;
+    if applied_key != normalized_key {
+        state.invalidate_cache_key(&normalized_key).await;
+    }
     Ok(Json(record))
 }
 
@@ -224,7 +230,18 @@ pub async fn manual_classify(
         );
     }
 
-    let (entity_level, hostname) = parse_normalized_key(&normalized_key).ok_or_else(|| {
+    let (_, _) = parse_normalized_key(&normalized_key).ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "INVALID_NORMALIZED_KEY",
+                "normalized_key must start with domain: or subdomain:",
+            )),
+        )
+    })?;
+
+    let applied_key = canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+    let (entity_level, hostname) = parse_normalized_key(&applied_key).ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,
             Json(ApiError::new(
@@ -235,7 +252,7 @@ pub async fn manual_classify(
     })?;
 
     let decision_payload = PolicyDecisionRequestPayload {
-        normalized_key: normalized_key.clone(),
+        normalized_key: applied_key.clone(),
         entity_level: entity_level.to_string(),
         source_ip: "127.0.0.1".to_string(),
         user_id: None,
@@ -283,7 +300,7 @@ pub async fn manual_classify(
     let taxonomy_version = taxonomy_store.taxonomy().version.clone();
     let record = persist_manual_classification(
         state.pool(),
-        &normalized_key,
+        &applied_key,
         &manual_payload,
         &user.actor,
         &validated.category.id,
@@ -297,14 +314,17 @@ pub async fn manual_classify(
     .map_err(db_error)?;
 
     if let Err(err) = sqlx::query("DELETE FROM classification_requests WHERE normalized_key = $1")
-        .bind(&normalized_key)
+        .bind(&applied_key)
         .execute(state.pool())
         .await
     {
-        error!(target = "svc-admin", %err, key = %normalized_key, "failed to clear classification request");
+        error!(target = "svc-admin", %err, key = %applied_key, "failed to clear classification request");
     }
 
-    state.invalidate_cache_key(&normalized_key).await;
+    state.invalidate_cache_key(&applied_key).await;
+    if applied_key != normalized_key {
+        state.invalidate_cache_key(&normalized_key).await;
+    }
     Ok(Json(record))
 }
 
@@ -334,6 +354,8 @@ pub async fn upsert_pending(
         .filter(|value| !value.is_empty())
         .unwrap_or("waiting_content");
 
+    let applied_key = canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+
     sqlx::query(
         r#"
         INSERT INTO classification_requests (normalized_key, status, base_url, last_error)
@@ -346,7 +368,7 @@ pub async fn upsert_pending(
             updated_at = NOW()
         "#,
     )
-    .bind(&normalized_key)
+    .bind(&applied_key)
     .bind(status)
     .bind(payload.base_url)
     .execute(state.pool())
@@ -374,8 +396,10 @@ pub async fn clear_pending(
         ));
     }
 
+    let applied_key = canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+
     sqlx::query("DELETE FROM classification_requests WHERE normalized_key = $1")
-        .bind(&normalized_key)
+        .bind(&applied_key)
         .execute(state.pool())
         .await
         .map_err(db_error)?;

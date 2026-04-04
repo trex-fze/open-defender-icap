@@ -57,13 +57,27 @@ pub fn normalize_target(host: &str, path: &str, scheme: Option<&str>) -> Result<
     })
 }
 
-fn derive_registered_domain(hostname: &str) -> String {
+pub fn derive_registered_domain(hostname: &str) -> String {
     let labels: Vec<&str> = hostname.split('.').collect();
     if labels.len() <= 2 {
         hostname.to_string()
     } else {
         labels[labels.len() - 2..].join(".")
     }
+}
+
+pub fn canonical_classification_key(normalized_key: &str) -> Option<String> {
+    let host = normalized_key
+        .strip_prefix("domain:")
+        .or_else(|| normalized_key.strip_prefix("subdomain:"))?
+        .trim()
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if host.is_empty() {
+        return None;
+    }
+    let registered = derive_registered_domain(&host);
+    Some(format!("domain:{}", registered))
 }
 
 fn sanitize_host(input: &str) -> String {
@@ -111,6 +125,19 @@ mod tests {
     fn missing_host_errors() {
         let err = normalize_target("   ", "/", None).unwrap_err();
         assert!(err.to_string().contains("host"));
+    }
+
+    #[test]
+    fn canonical_key_promotes_subdomain_to_domain() {
+        assert_eq!(
+            canonical_classification_key("subdomain:www.example.com").as_deref(),
+            Some("domain:example.com")
+        );
+        assert_eq!(
+            canonical_classification_key("domain:example.com").as_deref(),
+            Some("domain:example.com")
+        );
+        assert!(canonical_classification_key("url:https://example.com").is_none());
     }
 
     #[test]

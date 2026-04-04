@@ -15,8 +15,9 @@ use tracing::{error, info, instrument, warn, Level};
 
 use cache::CacheClient;
 use common_types::{
-    normalizer::normalize_target, ClassificationVerdict, EntityLevel, NormalizedTarget,
-    PageFetchJob, PolicyAction, PolicyDecision, PolicyDecisionRequest,
+    normalizer::{canonical_classification_key, normalize_target},
+    ClassificationVerdict, EntityLevel, NormalizedTarget, PageFetchJob, PolicyAction,
+    PolicyDecision, PolicyDecisionRequest,
 };
 use jobs::{ClassificationJob, JobPublisher, PageFetchPublisher};
 use pending_client::PendingClient;
@@ -128,6 +129,8 @@ async fn handle_connection(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("HTTP path missing"))?;
     let normalized = normalize_target(http_host, http_path, icap_req.http_scheme.as_deref())?;
+    let classification_key =
+        canonical_classification_key(&normalized.normalized_key).unwrap_or_else(|| normalized.normalized_key.clone());
     if let Some(trace_id) = &icap_req.trace_id {
         tracing::Span::current().record("trace_id", &tracing::field::display(trace_id));
     }
@@ -139,11 +142,11 @@ async fn handle_connection(
     {
         if !matches!(decision.action, PolicyAction::ContentPending) {
             if let Some(client) = &pending_client {
-                if let Err(err) = client.clear_pending(&normalized.normalized_key).await {
+                if let Err(err) = client.clear_pending(&classification_key).await {
                     warn!(
                         target = "svc-icap",
                         %err,
-                        normalized_key = %normalized.normalized_key,
+                        normalized_key = %classification_key,
                         "failed to clear stale pending classification request on cache hit"
                     );
                 }
@@ -219,20 +222,20 @@ async fn handle_connection(
     if requires_pending {
         if let Some(client) = &pending_client {
             if let Err(err) = client
-                .upsert_pending(&normalized.normalized_key, base_url.as_deref())
+                .upsert_pending(&classification_key, base_url.as_deref())
                 .await
             {
                 warn!(
                     target = "svc-icap",
                     %err,
-                    normalized_key = %normalized.normalized_key,
+                    normalized_key = %classification_key,
                     "failed to upsert pending classification request"
                 );
             }
         }
         if let Some(publisher) = &page_fetch_publisher {
             let job = PageFetchJob {
-                normalized_key: normalized.normalized_key.clone(),
+                normalized_key: classification_key.clone(),
                 url: base_url
                     .clone()
                     .unwrap_or_else(|| normalized.full_url.clone()),
@@ -245,11 +248,11 @@ async fn handle_connection(
             }
         }
     } else if let Some(client) = &pending_client {
-        if let Err(err) = client.clear_pending(&normalized.normalized_key).await {
+        if let Err(err) = client.clear_pending(&classification_key).await {
             warn!(
                 target = "svc-icap",
                 %err,
-                normalized_key = %normalized.normalized_key,
+                normalized_key = %classification_key,
                 "failed to clear stale pending classification request"
             );
         }
@@ -261,8 +264,8 @@ async fn handle_connection(
         if enqueue {
             if let Err(err) = publisher
                 .publish(&ClassificationJob {
-                    normalized_key: &normalized.normalized_key,
-                    entity_level: entity_level_str(&normalized.entity_level),
+                    normalized_key: &classification_key,
+                    entity_level: entity_level_str_from_key(&classification_key),
                     hostname: &normalized.hostname,
                     full_url: &normalized.full_url,
                     trace_id: icap_req.trace_id.as_deref().unwrap_or(""),
@@ -377,12 +380,15 @@ mod identity_tests {
     }
 }
 
-fn entity_level_str(level: &EntityLevel) -> &'static str {
-    match level {
-        EntityLevel::Domain => "domain",
-        EntityLevel::Subdomain => "subdomain",
-        EntityLevel::Url => "url",
-        EntityLevel::Page => "page",
+fn entity_level_str_from_key(normalized_key: &str) -> &'static str {
+    if normalized_key.starts_with("domain:") {
+        "domain"
+    } else if normalized_key.starts_with("subdomain:") {
+        "subdomain"
+    } else if normalized_key.starts_with("url:") {
+        "url"
+    } else {
+        "page"
     }
 }
 
