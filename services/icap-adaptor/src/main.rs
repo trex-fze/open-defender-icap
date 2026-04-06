@@ -129,8 +129,8 @@ async fn handle_connection(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("HTTP path missing"))?;
     let normalized = normalize_target(http_host, http_path, icap_req.http_scheme.as_deref())?;
-    let classification_key =
-        canonical_classification_key(&normalized.normalized_key).unwrap_or_else(|| normalized.normalized_key.clone());
+    let classification_key = canonical_classification_key(&normalized.normalized_key)
+        .unwrap_or_else(|| normalized.normalized_key.clone());
     if let Some(trace_id) = &icap_req.trace_id {
         tracing::Span::current().record("trace_id", &tracing::field::display(trace_id));
     }
@@ -464,27 +464,13 @@ fn build_fetch_candidates(classification_key: &str, normalized: &NormalizedTarge
             format!("https://www.{domain}/"),
         ];
         if let Some(observed) = derive_base_url(&normalized.full_url) {
-            if !is_likely_asset_host(&normalized.hostname) {
-                candidates.push(observed);
-            }
+            candidates.push(observed);
         }
         dedupe_preserve_order(candidates)
     } else {
-        dedupe_preserve_order(
-            vec![derive_base_url(&normalized.full_url)
-                .unwrap_or_else(|| fallback_base_url(&normalized.hostname))],
-        )
+        dedupe_preserve_order(vec![derive_base_url(&normalized.full_url)
+            .unwrap_or_else(|| fallback_base_url(&normalized.hostname))])
     }
-}
-
-fn is_likely_asset_host(hostname: &str) -> bool {
-    let lowered = hostname.to_ascii_lowercase();
-    lowered.split('.').any(|label| {
-        matches!(
-            label,
-            "cdn" | "cdns" | "img" | "images" | "image" | "static" | "assets" | "media" | "js"
-        )
-    })
 }
 
 fn dedupe_preserve_order(values: Vec<String>) -> Vec<String> {
@@ -673,7 +659,8 @@ mod icap_response_tests {
         let candidates = build_fetch_candidates("domain:weglot.com", &normalized);
         assert_eq!(candidates[0], "https://weglot.com/");
         assert_eq!(candidates[1], "https://www.weglot.com/");
-        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[2], "https://cdn.weglot.com/");
+        assert_eq!(candidates.len(), 3);
     }
 
     #[test]

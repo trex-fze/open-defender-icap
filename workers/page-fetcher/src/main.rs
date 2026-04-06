@@ -10,6 +10,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use std::collections::HashMap;
 use tokio::signal;
 use tokio::time::Instant;
 use tracing::{error, info, Level};
@@ -293,10 +294,25 @@ impl PageFetcher {
         let candidates = resolve_candidate_urls(&job)?;
         let mut attempts: Vec<CrawlAttempt> = Vec::new();
         let mut last_failure: Option<FetchFailure> = None;
+        let mut dns_resolution_cache: HashMap<String, bool> = HashMap::new();
+        let mut had_crawl_attempt = false;
 
         for candidate in candidates {
             let parsed = Url::parse(&candidate).context("candidate url invalid")?;
             let host = parsed.host_str().unwrap_or_default();
+            if host.is_empty() {
+                attempts.push(CrawlAttempt {
+                    url: candidate,
+                    outcome: "failed".into(),
+                    reason: "invalid_candidate_host".into(),
+                });
+                last_failure = Some(FetchFailure {
+                    fetch_status: "failed".into(),
+                    fetch_reason: "invalid_candidate_host".into(),
+                    detail: "candidate URL is missing a hostname".into(),
+                });
+                continue;
+            }
             if is_likely_asset_host(host, &self.cfg.unsupported_host_allowlist) {
                 self.metrics.record_asset_prefilter_skip();
                 attempts.push(CrawlAttempt {
@@ -307,6 +323,16 @@ impl PageFetcher {
                 continue;
             }
 
+            if !self.host_resolves(host, &mut dns_resolution_cache).await {
+                attempts.push(CrawlAttempt {
+                    url: candidate,
+                    outcome: "unsupported".into(),
+                    reason: "dns_unresolvable".into(),
+                });
+                continue;
+            }
+
+            had_crawl_attempt = true;
             let start = Instant::now();
             match self.fetch_content(&job, &candidate).await {
                 Ok(response) => {
@@ -339,14 +365,51 @@ impl PageFetcher {
             }
         }
 
-        let failure = last_failure.unwrap_or(FetchFailure {
-            fetch_status: "unsupported".into(),
-            fetch_reason: "all_candidates_filtered".into(),
-            detail: "all candidate URLs were filtered as non-page endpoints".into(),
-        });
-        self.store_failure(&job, ttl_seconds, &failure, &attempts).await?;
+        let all_candidates_dns_unresolvable = !attempts.is_empty()
+            && attempts
+                .iter()
+                .all(|attempt| attempt.reason == "dns_unresolvable");
+        let no_candidates_reached_crawl = !had_crawl_attempt;
+
+        let failure = if no_candidates_reached_crawl && all_candidates_dns_unresolvable {
+            self.metrics.record_terminal_dns_unresolvable();
+            FetchFailure {
+                fetch_status: "unsupported".into(),
+                fetch_reason: "dns_unresolvable".into(),
+                detail: "all candidate hosts failed DNS preflight before Crawl4AI".into(),
+            }
+        } else {
+            last_failure.unwrap_or(FetchFailure {
+                fetch_status: "unsupported".into(),
+                fetch_reason: "all_candidates_filtered".into(),
+                detail: "all candidate URLs were filtered as non-page endpoints".into(),
+            })
+        };
+        self.store_failure(&job, ttl_seconds, &failure, &attempts)
+            .await?;
         self.metrics.record_crawl_failure();
         Err(anyhow!(failure.detail))
+    }
+
+    async fn host_resolves(&self, host: &str, cache: &mut HashMap<String, bool>) -> bool {
+        if let Some(resolved) = cache.get(host) {
+            return *resolved;
+        }
+
+        self.metrics.record_dns_preflight_check();
+        let resolved = tokio::net::lookup_host((host, 443))
+            .await
+            .map(|mut addrs| addrs.next().is_some())
+            .unwrap_or(false);
+
+        if resolved {
+            self.metrics.record_dns_preflight_resolved();
+        } else {
+            self.metrics.record_dns_preflight_unresolved();
+        }
+
+        cache.insert(host.to_string(), resolved);
+        resolved
     }
 
     async fn content_fresh(&self, normalized_key: &str) -> Result<bool> {
@@ -595,7 +658,9 @@ fn parse_crawl_error_payload(payload: &str) -> Option<FetchFailure> {
     }
     .to_string();
     let fetch_reason = detail.reason.unwrap_or_else(|| "crawl_failed".into());
-    let message = detail.detail.unwrap_or_else(|| "crawl service error".into());
+    let message = detail
+        .detail
+        .unwrap_or_else(|| "crawl service error".into());
     Some(FetchFailure {
         fetch_status,
         fetch_reason,
@@ -635,10 +700,9 @@ fn classify_crawl_failure(detail: &str, status_code: Option<u16>) -> (String, St
 }
 
 fn is_likely_asset_host(hostname: &str, allowlist: &[String]) -> bool {
-    if allowlist
-        .iter()
-        .any(|allowed| hostname.eq_ignore_ascii_case(allowed) || hostname.ends_with(&format!(".{allowed}")))
-    {
+    if allowlist.iter().any(|allowed| {
+        hostname.eq_ignore_ascii_case(allowed) || hostname.ends_with(&format!(".{allowed}"))
+    }) {
         return false;
     }
     let lowered = hostname.to_ascii_lowercase();
@@ -751,6 +815,44 @@ mod tests {
             ttl_seconds: None,
         };
         let resolved = resolve_candidate_urls(&job).expect("should resolve candidates");
-        assert_eq!(resolved, vec!["https://example.com/", "https://www.example.com/"]);
+        assert_eq!(
+            resolved,
+            vec!["https://example.com/", "https://www.example.com/"]
+        );
+    }
+
+    #[test]
+    fn dns_terminal_detection_requires_all_candidates_dns_unresolvable() {
+        let attempts = vec![
+            CrawlAttempt {
+                url: "https://example.com/".into(),
+                outcome: "unsupported".into(),
+                reason: "dns_unresolvable".into(),
+            },
+            CrawlAttempt {
+                url: "https://www.example.com/".into(),
+                outcome: "unsupported".into(),
+                reason: "dns_unresolvable".into(),
+            },
+        ];
+        assert!(attempts
+            .iter()
+            .all(|attempt| attempt.reason == "dns_unresolvable"));
+
+        let mixed_attempts = vec![
+            CrawlAttempt {
+                url: "https://example.com/".into(),
+                outcome: "unsupported".into(),
+                reason: "asset_endpoint".into(),
+            },
+            CrawlAttempt {
+                url: "https://www.example.com/".into(),
+                outcome: "unsupported".into(),
+                reason: "dns_unresolvable".into(),
+            },
+        ];
+        assert!(!mixed_attempts
+            .iter()
+            .all(|attempt| attempt.reason == "dns_unresolvable"));
     }
 }

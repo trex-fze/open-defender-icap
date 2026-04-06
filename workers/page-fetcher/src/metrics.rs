@@ -62,6 +62,38 @@ static ASSET_PREFILTER_SKIPS: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+static DNS_PREFLIGHT_CHECKS: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_fetch_dns_preflight_checks_total",
+        "Number of candidate hosts checked with DNS preflight"
+    )
+    .unwrap()
+});
+
+static DNS_PREFLIGHT_RESOLVED: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_fetch_dns_preflight_resolved_total",
+        "Number of candidate hosts that resolved in DNS preflight"
+    )
+    .unwrap()
+});
+
+static DNS_PREFLIGHT_UNRESOLVED: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_fetch_dns_preflight_unresolved_total",
+        "Number of candidate hosts that failed DNS preflight"
+    )
+    .unwrap()
+});
+
+static TERMINAL_DNS_UNRESOLVABLE: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_fetch_terminal_dns_unresolvable_total",
+        "Jobs ending with terminal unsupported:dns_unresolvable"
+    )
+    .unwrap()
+});
+
 static FETCH_LATENCY: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "page_fetch_duration_seconds",
@@ -105,6 +137,22 @@ impl MetricsServer {
 
     pub fn record_asset_prefilter_skip(&self) {
         ASSET_PREFILTER_SKIPS.inc();
+    }
+
+    pub fn record_dns_preflight_check(&self) {
+        DNS_PREFLIGHT_CHECKS.inc();
+    }
+
+    pub fn record_dns_preflight_resolved(&self) {
+        DNS_PREFLIGHT_RESOLVED.inc();
+    }
+
+    pub fn record_dns_preflight_unresolved(&self) {
+        DNS_PREFLIGHT_UNRESOLVED.inc();
+    }
+
+    pub fn record_terminal_dns_unresolvable(&self) {
+        TERMINAL_DNS_UNRESOLVABLE.inc();
     }
 
     pub fn observe_fetch_latency(&self, seconds: f64) {

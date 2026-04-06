@@ -28,6 +28,9 @@ const failureHint = (status: string, reason?: string) => {
   if (status === 'unsupported' && reason === 'no_content_endpoint') {
     return 'Page returned minimal structural content. Try a homepage or product/docs path for richer evidence.';
   }
+  if (status === 'unsupported' && reason === 'dns_unresolvable') {
+    return 'Candidate hosts did not resolve in DNS during preflight. Inspect source URL/candidate targeting and domain DNS health.';
+  }
   if (status === 'blocked') {
     return 'Destination appears protected by anti-bot controls; monitor fallback classification behavior and override if needed.';
   }

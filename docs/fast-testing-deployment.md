@@ -298,6 +298,7 @@ Use `down -v` only when you explicitly need a clean local data state.
   - Read `logs/crawl4ai/crawl-audit.jsonl` on the host. Each entry contains timestamp, URL, report (`success|failed|blocked`), reason, status code, duration, and error details.
   - `blocked` is reserved for explicit anti-bot/access-denied failures (for example HTTP 403/429, captcha/challenge pages).
   - `unsupported` is used for non-page/asset-like endpoints (for example CDN JS/image hosts with minimal structural content) so anti-bot metrics are not inflated.
+  - page-fetcher runs DNS preflight before Crawl4AI; when all candidates are non-resolving, it records terminal `unsupported` with reason `dns_unresolvable`.
   - page-fetcher enforces terminal cooldowns for `failed|blocked|unsupported` rows to prevent repeated churn on the same key.
 - How do I block an entire domain including subdomains?
   - In Allow / Deny, create one active `block` override for the apex domain (for example `example.com`).
@@ -307,7 +308,7 @@ Use `down -v` only when you explicitly need a clean local data state.
   - Override resolution uses most-specific scope first, so the subdomain rule wins over the parent domain rule.
 - Why do pending/classification keys appear as `domain:example.com` even when I browse a subdomain?
   - Domain-first classification mode is enabled. Subdomain traffic is deduplicated into canonical domain keys for pending rows, page fetch jobs, and persisted classifications.
-  - Page fetch URL resolution is apex-first (`https://example.com/`, then `https://www.example.com/`, then observed host when suitable) to avoid empty excerpts from CDN/script hosts.
+  - Page fetch URL resolution is apex-first (`https://example.com/`, then `https://www.example.com/`, then observed host) with DNS preflight so non-resolving apex candidates do not cause repeated Crawl4AI DNS churn.
   - Use Diagnostics Page Content Inspector fields (`source_url`, `resolved_url`, `attempt_summary`) to confirm what was tried and why no-content outcomes were recorded.
   - This reduces queue churn and classification delay; use subdomain Allow / Deny overrides when host-specific exceptions are needed.
 - How do I see override commands in odctl help?

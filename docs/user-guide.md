@@ -94,7 +94,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - **Policy errors**: 400 from `/api/v1/decision` indicates validation failure; inspect request body for missing `normalized_key`.
 - **CLI auth failures**: Ensure config token valid; inspect `~/.odctl/logs` (future) for stack traces.
 - **Docker build failures**: Clear `target/` and rebuild; ensure Rust toolchain matches required version.
-- **Crawl pending unclear**: inspect `logs/crawl4ai/crawl-audit.jsonl` and correlate failing URLs by `normalized_key`; repeated `blocked` or `failed` reasons indicate no-content fallback path should be used.
+- **Crawl pending unclear**: inspect `logs/crawl4ai/crawl-audit.jsonl` and correlate failing URLs by `normalized_key`; repeated `blocked`/`failed` reasons or terminal `unsupported:dns_unresolvable` in `page_contents` indicate no-content fallback path should be used.
 - **Local model produced invalid JSON and key failed**: worker now attempts online metadata-only verification automatically. If online verification is unavailable/fails, classification is terminalized to `unknown-unclassified / insufficient-evidence` (pending is cleared).
 - **Need override examples (domain + subdomain behavior)?** See FAQ entries in `README.md` and `docs/fast-testing-deployment.md` for UI + `odctl` examples, including full-domain block (`domain:example.com`) and most-specific subdomain precedence.
 - **Why does Pending show `domain:example.com` after browsing `www.example.com`?** Domain-first classification scope is enabled: ICAP deduplicates subdomain traffic into canonical domain keys for pending/classification/content artifacts. Use Allow / Deny subdomain overrides for host-specific exceptions.
