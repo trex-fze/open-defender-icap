@@ -5,6 +5,10 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+    Argon2,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 use common_types::PolicyAction;
 use dirs::config_dir;
@@ -12,7 +16,7 @@ use policy_dsl::{Conditions as RuleConditions, PolicyDocument, PolicyRule as Dsl
 use reqwest::{header, Client};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{migrate::Migrator, postgres::PgPoolOptions};
+use sqlx::{migrate::Migrator, postgres::PgPoolOptions, Row};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -316,6 +320,18 @@ enum IamCmd {
     #[clap(subcommand)]
     ServiceAccounts(IamServiceAccountCmd),
     Whoami,
+    RecoverAdminPassword {
+        #[clap(long, default_value = "admin")]
+        username: String,
+        #[clap(long)]
+        new_password: String,
+        #[clap(long)]
+        reason: String,
+        #[clap(long)]
+        yes: bool,
+        #[clap(long)]
+        admin_db_url: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -655,21 +671,86 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let token = resolve_token(cli.token.clone()).await?;
-    let client = ApiClient::new(&cli.base_url, token)?;
+    let bypass_api_client = matches!(
+        &cli.command,
+        Commands::Iam(IamCmd::RecoverAdminPassword { .. })
+    );
+    let client = if bypass_api_client {
+        None
+    } else {
+        let token = resolve_token(cli.token.clone()).await?;
+        Some(ApiClient::new(&cli.base_url, token)?)
+    };
 
     match &cli.command {
         Commands::Env { url } => handle_env(url.as_deref().unwrap_or(&cli.base_url)).await?,
-        Commands::Policy(cmd) => handle_policy(cmd, &client, cli.json).await?,
-        Commands::Override(cmd) => handle_override(cmd, &client, cli.json).await?,
-        Commands::Cache(cmd) => handle_cache(cmd, &client, cli.json).await?,
+        Commands::Policy(cmd) => {
+            handle_policy(
+                cmd,
+                client.as_ref().expect("api client must exist"),
+                cli.json,
+            )
+            .await?
+        }
+        Commands::Override(cmd) => {
+            handle_override(
+                cmd,
+                client.as_ref().expect("api client must exist"),
+                cli.json,
+            )
+            .await?
+        }
+        Commands::Cache(cmd) => {
+            handle_cache(
+                cmd,
+                client.as_ref().expect("api client must exist"),
+                cli.json,
+            )
+            .await?
+        }
         Commands::Migrate(_) => unreachable!(),
-        Commands::Page(cmd) => handle_page(cmd, &client, cli.json).await?,
-        Commands::Classification(cmd) => handle_classification(cmd, &client, cli.json).await?,
-        Commands::Report(cmd) => handle_report(cmd, &client, cli.json).await?,
-        Commands::Logs(cmd) => handle_logs(cmd, &client, cli.json).await?,
+        Commands::Page(cmd) => {
+            handle_page(
+                cmd,
+                client.as_ref().expect("api client must exist"),
+                cli.json,
+            )
+            .await?
+        }
+        Commands::Classification(cmd) => {
+            handle_classification(
+                cmd,
+                client.as_ref().expect("api client must exist"),
+                cli.json,
+            )
+            .await?
+        }
+        Commands::Report(cmd) => {
+            handle_report(
+                cmd,
+                client.as_ref().expect("api client must exist"),
+                cli.json,
+            )
+            .await?
+        }
+        Commands::Logs(cmd) => {
+            handle_logs(
+                cmd,
+                client.as_ref().expect("api client must exist"),
+                cli.json,
+            )
+            .await?
+        }
         Commands::Llm(cmd) => handle_llm(cmd, cli.json).await?,
-        Commands::Iam(cmd) => handle_iam(cmd, &client, cli.json).await?,
+        Commands::Iam(cmd) => {
+            if matches!(cmd, IamCmd::RecoverAdminPassword { .. }) {
+                let local_client = ApiClient::new(&cli.base_url, None)?;
+                handle_iam(cmd, &local_client, cli.json).await?
+            } else {
+                let api_client = client.as_ref().expect("api client must exist");
+                handle_iam(cmd, api_client, cli.json).await?
+            }
+        }
         Commands::Smoke { profile } => run_smoke(profile).await?,
         Commands::Auth(_) => unreachable!(),
     }
@@ -1078,6 +1159,86 @@ fn resolve_db_url(source: &Option<String>, env_key: &str, flag: &str) -> Result<
         return Ok(url.clone());
     }
     env::var(env_key).with_context(|| format!("set {} or pass {}", env_key, flag))
+}
+
+fn hash_password(value: &str) -> Result<String> {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let hash = argon2
+        .hash_password(value.as_bytes(), &salt)
+        .map_err(|err| anyhow!("failed to hash password: {}", err))?;
+    Ok(hash.to_string())
+}
+
+async fn recover_admin_password_local(
+    db_url: &str,
+    username: &str,
+    new_password: &str,
+    reason: &str,
+) -> Result<()> {
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(db_url)
+        .await
+        .context("failed to connect admin database for recovery")?;
+
+    let username = username.trim();
+    if username.is_empty() {
+        return Err(anyhow!("--username cannot be empty"));
+    }
+
+    let mut tx = pool.begin().await?;
+    let row = sqlx::query(
+        "SELECT id::text AS id FROM iam_users WHERE LOWER(COALESCE(username, '')) = LOWER($1) LIMIT 1",
+    )
+    .bind(username)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(row) = row else {
+        return Err(anyhow!("user '{}' not found", username));
+    };
+    let user_id: String = row.get("id");
+    let hash = hash_password(new_password.trim())?;
+
+    sqlx::query(
+        r#"
+        UPDATE iam_users
+        SET password_hash = $2,
+            password_updated_at = NOW(),
+            must_change_password = TRUE,
+            failed_login_attempts = 0,
+            locked_until = NULL,
+            token_version = token_version + 1,
+            updated_at = NOW()
+        WHERE id = $1::uuid
+    "#,
+    )
+    .bind(&user_id)
+    .bind(hash)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO iam_audit_events (id, actor, action, target_type, target_id, payload)
+        VALUES ($1::uuid, $2, $3, $4, $5, $6)
+    "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind("breakglass-cli")
+    .bind("iam.auth.recover_admin_password")
+    .bind("user")
+    .bind(&user_id)
+    .bind(json!({
+        "username": username,
+        "reason": reason,
+        "host": env::var("HOSTNAME").ok(),
+    }))
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
 }
 
 async fn run_migrations(name: &str, url: &str, migrator: &Migrator) -> Result<()> {
@@ -1501,6 +1662,28 @@ async fn handle_iam(cmd: &IamCmd, client: &ApiClient, json: bool) -> Result<()> 
                 println!("Roles           : {}", response.roles.join(", "));
                 println!("Permissions     : {}", response.permissions.join(", "));
             }
+        }
+        IamCmd::RecoverAdminPassword {
+            username,
+            new_password,
+            reason,
+            yes,
+            admin_db_url,
+        } => {
+            if !yes {
+                return Err(anyhow!(
+                    "recovery is sensitive; rerun with --yes to confirm"
+                ));
+            }
+            if reason.trim().is_empty() {
+                return Err(anyhow!("--reason is required"));
+            }
+            if new_password.trim().len() < 8 {
+                return Err(anyhow!("new password must be at least 8 characters"));
+            }
+            let db_url = resolve_db_url(admin_db_url, "OD_ADMIN_DATABASE_URL", "--admin-db-url")?;
+            recover_admin_password_local(&db_url, username, new_password, reason).await?;
+            println!("Recovered local admin password for {}", username);
         }
     }
     Ok(())

@@ -160,6 +160,10 @@ impl IamService {
                 email = COALESCE($4, email),
                 display_name = COALESCE($5, display_name),
                 status = COALESCE($6, status),
+                token_version = CASE
+                    WHEN COALESCE($6, status) = 'disabled' AND status != 'disabled' THEN token_version + 1
+                    ELSE token_version
+                END,
                 updated_at = NOW()
             WHERE id = $1
             RETURNING id, username, subject, email, display_name, status, is_protected, last_login_at, created_at, updated_at
@@ -179,7 +183,7 @@ impl IamService {
     pub async fn disable_user(&self, id: Uuid) -> Result<(), IamError> {
         self.ensure_user_mutation_allowed(id, true).await?;
         let result = sqlx::query(
-            r#"UPDATE iam_users SET status = 'disabled', updated_at = NOW() WHERE id = $1"#,
+            r#"UPDATE iam_users SET status = 'disabled', token_version = token_version + 1, updated_at = NOW() WHERE id = $1"#,
         )
         .bind(id)
         .execute(&self.pool)
@@ -284,6 +288,10 @@ impl IamService {
         .fetch_one(&self.pool)
         .await?;
         Ok(count)
+    }
+
+    pub async fn has_active_policy_admin(&self) -> Result<bool, IamError> {
+        Ok(self.active_policy_admin_count().await? > 0)
     }
 
     async fn ensure_user_mutation_allowed(
@@ -999,7 +1007,7 @@ impl IamService {
     ) -> Result<LocalAuthenticatedUser, IamError> {
         let row = sqlx::query(
             r#"
-            SELECT id, username, email, display_name, status, password_hash, failed_login_attempts, locked_until, must_change_password
+            SELECT id, username, email, display_name, status, password_hash, failed_login_attempts, locked_until, must_change_password, token_version
             FROM iam_users
             WHERE LOWER(email) = LOWER($1) OR LOWER(COALESCE(username, '')) = LOWER($1)
             LIMIT 1
@@ -1076,7 +1084,19 @@ impl IamService {
             roles: access.roles,
             permissions: access.permissions,
             must_change_password: row.get::<bool, _>("must_change_password"),
+            token_version: row.get::<i64, _>("token_version"),
         })
+    }
+
+    pub async fn user_token_version(&self, user_id: Uuid) -> Result<i64, IamError> {
+        let row = sqlx::query("SELECT token_version FROM iam_users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else {
+            return Err(IamError::NotFound("user".into()));
+        };
+        Ok(row.get::<i64, _>("token_version"))
     }
 
     pub async fn set_user_password(
@@ -1100,6 +1120,7 @@ impl IamService {
             SET password_hash = $2,
                 password_updated_at = NOW(),
                 must_change_password = $3,
+                token_version = token_version + 1,
                 failed_login_attempts = 0,
                 locked_until = NULL,
                 updated_at = NOW()
@@ -1211,7 +1232,7 @@ impl IamService {
         let candidates = sqlx::query(
             r#"
             SELECT t.id, t.user_id, t.token_hash,
-                   u.username, u.email, u.display_name, u.status,
+                   u.username, u.email, u.display_name, u.status, u.token_version,
                    t.expires_at
             FROM iam_user_tokens t
             JOIN iam_users u ON u.id = t.user_id
@@ -1257,6 +1278,7 @@ impl IamService {
                 roles: access.roles,
                 permissions: access.permissions,
                 must_change_password: false,
+                token_version: row.get::<i64, _>("token_version"),
             }));
         }
         Ok(None)
@@ -1362,6 +1384,7 @@ pub struct LocalAuthenticatedUser {
     pub roles: HashSet<String>,
     pub permissions: HashSet<String>,
     pub must_change_password: bool,
+    pub token_version: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]

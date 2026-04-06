@@ -138,6 +138,28 @@ const fn default_lockout_seconds() -> i64 {
     15 * 60
 }
 
+fn validate_local_jwt_secret(secret: &str) -> anyhow::Result<()> {
+    let trimmed = secret.trim();
+    if trimmed.len() < 32 {
+        anyhow::bail!(
+            "OD_LOCAL_AUTH_JWT_SECRET must be at least 32 characters (strong random secret)"
+        );
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    let blocked = [
+        "changeme",
+        "od-local-dev-secret-change-me",
+        "changeme-local-jwt-secret",
+        "local-jwt-secret",
+    ];
+    if blocked.iter().any(|needle| lowered.contains(needle)) {
+        anyhow::bail!(
+            "OD_LOCAL_AUTH_JWT_SECRET appears to use a default/test value; set a strong random secret"
+        );
+    }
+    Ok(())
+}
+
 impl AdminAuth {
     pub async fn from_config(
         static_token: Option<String>,
@@ -145,6 +167,21 @@ impl AdminAuth {
         iam: Arc<IamService>,
     ) -> anyhow::Result<Self> {
         let merged = settings.merge_env();
+        let local_secret = match merged.mode {
+            AuthMode::Local | AuthMode::Hybrid => {
+                let secret = merged.local_jwt_secret.clone().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "OD_LOCAL_AUTH_JWT_SECRET is required when auth.mode is local or hybrid"
+                    )
+                })?;
+                validate_local_jwt_secret(&secret)?;
+                secret
+            }
+            AuthMode::Oidc => merged
+                .local_jwt_secret
+                .clone()
+                .unwrap_or_else(|| "od-oidc-local-jwt-unused".to_string()),
+        };
         let jwt = if let (Some(secret), Some(issuer), Some(audience)) = (
             merged.oidc_hs256_secret.clone(),
             merged.oidc_issuer.clone(),
@@ -163,12 +200,7 @@ impl AdminAuth {
                 .unwrap_or_else(default_static_roles),
             mode: merged.mode,
             allow_claim_fallback: merged.allow_claim_fallback,
-            local_jwt: LocalJwtIssuer::new(
-                merged
-                    .local_jwt_secret
-                    .unwrap_or_else(|| "od-local-dev-secret-change-me".to_string()),
-                merged.local_jwt_ttl_seconds,
-            ),
+            local_jwt: LocalJwtIssuer::new(local_secret, merged.local_jwt_ttl_seconds),
             max_failed_attempts: merged.max_failed_attempts,
             lockout_seconds: merged.lockout_seconds,
             jwt,
@@ -257,6 +289,10 @@ impl AdminAuth {
             .map_err(|_| AuthError::NotProvisioned)?;
         if user.status != "active" {
             return Err(AuthError::Disabled);
+        }
+        let current_token_version = self.iam.user_token_version(user.id).await?;
+        if claims.token_version != current_token_version {
+            return Err(AuthError::InvalidCredentials);
         }
         let access = self.iam.effective_permissions_for_user(user.id).await?;
         Ok(UserContext::from_effective(
@@ -641,6 +677,7 @@ struct LocalTokenClaims {
     sub: Uuid,
     username: Option<String>,
     email: String,
+    token_version: i64,
     iss: String,
     aud: String,
     exp: i64,
@@ -665,6 +702,7 @@ impl LocalJwtIssuer {
             sub: user.id,
             username: user.username.clone(),
             email: user.email.clone(),
+            token_version: user.token_version,
             iss: "od-local".to_string(),
             aud: "od-admin-ui".to_string(),
             exp: now + self.ttl_seconds,
@@ -813,7 +851,9 @@ impl From<IamError> for AuthError {
             IamError::InvalidCredentials => AuthError::InvalidCredentials,
             IamError::Disabled => AuthError::Disabled,
             IamError::Locked(until) => AuthError::Locked(until.to_rfc3339()),
-            IamError::ProtectedUser => AuthError::Internal("protected user mutation blocked".into()),
+            IamError::ProtectedUser => {
+                AuthError::Internal("protected user mutation blocked".into())
+            }
             IamError::LastActiveAdmin => {
                 AuthError::Internal("last active admin guard blocked mutation".into())
             }
@@ -937,6 +977,7 @@ mod tests {
             roles,
             permissions,
             must_change_password: true,
+            token_version: 3,
         };
 
         let issuer = LocalJwtIssuer::new("test-secret".into(), 3600);
@@ -945,5 +986,18 @@ mod tests {
         assert_eq!(claims.sub, user.id);
         assert_eq!(claims.username.as_deref(), Some("admin"));
         assert_eq!(claims.email, "admin@local");
+        assert_eq!(claims.token_version, 3);
+    }
+
+    #[test]
+    fn local_jwt_secret_validation_rejects_weak_values() {
+        assert!(validate_local_jwt_secret("short").is_err());
+        assert!(validate_local_jwt_secret("changeme-local-jwt-secret-1234567890").is_err());
+    }
+
+    #[test]
+    fn local_jwt_secret_validation_accepts_strong_value() {
+        let strong = "f5dce5ec2f084f779ac8d8f3dacf97ec-2026-hardening";
+        assert!(validate_local_jwt_secret(strong).is_ok());
     }
 }

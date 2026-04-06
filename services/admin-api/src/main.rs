@@ -387,12 +387,24 @@ async fn main() -> Result<()> {
 
     let merged_auth = cfg.auth.clone().merge_env();
     if matches!(merged_auth.mode, AuthMode::Local | AuthMode::Hybrid) {
-        let default_password = env::var("OD_DEFAULT_ADMIN_PASSWORD")
-            .context("OD_DEFAULT_ADMIN_PASSWORD is required when auth.mode is local or hybrid")?;
-        iam_service
-            .bootstrap_local_admin(&default_password)
+        let has_active_admin = iam_service
+            .has_active_policy_admin()
             .await
-            .context("failed to bootstrap default local admin")?;
+            .context("failed to verify active local policy-admin presence")?;
+        if has_active_admin {
+            info!(
+                target = "svc-admin",
+                "skipping local admin bootstrap: active policy-admin already exists"
+            );
+        } else {
+            let default_password = env::var("OD_DEFAULT_ADMIN_PASSWORD").context(
+                "OD_DEFAULT_ADMIN_PASSWORD is required only for first local bootstrap when no active policy-admin exists",
+            )?;
+            iam_service
+                .bootstrap_local_admin(&default_password)
+                .await
+                .context("failed to bootstrap default local admin")?;
+        }
     }
 
     let admin_auth = Arc::new(

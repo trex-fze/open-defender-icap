@@ -38,7 +38,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 ## 5. Admin API & Overrides
 - Config file: `config/admin-api.json` controls host/port, optional `database_url`, optional `admin_token`, and cache invalidation wiring (`redis_url`, `cache_channel`). Leave `database_url` as `null` for check-ins, but set either `database_url` in the file or `OD_ADMIN_DATABASE_URL`/`DATABASE_URL` env vars in deployment shells; the service refuses to start without one of these values.
 - Cache invalidation: when `redis_url` is configured (or `OD_CACHE_REDIS_URL` env var is set) the Admin API publishes override/policy updates to the `cache_channel` (defaults to `od:cache:invalidate`) and deletes matching Redis keys before returning to the client. Without Redis configured the API logs a warning and skips invalidation, which means cached policy decisions may take up to 5 minutes to expire.
-- Local authentication (default): set `OD_AUTH_MODE=local`, `OD_LOCAL_AUTH_JWT_SECRET`, and `OD_DEFAULT_ADMIN_PASSWORD`. On first startup, Admin API bootstraps `admin` / `admin@local` with `policy-admin` role using the env password hash.
+- Local authentication (default): set `OD_AUTH_MODE=local` and a strong `OD_LOCAL_AUTH_JWT_SECRET` (>=32 chars, non-default). `OD_DEFAULT_ADMIN_PASSWORD` is only required for first bootstrap when no active local `policy-admin` exists.
 - Login endpoint: `POST /api/v1/auth/login` with `{ "username": "admin", "password": "..." }`; use returned bearer token for UI/API calls.
 - Service-account/static tokens remain valid for automation through `X-Admin-Token`.
 - Optional OIDC mode: set `OD_AUTH_MODE=hybrid|oidc` + `OD_OIDC_*` variables to validate external JWTs.
@@ -74,6 +74,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl iam users enable <id>` | Re-enable a disabled IAM user | Calls `POST /api/v1/iam/users/:id/enable`. |
 | `odctl iam users update <id> --username ...` | Edit IAM user identity fields/status | Calls `PUT /api/v1/iam/users/:id`; supports username/email/display/subject/status updates. |
 | `odctl iam users delete <id> --yes` | Hard delete IAM user (irreversible) | Calls `DELETE /api/v1/iam/users/:id?hard=true`; blocked for protected/last-admin cases. |
+| `odctl iam recover-admin-password --username admin --new-password ... --reason ... --yes` | Break-glass local admin password recovery | Uses direct DB access (`OD_ADMIN_DATABASE_URL` or `--admin-db-url`), writes audit event, sets `must_change_password=true`, and invalidates existing local JWT sessions. |
 
 Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 OD_ADMIN_TOKEN=secret odctl policy reload`, `OD_ADMIN_TOKEN=secret odctl policy simulate request.json`.
 
@@ -102,6 +103,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - **Redis issues**: Confirm `redis_url` configured; check `redis-cli INFO` for latency; fallback memory cache will emit warnings if Redis unreachable.
 - **Policy errors**: 400 from `/api/v1/decision` indicates validation failure; inspect request body for missing `normalized_key`.
 - **CLI auth failures**: Ensure config token valid; inspect `~/.odctl/logs` (future) for stack traces.
+- **Forgot local admin password**: run `odctl iam recover-admin-password` from a trusted host with DB access; include incident reason and rotate credentials immediately after regaining access.
 - **IAM disable/delete blocked with 409**: `PROTECTED_USER` means target is protected (default local admin). `LAST_ACTIVE_ADMIN` means operation would remove final active `policy-admin`; promote another admin first.
 - **Docker build failures**: Clear `target/` and rebuild; ensure Rust toolchain matches required version.
 - **Crawl pending unclear**: inspect `logs/crawl4ai/crawl-audit.jsonl` and correlate failing URLs by `normalized_key`; repeated `blocked`/`failed` reasons or terminal `unsupported:dns_unresolvable` in `page_contents` indicate no-content fallback path should be used.

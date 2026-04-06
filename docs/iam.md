@@ -21,8 +21,11 @@ For local/hybrid modes, set `OD_LOCAL_AUTH_JWT_SECRET` so the API can issue and 
 
 ## Required Environment Variables
 
-* `OD_DEFAULT_ADMIN_PASSWORD` – bootstrap password for the first local admin user (`admin`).
-* `OD_LOCAL_AUTH_JWT_SECRET` – HMAC secret for local JWT issuance.
+* `OD_LOCAL_AUTH_JWT_SECRET` – HMAC secret for local JWT issuance (required in local/hybrid mode, minimum 32 chars, must not be a default/test value).
+
+Bootstrap-only variable:
+
+* `OD_DEFAULT_ADMIN_PASSWORD` – required only when no active local `policy-admin` exists and bootstrap must create the initial admin.
 
 Optional hardening knobs:
 
@@ -43,6 +46,8 @@ If none exists, it creates:
 * role binding: `policy-admin`
 
 This operation is idempotent and runs after migrations.
+
+If an active `policy-admin` already exists, bootstrap is skipped and `OD_DEFAULT_ADMIN_PASSWORD` is not required.
 
 ## Login Flow
 
@@ -109,3 +114,21 @@ For compatibility, `DELETE /api/v1/iam/users/:id` without `hard=true` behaves as
 The default local admin account is marked protected (`is_protected=true`) and cannot be disabled, hard-deleted, or stripped in ways that remove the last active `policy-admin` access path. The API returns `409` with `PROTECTED_USER` or `LAST_ACTIVE_ADMIN` when these guardrails trigger.
 
 These guardrails also block operations that would remove the final active `policy-admin` user, even if the target is not marked protected.
+
+## Break-glass Recovery (CLI)
+
+When administrators forget local passwords and cannot authenticate, use local DB-backed recovery from a trusted host:
+
+```bash
+odctl iam recover-admin-password \
+  --username admin \
+  --new-password '<strong-password>' \
+  --reason 'incident ticket INC-1234' \
+  --yes
+```
+
+Requirements:
+
+* `OD_ADMIN_DATABASE_URL` (or `--admin-db-url`) must point to Admin API Postgres.
+* Command writes IAM audit event `iam.auth.recover_admin_password`.
+* Recovery sets `must_change_password=true`, clears lockout counters, and invalidates existing local JWT sessions by incrementing `token_version`.

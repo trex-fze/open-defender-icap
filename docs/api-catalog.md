@@ -45,7 +45,7 @@ Override precedence note: policy-engine evaluates active domain overrides before
 
 | Method | Path | Description | Auth | Request Schema | Response |
 | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/auth/login` | Local username/password login (local/hybrid auth mode). | Public route. | `{ username, password }` | `{ access_token, expires_in, user { id, username, email, roles, permissions, must_change_password } }` |
+| `POST` | `/api/v1/auth/login` | Local username/password login (local/hybrid auth mode). | Public route. | `{ username, password }` | `{ access_token, expires_in, user { id, username, email, roles, permissions, must_change_password } }`; local JWT carries user `token_version` and is invalidated after password reset/change/disable. |
 | `GET` | `/api/v1/auth/mode` | Resolve active authentication mode for UI behavior. | Public route. | — | `{ mode: "local" | "hybrid" | "oidc" }` |
 | `POST` | `/api/v1/auth/change-password` | Change the authenticated local user's password. | Authenticated user principal. | `{ current_password, new_password }` | `204 No Content` |
 
@@ -118,6 +118,8 @@ Override precedence note: policy-engine evaluates active domain overrides before
 | `GET` | `/api/v1/iam/whoami` | Introspect the caller’s effective roles and permissions. | Any authenticated caller; user principals include `username`, `email`, `display_name`, and `must_change_password` for forced-password-change UX. |
 
 Compatibility note: `DELETE /api/v1/iam/users/:id` without `hard=true` behaves as disable. Use `POST /api/v1/iam/users/:id/disable` and `POST /api/v1/iam/users/:id/enable` for explicit lifecycle transitions, and `DELETE ...?hard=true` for irreversible removal.
+
+Local auth startup note: in `local`/`hybrid` mode, `OD_LOCAL_AUTH_JWT_SECRET` is required and validated for strength; `OD_DEFAULT_ADMIN_PASSWORD` is required only when bootstrap must create the first active local `policy-admin`.
 | `GET` | `/api/v1/iam/audit` | Paginated IAM audit log (mutations + metadata). | `iam:view` (policy-admin or auditor). Cursor pagination with `limit` and `cursor`; response is `{ data, meta }`. |
 
 ---
