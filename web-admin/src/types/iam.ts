@@ -1,7 +1,8 @@
 export type IamUserRecord = {
   id: string;
+  username?: string | null;
   subject?: string | null;
-  email: string;
+  email?: string | null;
   display_name?: string | null;
   status: string;
   last_login_at?: string | null;

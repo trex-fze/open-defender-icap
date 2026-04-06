@@ -579,6 +579,18 @@ async fn main() -> Result<()> {
             delete(iam::revoke_user_role_route),
         )
         .route(
+            "/api/v1/iam/users/:id/set-password",
+            post(iam::set_user_password_route),
+        )
+        .route(
+            "/api/v1/iam/users/:id/tokens",
+            get(iam::list_user_tokens_route).post(iam::create_user_token_route),
+        )
+        .route(
+            "/api/v1/iam/users/:id/tokens/:token_id",
+            delete(iam::revoke_user_token_route),
+        )
+        .route(
             "/api/v1/iam/groups",
             get(iam::list_groups_route).post(iam::create_group_route),
         )
@@ -620,6 +632,10 @@ async fn main() -> Result<()> {
         .route("/api/v1/iam/whoami", get(iam::whoami_route))
         .route("/api/v1/iam/audit", get(iam::list_audit_route))
         .route(
+            "/api/v1/auth/change-password",
+            post(auth::change_password_route),
+        )
+        .route(
             "/api/v1/page-contents/:normalized_key",
             get(page_contents::get_page_content),
         )
@@ -635,6 +651,7 @@ async fn main() -> Result<()> {
         .route("/health/live", get(health))
         .route("/metrics", get(metrics_endpoint))
         .route("/api/v1/auth/login", post(auth::login_route))
+        .route("/api/v1/auth/mode", get(auth::auth_mode_route))
         .with_state(state)
         .merge(admin_routes)
         .layer(cors_layer);

@@ -6,9 +6,11 @@ type LoginResponse = {
   access_token: string;
   expires_in: number;
   user: {
+    username?: string | null;
     email: string;
     display_name?: string | null;
     roles: string[];
+    must_change_password?: boolean;
   };
 };
 
@@ -56,9 +58,16 @@ export const LoginPage = () => {
       const payload = (await response.json()) as LoginResponse;
       login(
         {
+          username: payload.user.username ?? undefined,
           email: payload.user.email,
-          name: payload.user.display_name || payload.user.email,
-          roles: payload.user.roles as any,
+          name: payload.user.display_name || payload.user.username || payload.user.email,
+          roles: payload.user.roles.filter(
+            (role): role is 'policy-admin' | 'policy-editor' | 'policy-viewer' | 'auditor' =>
+              role === 'policy-admin' ||
+              role === 'policy-editor' ||
+              role === 'policy-viewer' ||
+              role === 'auditor',
+          ),
         },
         {
           tokens: {

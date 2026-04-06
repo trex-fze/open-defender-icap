@@ -46,6 +46,8 @@ Override precedence note: policy-engine evaluates active domain overrides before
 | Method | Path | Description | Auth | Request Schema | Response |
 | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/v1/auth/login` | Local username/password login (local/hybrid auth mode). | Public route. | `{ username, password }` | `{ access_token, expires_in, user { id, username, email, roles, permissions, must_change_password } }` |
+| `GET` | `/api/v1/auth/mode` | Resolve active authentication mode for UI behavior. | Public route. | — | `{ mode: "local" | "hybrid" | "oidc" }` |
+| `POST` | `/api/v1/auth/change-password` | Change the authenticated local user's password. | Authenticated user principal. | `{ current_password, new_password }` | `204 No Content` |
 
 ### Embedded Policy Admin (mirror of policy-engine)
 
@@ -97,9 +99,12 @@ Override precedence note: policy-engine evaluates active domain overrides before
 
 | Method | Path | Description | Roles |
 | --- | --- | --- | --- |
-| `GET`/`POST` | `/api/v1/iam/users` | List or create IAM users (email + optional OIDC subject). | `iam:manage` (policy-admin). `GET` is cursor paginated (`limit`, `cursor`) and returns `{ data, meta }`. |
+| `GET`/`POST` | `/api/v1/iam/users` | List or create IAM users (`username` primary, optional `email`, optional OIDC/hybrid `subject`). | `iam:manage` (policy-admin). `GET` is cursor paginated (`limit`, `cursor`) and returns `{ data, meta }`. `POST` supports optional local `password` + `must_change_password`. |
 | `GET`/`PUT`/`DELETE` | `/api/v1/iam/users/:id` | Fetch, update, or disable a user. | `iam:manage` for mutations, `iam:view` for reads. |
 | `POST`/`DELETE` | `/api/v1/iam/users/:id/roles` | Assign or revoke role bindings for a user. | `iam:manage`. |
+| `POST` | `/api/v1/iam/users/:id/set-password` | Set/reset a local user's password. | `iam:manage`. |
+| `GET`/`POST` | `/api/v1/iam/users/:id/tokens` | List or create personal API keys for a user. | `iam:view` / `iam:manage`; plaintext token is returned only on create. |
+| `DELETE` | `/api/v1/iam/users/:id/tokens/:token_id` | Revoke a user's personal API key. | `iam:manage`. |
 | `GET`/`POST` | `/api/v1/iam/groups` | List/create groups (name + description). | `iam:view` / `iam:manage`. `GET` is cursor paginated (`limit`, `cursor`) and returns `{ data, meta }`. |
 | `GET`/`PUT`/`DELETE` | `/api/v1/iam/groups/:id` | Inspect or update a group. | `iam:manage` for writes, `iam:view` for reads. |
 | `POST`/`DELETE` | `/api/v1/iam/groups/:id/members` | Add/remove members from a group. | `iam:manage`. |

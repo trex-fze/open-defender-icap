@@ -7,6 +7,7 @@ export type Role =
   | 'auditor';
 
 export type UserProfile = {
+  username?: string;
   name: string;
   email: string;
   roles: Role[];
@@ -32,16 +33,20 @@ type AuthContextValue = {
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const defaultUser: UserProfile = {
-  name: 'Avery Quinn',
-  email: 'avery@example.com',
-  roles: ['policy-admin', 'policy-viewer'],
+const TOKEN_STORAGE_KEY = 'od.admin.tokens';
+const USER_STORAGE_KEY = 'od.admin.user';
+const DEFAULT_TOKEN_TTL_MS = 60 * 60 * 1000;
+const TOKEN_MODE = (import.meta.env.VITE_ADMIN_TOKEN_MODE ?? 'auto').trim().toLowerCase();
+
+type WhoAmIResponse = {
+  actor: string;
+  roles: string[];
+  username?: string | null;
+  email?: string | null;
+  display_name?: string | null;
 };
 
-const TOKEN_STORAGE_KEY = 'od.admin.tokens';
-const DEFAULT_ADMIN_TOKEN = (import.meta.env.VITE_DEFAULT_ADMIN_TOKEN ?? 'changeme-admin').trim();
-const ENV_BOOTSTRAP_TOKEN = (import.meta.env.VITE_ADMIN_TOKEN ?? DEFAULT_ADMIN_TOKEN).trim();
-const DEFAULT_TOKEN_TTL_MS = 60 * 60 * 1000;
+const knownRoles = new Set<Role>(['policy-admin', 'policy-editor', 'policy-viewer', 'auditor']);
 
 const isExpired = (token?: AuthTokens | null): boolean => {
   if (!token?.expiresAt) return false;
@@ -58,11 +63,52 @@ const normalizeToken = (token: AuthTokens): AuthTokens => {
   };
 };
 
-const readStoredTokens = (): AuthTokens | null => {
-  if (ENV_BOOTSTRAP_TOKEN) {
-    return normalizeToken({ accessToken: ENV_BOOTSTRAP_TOKEN });
-  }
+const normalizeRoles = (roles?: string[] | Role[]): Role[] => {
+  if (!roles || roles.length === 0) return [];
+  return roles.flatMap((role) => (knownRoles.has(role as Role) ? [role as Role] : []));
+};
 
+const isLikelyJwt = (token: string): boolean => {
+  const parts = token.split('.');
+  return parts.length === 3 && parts.every((part) => part.length > 0);
+};
+
+const resolveAdminApiBase = (): string => {
+  const runtimeOverride =
+    typeof window !== 'undefined'
+      ? (window as Window & { __OD_ADMIN_API_URL__?: string }).__OD_ADMIN_API_URL__
+      : undefined;
+  const envUrl = (import.meta.env.VITE_ADMIN_API_URL ?? '').trim();
+  const fallbackEnv = (import.meta.env.VITE_ADMIN_API_FALLBACK ?? '').trim();
+  const fallbackBase =
+    typeof window !== 'undefined'
+      ? `${window.location.protocol}//${window.location.hostname}:19000`
+      : 'http://localhost:19000';
+  const candidate = (runtimeOverride ?? envUrl) || fallbackEnv || fallbackBase;
+  return candidate.trim();
+};
+
+const readStoredUser = (): UserProfile | null => {
+  if (typeof window === 'undefined') return null;
+  const raw = window.localStorage.getItem(USER_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<UserProfile>;
+    if (!parsed.email || !parsed.name) {
+      return null;
+    }
+    return {
+      username: parsed.username,
+      name: parsed.name,
+      email: parsed.email,
+      roles: normalizeRoles(parsed.roles),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const readStoredTokens = (): AuthTokens | null => {
   if (typeof window !== 'undefined') {
     const raw = window.localStorage.getItem(TOKEN_STORAGE_KEY);
     if (raw) {
@@ -85,7 +131,7 @@ const readStoredTokens = (): AuthTokens | null => {
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<UserProfile | null>(defaultUser);
+  const [user, setUser] = useState<UserProfile | null>(() => readStoredUser());
   const [tokens, setTokens] = useState<AuthTokens | null>(() => readStoredTokens());
   const [authNotice, setAuthNotice] = useState<string | undefined>();
 
@@ -117,6 +163,63 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [tokens]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (user) {
+      window.localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+    } else {
+      window.localStorage.removeItem(USER_STORAGE_KEY);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!tokens?.accessToken) return;
+    const controller = new AbortController();
+    const refreshWhoAmI = async () => {
+      try {
+        const token = tokens.accessToken.trim();
+        const headers: HeadersInit = { Accept: 'application/json' };
+        const useBearer = TOKEN_MODE === 'bearer' || (TOKEN_MODE === 'auto' && isLikelyJwt(token));
+        if (useBearer) {
+          headers.Authorization = `Bearer ${token}`;
+        } else {
+          (headers as Record<string, string>)['X-Admin-Token'] = token;
+        }
+
+        const response = await fetch(new URL('/api/v1/iam/whoami', resolveAdminApiBase()).toString(), {
+          method: 'GET',
+          headers,
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            setUser(null);
+            setTokens(null);
+            setAuthNotice('Session expired. Please sign in again.');
+          }
+          return;
+        }
+
+        const data = (await response.json()) as WhoAmIResponse;
+        const effectiveEmail = data.email?.trim() || user?.email || data.actor;
+        const effectiveName =
+          data.display_name?.trim() || data.username?.trim() || user?.name || effectiveEmail;
+        setUser({
+          username: data.username ?? user?.username,
+          name: effectiveName,
+          email: effectiveEmail,
+          roles: normalizeRoles(data.roles),
+        });
+      } catch {
+        // no-op; keep existing session state on transient network errors
+      }
+    };
+
+    refreshWhoAmI();
+    return () => controller.abort();
+  }, [tokens?.accessToken]);
+
   const value = useMemo<AuthContextValue>(() => {
     const hasRole = (role: Role) => Boolean(user?.roles.includes(role));
     const hasAnyRole = (roles?: Role[]) => {
@@ -131,16 +234,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       hasRole,
       hasAnyRole,
       login: (profile, options) => {
+        const email = profile?.email ?? user?.email ?? '';
+        const username = profile?.username ?? user?.username;
         setUser({
-          name: profile?.name ?? defaultUser.name,
-          email: profile?.email ?? defaultUser.email,
-          roles: profile?.roles ?? defaultUser.roles,
+          username,
+          name: profile?.name ?? username ?? email,
+          email,
+          roles: normalizeRoles(profile?.roles ?? user?.roles),
         });
         if (options?.tokens) {
           setTokens(normalizeToken(options.tokens));
-          setAuthNotice(undefined);
-        } else if (!tokens) {
-          setTokens(readStoredTokens());
           setAuthNotice(undefined);
         }
       },

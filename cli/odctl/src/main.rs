@@ -243,7 +243,11 @@ enum ClassificationCmd {
         mode: String,
         #[clap(long, takes_value = false, conflicts_with = "no-recompute")]
         recompute: bool,
-        #[clap(long = "no-recompute", takes_value = false, conflicts_with = "recompute")]
+        #[clap(
+            long = "no-recompute",
+            takes_value = false,
+            conflicts_with = "recompute"
+        )]
         no_recompute: bool,
         #[clap(long)]
         dry_run: bool,
@@ -323,11 +327,17 @@ enum IamUsersCmd {
     },
     Create {
         #[clap(long)]
-        email: String,
+        username: String,
+        #[clap(long)]
+        email: Option<String>,
         #[clap(long)]
         display_name: Option<String>,
         #[clap(long)]
         subject: Option<String>,
+        #[clap(long)]
+        password: Option<String>,
+        #[clap(long, default_value_t = true)]
+        must_change_password: bool,
         #[clap(long, default_value = "active")]
         status: String,
     },
@@ -1495,35 +1505,56 @@ async fn handle_iam_users(cmd: &IamUsersCmd, client: &ApiClient, json: bool) -> 
                     .data
                     .iter()
                     .map(|user| {
+                        let identity = user
+                            .user
+                            .username
+                            .clone()
+                            .or(user.user.email.clone())
+                            .unwrap_or_else(|| user.user.id.to_string());
                         vec![
                             user.user.id.to_string(),
-                            user.user.email.clone(),
+                            identity,
                             user.user.status.clone(),
                             user.roles.join(", "),
                         ]
                     })
                     .collect();
-                print_table(&["ID", "Email", "Status", "Roles"], rows);
+                print_table(&["ID", "User", "Status", "Roles"], rows);
                 print_next_cursor(users.meta.next_cursor.as_deref());
             }
         }
         IamUsersCmd::Create {
+            username,
             email,
             display_name,
             subject,
+            password,
+            must_change_password,
             status,
         } => {
             let payload = CreateUserPayload {
+                username: username.clone(),
                 email: email.clone(),
                 display_name: display_name.clone(),
                 subject: subject.clone(),
+                password: password.clone(),
+                must_change_password: *must_change_password,
                 status: status.clone(),
             };
             let detail: IamUserDetails = client.post("/api/v1/iam/users", &payload).await?;
             if json {
                 print_json(&detail)?;
             } else {
-                println!("Created user {} ({})", detail.user.id, detail.user.email);
+                println!(
+                    "Created user {} ({})",
+                    detail.user.id,
+                    detail
+                        .user
+                        .username
+                        .clone()
+                        .or(detail.user.email.clone())
+                        .unwrap_or_else(|| detail.user.id.to_string())
+                );
             }
         }
         IamUsersCmd::Disable { id } => {
@@ -2387,8 +2418,9 @@ struct CliLogRecord {
 #[derive(Debug, Deserialize, Serialize)]
 struct IamUserRecord {
     id: Uuid,
+    username: Option<String>,
     subject: Option<String>,
-    email: String,
+    email: Option<String>,
     display_name: Option<String>,
     status: String,
     last_login_at: Option<String>,
@@ -2489,11 +2521,16 @@ struct DeviceErrorResponse {
 
 #[derive(Serialize)]
 struct CreateUserPayload {
-    email: String,
+    username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     subject: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    password: Option<String>,
+    must_change_password: bool,
     status: String,
 }
 

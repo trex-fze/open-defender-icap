@@ -31,10 +31,10 @@ const Harness = () => {
 const renderWithProvider = () => render(<AuthProvider><Harness /></AuthProvider>);
 
 describe('AuthProvider', () => {
-  it('provides default user and roles', () => {
+  it('starts unauthenticated by default', () => {
     renderWithProvider();
-    expect(screen.getByTestId('user-name')).toHaveTextContent('Avery');
-    expect(screen.getByTestId('has-admin')).toHaveTextContent('yes');
+    expect(screen.getByTestId('user-name')).toHaveTextContent('anonymous');
+    expect(screen.getByTestId('has-admin')).toHaveTextContent('no');
   });
 
   it('updates user and tokens on login', () => {

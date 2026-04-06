@@ -205,6 +205,25 @@ impl AdminAuth {
         }
 
         if let Some(provided) = admin {
+            if let Some(user_token_principal) = self
+                .iam
+                .verify_user_token(&provided)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            {
+                return Ok(UserContext::from_effective(
+                    user_token_principal
+                        .username
+                        .clone()
+                        .unwrap_or_else(|| user_token_principal.email.clone()),
+                    PrincipalType::User,
+                    Some(user_token_principal.id),
+                    EffectiveAccess {
+                        roles: user_token_principal.roles,
+                        permissions: user_token_principal.permissions,
+                    },
+                ));
+            }
             if let Some(service) = self
                 .iam
                 .verify_service_token(&provided)
@@ -241,7 +260,12 @@ impl AdminAuth {
         }
         let access = self.iam.effective_permissions_for_user(user.id).await?;
         Ok(UserContext::from_effective(
-            claims.username.unwrap_or_else(|| user.email.clone()),
+            claims.username.unwrap_or_else(|| {
+                user.username
+                    .clone()
+                    .or(user.email.clone())
+                    .unwrap_or_else(|| user.id.to_string())
+            }),
             PrincipalType::User,
             Some(user.id),
             access,
@@ -313,6 +337,10 @@ impl AdminAuth {
 
         Err(AuthError::NotProvisioned)
     }
+
+    pub fn mode(&self) -> &AuthMode {
+        &self.mode
+    }
 }
 
 pub async fn enforce_admin(
@@ -350,6 +378,11 @@ pub struct LocalLoginResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct AuthModeResponse {
+    pub mode: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct LocalLoginUser {
     pub id: Uuid,
     pub username: Option<String>,
@@ -358,6 +391,12 @@ pub struct LocalLoginUser {
     pub roles: Vec<String>,
     pub permissions: Vec<String>,
     pub must_change_password: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
 }
 
 pub async fn login_route(
@@ -403,6 +442,70 @@ pub async fn login_route(
             must_change_password: login.user.must_change_password,
         },
     }))
+}
+
+pub async fn auth_mode_route(
+    State(state): State<AppState>,
+) -> Result<Json<AuthModeResponse>, (StatusCode, Json<ApiError>)> {
+    let mode = match state.admin_auth().mode() {
+        AuthMode::Local => "local",
+        AuthMode::Hybrid => "hybrid",
+        AuthMode::Oidc => "oidc",
+    };
+    Ok(Json(AuthModeResponse {
+        mode: mode.to_string(),
+    }))
+}
+
+pub async fn change_password_route(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<UserContext>,
+    Json(payload): Json<ChangePasswordRequest>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    let Some(user_id) = user.principal_id else {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ApiError::new(
+                "FORBIDDEN",
+                "password change is only supported for authenticated user principals",
+            )),
+        ));
+    };
+
+    if payload.current_password.trim().is_empty() || payload.new_password.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "VALIDATION_ERROR",
+                "current_password and new_password are required",
+            )),
+        ));
+    }
+
+    state
+        .iam()
+        .change_password(
+            user_id,
+            payload.current_password.as_str(),
+            payload.new_password.as_str(),
+        )
+        .await
+        .map_err(|err| {
+            let (status, error) = crate::iam::map_iam_error(err);
+            (status, error)
+        })?;
+
+    state
+        .log_iam_event(
+            "iam.auth.password.change",
+            Some(user.actor.clone()),
+            "user",
+            Some(user_id.to_string()),
+            json!({}),
+        )
+        .await;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Clone, Debug, Serialize)]

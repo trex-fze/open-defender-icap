@@ -2,6 +2,12 @@
 
 Stage 11 now supports **local username/password auth** without an IdP. RBAC still comes from IAM users, groups, and roles; only the authentication mechanism changed.
 
+## Local Identity Model
+
+For local auth, `username` is the primary login identity. `email` is optional.
+
+`subject` is optional and only required when mapping external IdP identities in `hybrid` or `oidc` mode.
+
 ## Auth Modes
 
 Configure Admin API auth mode in `config/admin-api.json` (`auth.mode`) or via `OD_AUTH_MODE`:
@@ -74,3 +80,4 @@ Use the token as `Authorization: Bearer <access_token>` for Admin API calls and 
 * Failed logins increment counters and temporarily lock accounts after the configured threshold.
 * Keep `OD_DEFAULT_ADMIN_PASSWORD` in a secret manager; rotate it immediately after first login.
 * Service account tokens remain available for machine-to-machine automation (`X-Admin-Token`).
+* IAM user API keys (personal tokens) can be created per user for automation flows and are authenticated as that user principal.

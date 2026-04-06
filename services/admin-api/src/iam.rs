@@ -38,7 +38,7 @@ impl IamService {
     pub async fn list_users(&self) -> Result<Vec<IamUserRecord>, IamError> {
         let users = sqlx::query_as::<_, IamUserRecord>(
             r#"
-            SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
+            SELECT id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
             FROM iam_users
             ORDER BY created_at DESC
         "#,
@@ -51,7 +51,7 @@ impl IamService {
     pub async fn get_user(&self, id: Uuid) -> Result<IamUserRecord, IamError> {
         let user = sqlx::query_as::<_, IamUserRecord>(
             r#"
-            SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
+            SELECT id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
             FROM iam_users
             WHERE id = $1
         "#,
@@ -68,7 +68,7 @@ impl IamService {
     ) -> Result<Option<IamUserRecord>, IamError> {
         let user = sqlx::query_as::<_, IamUserRecord>(
             r#"
-            SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
+            SELECT id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
             FROM iam_users
             WHERE subject = $1
         "#,
@@ -82,33 +82,56 @@ impl IamService {
     pub async fn find_user_by_email(&self, email: &str) -> Result<Option<IamUserRecord>, IamError> {
         let user = sqlx::query_as::<_, IamUserRecord>(
             r#"
-            SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
+            SELECT id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
             FROM iam_users
             WHERE email = $1
         "#,
         )
-        .bind(email)
+        .bind(email.trim())
         .fetch_optional(&self.pool)
         .await?;
         Ok(user)
     }
 
     pub async fn create_user(&self, payload: CreateUserRequest) -> Result<IamUserRecord, IamError> {
-        if payload.email.trim().is_empty() {
-            return Err(IamError::Validation("email required".into()));
+        if payload.username.trim().is_empty() {
+            return Err(IamError::Validation("username required".into()));
         }
+        let email = payload
+            .email
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let password_hash = if let Some(raw_password) = payload.password.as_deref() {
+            let trimmed = raw_password.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                if trimmed.len() < 8 {
+                    return Err(IamError::Validation(
+                        "password must be at least 8 characters".into(),
+                    ));
+                }
+                Some(hash_token(trimmed)?)
+            }
+        } else {
+            None
+        };
+        let must_change_password = payload.must_change_password.unwrap_or(true);
         let record = sqlx::query_as::<_, IamUserRecord>(
             r#"
-            INSERT INTO iam_users (id, subject, email, display_name, status)
-            VALUES ($1, $2, $3, $4, COALESCE($5, 'active'))
-            RETURNING id, subject, email, display_name, status, last_login_at, created_at, updated_at
+            INSERT INTO iam_users (id, username, subject, email, display_name, status, password_hash, password_updated_at, must_change_password)
+            VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'active'), $7, CASE WHEN $7 IS NOT NULL THEN NOW() ELSE NULL END, $8)
+            RETURNING id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
         "#,
         )
         .bind(Uuid::new_v4())
+        .bind(payload.username.trim().to_string())
         .bind(payload.subject)
-        .bind(payload.email.trim().to_string())
+        .bind(email)
         .bind(payload.display_name)
         .bind(payload.status)
+        .bind(password_hash)
+        .bind(must_change_password)
         .fetch_one(&self.pool)
         .await
         .map_err(map_db_error)?;
@@ -123,16 +146,18 @@ impl IamService {
         let record = sqlx::query_as::<_, IamUserRecord>(
             r#"
             UPDATE iam_users
-            SET subject = COALESCE($2, subject),
-                email = COALESCE($3, email),
-                display_name = COALESCE($4, display_name),
-                status = COALESCE($5, status),
+            SET username = COALESCE($2, username),
+                subject = COALESCE($3, subject),
+                email = COALESCE($4, email),
+                display_name = COALESCE($5, display_name),
+                status = COALESCE($6, status),
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, subject, email, display_name, status, last_login_at, created_at, updated_at
+            RETURNING id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
         "#,
         )
         .bind(id)
+        .bind(payload.username)
         .bind(payload.subject)
         .bind(payload.email)
         .bind(payload.display_name)
@@ -245,7 +270,7 @@ impl IamService {
     pub async fn list_group_members(&self, group_id: Uuid) -> Result<Vec<IamUserRecord>, IamError> {
         let members = sqlx::query_as::<_, IamUserRecord>(
             r#"
-            SELECT u.id, u.subject, u.email, u.display_name, u.status, u.last_login_at, u.created_at, u.updated_at
+            SELECT u.id, u.username, u.subject, u.email, u.display_name, u.status, u.last_login_at, u.created_at, u.updated_at
             FROM iam_group_members gm
             JOIN iam_users u ON u.id = gm.user_id
             WHERE gm.group_id = $1
@@ -917,12 +942,197 @@ impl IamService {
         Ok(LocalAuthenticatedUser {
             id: user_id,
             username: row.get::<Option<String>, _>("username"),
-            email: row.get::<String, _>("email"),
+            email: row
+                .get::<Option<String>, _>("email")
+                .unwrap_or_else(|| row.get::<Option<String>, _>("username").unwrap_or_default()),
             display_name: row.get::<Option<String>, _>("display_name"),
             roles: access.roles,
             permissions: access.permissions,
             must_change_password: row.get::<bool, _>("must_change_password"),
         })
+    }
+
+    pub async fn set_user_password(
+        &self,
+        user_id: Uuid,
+        password: &str,
+        must_change_password: bool,
+    ) -> Result<(), IamError> {
+        if password.trim().is_empty() {
+            return Err(IamError::Validation("password is required".into()));
+        }
+        if password.trim().len() < 8 {
+            return Err(IamError::Validation(
+                "password must be at least 8 characters".into(),
+            ));
+        }
+        let hash = hash_token(password.trim())?;
+        let updated = sqlx::query(
+            r#"
+            UPDATE iam_users
+            SET password_hash = $2,
+                password_updated_at = NOW(),
+                must_change_password = $3,
+                failed_login_attempts = 0,
+                locked_until = NULL,
+                updated_at = NOW()
+            WHERE id = $1
+        "#,
+        )
+        .bind(user_id)
+        .bind(hash)
+        .bind(must_change_password)
+        .execute(&self.pool)
+        .await?;
+        if updated.rows_affected() == 0 {
+            return Err(IamError::NotFound("user".into()));
+        }
+        Ok(())
+    }
+
+    pub async fn change_password(
+        &self,
+        user_id: Uuid,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(), IamError> {
+        let row = sqlx::query("SELECT password_hash FROM iam_users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else {
+            return Err(IamError::NotFound("user".into()));
+        };
+        let existing = row
+            .get::<Option<String>, _>("password_hash")
+            .ok_or(IamError::InvalidCredentials)?;
+        if !verify_hash(current_password, &existing)? {
+            return Err(IamError::InvalidCredentials);
+        }
+        self.set_user_password(user_id, new_password, false).await
+    }
+
+    pub async fn create_user_token(
+        &self,
+        user_id: Uuid,
+        payload: CreateUserTokenRequest,
+    ) -> Result<UserTokenWithSecret, IamError> {
+        if payload.name.trim().is_empty() {
+            return Err(IamError::Validation("token name is required".into()));
+        }
+
+        let token = generate_token();
+        let hash = hash_token(&token)?;
+        let hint = token_hint(&token);
+        let record = sqlx::query_as::<_, UserTokenRecord>(
+            r#"
+            INSERT INTO iam_user_tokens (id, user_id, name, token_hash, token_hint, expires_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, user_id, name, token_hint, status, created_at, last_used_at, expires_at
+        "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(payload.name.trim().to_string())
+        .bind(hash)
+        .bind(hint)
+        .bind(payload.expires_at)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_error)?;
+
+        Ok(UserTokenWithSecret {
+            token,
+            token_record: record,
+        })
+    }
+
+    pub async fn list_user_tokens(&self, user_id: Uuid) -> Result<Vec<UserTokenRecord>, IamError> {
+        let rows = sqlx::query_as::<_, UserTokenRecord>(
+            r#"
+            SELECT id, user_id, name, token_hint, status, created_at, last_used_at, expires_at
+            FROM iam_user_tokens
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+        "#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    pub async fn revoke_user_token(&self, user_id: Uuid, token_id: Uuid) -> Result<(), IamError> {
+        let result = sqlx::query(
+            "UPDATE iam_user_tokens SET status = 'disabled' WHERE id = $1 AND user_id = $2",
+        )
+        .bind(token_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(IamError::NotFound("user_token".into()));
+        }
+        Ok(())
+    }
+
+    pub async fn verify_user_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<LocalAuthenticatedUser>, IamError> {
+        let hint = token_hint(token);
+        let candidates = sqlx::query(
+            r#"
+            SELECT t.id, t.user_id, t.token_hash,
+                   u.username, u.email, u.display_name, u.status,
+                   t.expires_at
+            FROM iam_user_tokens t
+            JOIN iam_users u ON u.id = t.user_id
+            WHERE t.status = 'active' AND t.token_hint = $1
+        "#,
+        )
+        .bind(hint)
+        .fetch_all(&self.pool)
+        .await?;
+
+        for row in candidates {
+            let expires_at = row.get::<Option<sqlx::types::chrono::DateTime<Utc>>, _>("expires_at");
+            if let Some(value) = expires_at {
+                if value <= Utc::now() {
+                    continue;
+                }
+            }
+            let hash = row.get::<String, _>("token_hash");
+            if !verify_hash(token, &hash)? {
+                continue;
+            }
+            let status = row.get::<String, _>("status");
+            if status != "active" {
+                continue;
+            }
+            let user_id = row.get::<Uuid, _>("user_id");
+            let access = self.effective_permissions_for_user(user_id).await?;
+            let _ = sqlx::query("UPDATE iam_user_tokens SET last_used_at = NOW() WHERE id = $1")
+                .bind(row.get::<Uuid, _>("id"))
+                .execute(&self.pool)
+                .await;
+
+            let username = row.get::<Option<String>, _>("username");
+            let email = row
+                .get::<Option<String>, _>("email")
+                .unwrap_or_else(|| username.clone().unwrap_or_default());
+
+            return Ok(Some(LocalAuthenticatedUser {
+                id: user_id,
+                username,
+                email,
+                display_name: row.get::<Option<String>, _>("display_name"),
+                roles: access.roles,
+                permissions: access.permissions,
+                must_change_password: false,
+            }));
+        }
+        Ok(None)
     }
 }
 
@@ -959,7 +1169,7 @@ fn map_db_error(err: sqlx::Error) -> IamError {
     IamError::Db(err)
 }
 
-fn map_iam_error(err: IamError) -> (StatusCode, Json<ApiError>) {
+pub(crate) fn map_iam_error(err: IamError) -> (StatusCode, Json<ApiError>) {
     match err {
         IamError::NotFound(resource) => (
             StatusCode::NOT_FOUND,
@@ -1012,8 +1222,9 @@ pub struct LocalAuthenticatedUser {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct IamUserRecord {
     pub id: Uuid,
+    pub username: Option<String>,
     pub subject: Option<String>,
-    pub email: String,
+    pub email: Option<String>,
     pub display_name: Option<String>,
     pub status: String,
     pub last_login_at: Option<sqlx::types::chrono::DateTime<Utc>>,
@@ -1072,18 +1283,52 @@ pub struct IamAuditRecord {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateUserRequest {
+    pub username: String,
     pub subject: Option<String>,
-    pub email: String,
+    pub email: Option<String>,
+    pub display_name: Option<String>,
+    pub status: Option<String>,
+    pub password: Option<String>,
+    pub must_change_password: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateUserRequest {
+    pub username: Option<String>,
+    pub subject: Option<String>,
+    pub email: Option<String>,
     pub display_name: Option<String>,
     pub status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateUserRequest {
-    pub subject: Option<String>,
-    pub email: Option<String>,
-    pub display_name: Option<String>,
-    pub status: Option<String>,
+pub struct SetUserPasswordRequest {
+    pub password: String,
+    pub must_change_password: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateUserTokenRequest {
+    pub name: String,
+    pub expires_at: Option<sqlx::types::chrono::DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+pub struct UserTokenRecord {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+    pub token_hint: Option<String>,
+    pub status: String,
+    pub created_at: sqlx::types::chrono::DateTime<Utc>,
+    pub last_used_at: Option<sqlx::types::chrono::DateTime<Utc>>,
+    pub expires_at: Option<sqlx::types::chrono::DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserTokenWithSecret {
+    pub token: String,
+    pub token_record: UserTokenRecord,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1224,6 +1469,9 @@ pub struct WhoAmIResponse {
     pub principal_id: Option<Uuid>,
     pub roles: Vec<String>,
     pub permissions: Vec<String>,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub display_name: Option<String>,
 }
 
 pub async fn list_users_route(
@@ -1252,7 +1500,7 @@ pub async fn list_users_route(
     let iam = state.iam();
     let users = sqlx::query_as::<_, IamUserRecord>(
         r#"
-        SELECT id, subject, email, display_name, status, last_login_at, created_at, updated_at
+        SELECT id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
         FROM iam_users
         WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2))
         ORDER BY created_at DESC, id DESC
@@ -1335,6 +1583,7 @@ pub async fn create_user_route(
             "user",
             Some(record.id.to_string()),
             json!({
+                "username": record.username,
                 "email": record.email,
                 "status": record.status,
             }),
@@ -1428,6 +1677,104 @@ pub async fn delete_user_route(
             "user",
             Some(id.to_string()),
             json!({}),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn set_user_password_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<SetUserPasswordRequest>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    state
+        .iam()
+        .set_user_password(
+            id,
+            payload.password.as_str(),
+            payload.must_change_password.unwrap_or(true),
+        )
+        .await
+        .map_err(map_iam_error)?;
+
+    state
+        .log_iam_event(
+            "iam.user.password.set",
+            Some(user.actor.clone()),
+            "user",
+            Some(id.to_string()),
+            json!({
+                "must_change_password": payload.must_change_password.unwrap_or(true),
+            }),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn create_user_token_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<CreateUserTokenRequest>,
+) -> Result<Json<UserTokenWithSecret>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let created = state
+        .iam()
+        .create_user_token(id, payload)
+        .await
+        .map_err(map_iam_error)?;
+
+    state
+        .log_iam_event(
+            "iam.user.token.create",
+            Some(user.actor.clone()),
+            "user",
+            Some(id.to_string()),
+            json!({
+                "token_name": created.token_record.name,
+                "token_id": created.token_record.id,
+            }),
+        )
+        .await;
+
+    Ok(Json(created))
+}
+
+pub async fn list_user_tokens_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<UserTokenRecord>>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_VIEW).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let tokens = state
+        .iam()
+        .list_user_tokens(id)
+        .await
+        .map_err(map_iam_error)?;
+    Ok(Json(tokens))
+}
+
+pub async fn revoke_user_token_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path((id, token_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    state
+        .iam()
+        .revoke_user_token(id, token_id)
+        .await
+        .map_err(map_iam_error)?;
+
+    state
+        .log_iam_event(
+            "iam.user.token.revoke",
+            Some(user.actor.clone()),
+            "user",
+            Some(id.to_string()),
+            json!({ "token_id": token_id }),
         )
         .await;
     Ok(StatusCode::NO_CONTENT)
@@ -1941,14 +2288,37 @@ pub async fn disable_service_account_route(
 }
 
 pub async fn whoami_route(
+    State(state): State<AppState>,
     Extension(user): Extension<UserContext>,
 ) -> Result<Json<WhoAmIResponse>, (StatusCode, Json<ApiError>)> {
+    let mut username = None;
+    let mut email = None;
+    let mut display_name = None;
+
+    if let (PrincipalType::User, Some(user_id)) = (&user.principal_type, user.principal_id) {
+        let profile =
+            sqlx::query("SELECT username, email, display_name FROM iam_users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(state.iam().pool())
+                .await
+                .map_err(|err| map_iam_error(map_db_error(err)))?;
+
+        if let Some(row) = profile {
+            username = row.get::<Option<String>, _>("username");
+            email = row.get::<Option<String>, _>("email");
+            display_name = row.get::<Option<String>, _>("display_name");
+        }
+    }
+
     Ok(Json(WhoAmIResponse {
         actor: user.actor.clone(),
         principal_type: user.principal_type.clone(),
         principal_id: user.principal_id,
         roles: user.roles_list(),
         permissions: user.permissions_list(),
+        username,
+        email,
+        display_name,
     }))
 }
 

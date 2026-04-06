@@ -108,6 +108,7 @@ const useIamRoles = () => {
 const IamUsersPanel = () => {
   const api = useAdminApi();
   const { roles } = useIamRoles();
+  const [authMode, setAuthMode] = useState<'local' | 'hybrid' | 'oidc'>('local');
   const [users, setUsers] = useState<IamUserDetails[]>([]);
   const [meta, setMeta] = useState<CursorMeta>({ limit: 50, has_more: false });
   const [cursor, setCursor] = useState<string | undefined>();
@@ -117,11 +118,15 @@ const IamUsersPanel = () => {
   const [selectedRole, setSelectedRole] = useState<Record<string, string>>({});
   const [busyUser, setBusyUser] = useState<string>();
   const [form, setForm] = useState({
+    username: '',
     email: '',
     display_name: '',
+    password: '',
+    must_change_password: true,
     subject: '',
     status: 'active',
   });
+  const [lastUserToken, setLastUserToken] = useState<{ userId: string; username: string; token: string }>();
 
   const loadUsers = useCallback(async () => {
     if (!api.canCallApi) return;
@@ -146,20 +151,44 @@ const IamUsersPanel = () => {
     loadUsers();
   }, [loadUsers]);
 
+  useEffect(() => {
+    if (!api.canCallApi) return;
+    adminGetJson<{ mode: 'local' | 'hybrid' | 'oidc' }>(
+      api as AdminApiContext,
+      '/api/v1/auth/mode',
+    )
+      .then((body) => setAuthMode(body.mode ?? 'local'))
+      .catch(() => {
+        setAuthMode('local');
+      });
+  }, [api]);
+
   const handleCreate = async (event: FormEvent) => {
     event.preventDefault();
-    if (!form.email.trim()) {
-      setError('Email is required');
+    if (!form.username.trim()) {
+      setError('Username is required');
       return;
     }
     try {
+      setLastUserToken(undefined);
       await adminPostJson(api as AdminApiContext, '/api/v1/iam/users', {
-        email: form.email.trim(),
+        username: form.username.trim(),
+        email: form.email.trim() || undefined,
         display_name: form.display_name.trim() || undefined,
+        password: form.password.trim() || undefined,
+        must_change_password: form.must_change_password,
         subject: form.subject.trim() || undefined,
         status: form.status,
       });
-      setForm({ email: '', display_name: '', subject: '', status: 'active' });
+      setForm({
+        username: '',
+        email: '',
+        display_name: '',
+        password: '',
+        must_change_password: true,
+        subject: '',
+        status: 'active',
+      });
       loadUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create user');
@@ -207,23 +236,67 @@ const IamUsersPanel = () => {
     }
   };
 
+  const setUserPassword = async (userId: string) => {
+    const nextPassword = window.prompt('Enter new password');
+    if (!nextPassword) return;
+    setBusyUser(userId);
+    try {
+      await adminPostJson(api as AdminApiContext, `/api/v1/iam/users/${userId}/set-password`, {
+        password: nextPassword,
+        must_change_password: true,
+      });
+      setError(undefined);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to set user password');
+    } finally {
+      setBusyUser(undefined);
+    }
+  };
+
+  const createUserApiKey = async (userId: string, username: string) => {
+    const name = window.prompt('Token name', `${username}-token`);
+    if (!name) return;
+    setBusyUser(userId);
+    try {
+      const response = await adminPostJson<{ token: string } & Record<string, any>>(
+        api as AdminApiContext,
+        `/api/v1/iam/users/${userId}/tokens`,
+        { name: name.trim() },
+      );
+      setLastUserToken({ userId, username, token: response.token });
+      setError(undefined);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create user API key');
+    } finally {
+      setBusyUser(undefined);
+    }
+  };
+
   return (
     <section>
       <header className="iam-section-head">
         <div>
           <h3>Directory</h3>
-          <p>Provision operators and align their role membership with policy guardrails.</p>
+          <p>Create operator accounts and align their role membership with policy guardrails.</p>
         </div>
       </header>
       <form className="iam-form" onSubmit={handleCreate}>
         <div className="iam-form-grid">
           <label>
-            <span>Email</span>
+            <span>Username</span>
+            <input
+              value={form.username}
+              onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))}
+              placeholder="casey"
+              required
+            />
+          </label>
+          <label>
+            <span>Email (optional)</span>
             <input
               value={form.email}
               onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
               placeholder="casey@example.com"
-              required
             />
           </label>
           <label>
@@ -235,13 +308,50 @@ const IamUsersPanel = () => {
             />
           </label>
           <label>
-            <span>Subject (OIDC)</span>
+            <span>Initial password (optional)</span>
             <input
-              value={form.subject}
-              onChange={(e) => setForm((prev) => ({ ...prev, subject: e.target.value }))}
-              placeholder="00u123..."
+              value={form.password}
+              onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
+              type="password"
+              placeholder="Set a temporary password"
             />
           </label>
+          <label>
+            <span>Require password change</span>
+            <select
+              value={form.must_change_password ? 'yes' : 'no'}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, must_change_password: e.target.value === 'yes' }))
+              }
+            >
+              <option value="yes">yes</option>
+              <option value="no">no</option>
+            </select>
+          </label>
+          {authMode === 'local' ? (
+            <details>
+              <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>
+                Advanced: external identity mapping
+              </summary>
+              <label style={{ marginTop: '0.5rem', display: 'block' }}>
+                <span>External IdP Subject (optional)</span>
+                <input
+                  value={form.subject}
+                  onChange={(e) => setForm((prev) => ({ ...prev, subject: e.target.value }))}
+                  placeholder="00u123..."
+                />
+              </label>
+            </details>
+          ) : (
+            <label>
+              <span>External IdP Subject (optional)</span>
+              <input
+                value={form.subject}
+                onChange={(e) => setForm((prev) => ({ ...prev, subject: e.target.value }))}
+                placeholder="00u123..."
+              />
+            </label>
+          )}
           <label>
             <span>Status</span>
             <select
@@ -253,8 +363,17 @@ const IamUsersPanel = () => {
             </select>
           </label>
         </div>
-        <button className="cta-button" disabled={!api.canCallApi}>Invite User</button>
+        <button className="cta-button" disabled={!api.canCallApi}>Create User</button>
       </form>
+      {lastUserToken && (
+        <div className="glass-panel" style={{ marginBottom: '1rem' }}>
+          <p className="section-title">New API key for {lastUserToken.username}</p>
+          <code className="token-display">{lastUserToken.token}</code>
+          <p className="muted" style={{ marginTop: '0.35rem' }}>
+            Copy now — this key is shown only once.
+          </p>
+        </div>
+      )}
       {error && <div className="error-banner">{error}</div>}
       <PaginationControls
         limit={meta.limit}
@@ -298,9 +417,10 @@ const IamUsersPanel = () => {
               {users.map((entry) => (
                 <tr key={entry.user.id}>
                   <td>
-                    <strong>{entry.user.display_name || entry.user.email}</strong>
+                    <strong>{entry.user.display_name || entry.user.username || entry.user.email || 'Unnamed user'}</strong>
                     <div className="muted" style={{ fontSize: '0.85rem' }}>
-                      {entry.user.email} · {entry.user.status}
+                      {(entry.user.username || 'no-username')}
+                      {entry.user.email ? ` · ${entry.user.email}` : ''} · {entry.user.status}
                     </div>
                   </td>
                   <td>
@@ -353,6 +473,23 @@ const IamUsersPanel = () => {
                     </div>
                   </td>
                   <td>
+                    <div className="button-stack" style={{ gap: '0.5rem' }}>
+                      <button
+                        className="ghost-button"
+                        disabled={busyUser === entry.user.id}
+                        onClick={() => setUserPassword(entry.user.id)}
+                      >
+                        Set Password
+                      </button>
+                      <button
+                        className="ghost-button"
+                        disabled={busyUser === entry.user.id}
+                        onClick={() => createUserApiKey(entry.user.id, entry.user.username || entry.user.email || 'user')}
+                      >
+                        Create API Key
+                      </button>
+                    </div>
+                    <div style={{ marginTop: '0.5rem' }}>
                     <button
                       className="ghost-button"
                       disabled={busyUser === entry.user.id}
@@ -360,6 +497,7 @@ const IamUsersPanel = () => {
                     >
                       Disable
                     </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -500,7 +638,7 @@ const IamGroupsPanel = () => {
     () =>
       directory.map((entry) => ({
         id: entry.user.id,
-        label: entry.user.display_name || entry.user.email,
+        label: entry.user.display_name || entry.user.username || entry.user.email || entry.user.id,
       })),
     [directory],
   );
