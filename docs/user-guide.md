@@ -11,6 +11,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 
 ### 1.1 Authentication
 - Admin API/UI use local username/password login by default (`POST /api/v1/auth/login`) and issue bearer tokens.
+- If login returns `must_change_password=true`, web-admin forces `/auth/change-password` until password update succeeds.
 - OIDC remains optional through `OD_AUTH_MODE=hybrid|oidc` for future enterprise integration.
 - Service-to-service communication (ICAP adaptor → policy engine, workers → DB) uses mTLS/service tokens.
 
@@ -69,6 +70,10 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl classification export --file bundle.json` | Export domain classifications for backup/share | Calls `GET /api/v1/classifications/export` and writes bundle schema `od-classification-bundle.v1`. |
 | `odctl classification import --file bundle.json --dry-run --recompute` | Import a bundle with optional policy recompute | Calls `POST /api/v1/classifications/import`; use `--no-recompute` to trust imported risk/action/confidence values. Invalid rows are rejected and saved to JSONL error file. |
 | `odctl classification flush --all --dry-run` | Preview or apply bulk classification flush | Calls `POST /api/v1/classifications/flush`; supports `--all`, `--prefix`, or `--keys-file` scopes. |
+| `odctl iam users disable <id>` | Disable IAM user access | Calls `POST /api/v1/iam/users/:id/disable`; protected/last-admin guardrails may return `409`. |
+| `odctl iam users enable <id>` | Re-enable a disabled IAM user | Calls `POST /api/v1/iam/users/:id/enable`. |
+| `odctl iam users update <id> --username ...` | Edit IAM user identity fields/status | Calls `PUT /api/v1/iam/users/:id`; supports username/email/display/subject/status updates. |
+| `odctl iam users delete <id> --yes` | Hard delete IAM user (irreversible) | Calls `DELETE /api/v1/iam/users/:id?hard=true`; blocked for protected/last-admin cases. |
 
 Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 OD_ADMIN_TOKEN=secret odctl policy reload`, `OD_ADMIN_TOKEN=secret odctl policy simulate request.json`.
 
@@ -76,6 +81,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
 - Routes: Dashboard, Investigations, Policies (+ draft create/publish), **Pending Sites** (manual classification with category/subcategory and policy-computed action; subdomain inputs auto-promote to canonical domain key), **Classifications** (classified/unclassified CRUD management with both `Effective Action` and `Recorded Action` columns), Allow / Deny list (domain + subdomain overrides), Taxonomy (read-only canonical listing with checkbox activation toggles), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs + classification exchange import/export/flush).
 - Authentication: local username/password login screen; RBAC controls navigation after token issuance.
+- Authentication gate: when `must_change_password=true`, UI redirects to password-change checkpoint before route access.
 - Build: `npm run build`; deploy static assets behind reverse proxy.
 - Operator runbook and screenshot checklist: `docs/runbooks/stage10-web-admin-operator-runbook.md`.
 - Frontend expansion roadmap: see `rfc/stage-10-frontend-management-parity.md` and `implementation-plan/stage-10-frontend-management-parity.md` for full management-feature parity scope.
@@ -96,6 +102,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - **Redis issues**: Confirm `redis_url` configured; check `redis-cli INFO` for latency; fallback memory cache will emit warnings if Redis unreachable.
 - **Policy errors**: 400 from `/api/v1/decision` indicates validation failure; inspect request body for missing `normalized_key`.
 - **CLI auth failures**: Ensure config token valid; inspect `~/.odctl/logs` (future) for stack traces.
+- **IAM disable/delete blocked with 409**: `PROTECTED_USER` means target is protected (default local admin). `LAST_ACTIVE_ADMIN` means operation would remove final active `policy-admin`; promote another admin first.
 - **Docker build failures**: Clear `target/` and rebuild; ensure Rust toolchain matches required version.
 - **Crawl pending unclear**: inspect `logs/crawl4ai/crawl-audit.jsonl` and correlate failing URLs by `normalized_key`; repeated `blocked`/`failed` reasons or terminal `unsupported:dns_unresolvable` in `page_contents` indicate no-content fallback path should be used.
 - **Local model produced invalid JSON and key failed**: worker now attempts online metadata-only verification automatically. If online verification is unavailable/fails, classification is terminalized to `unknown-unclassified / insufficient-evidence` (pending is cleared).

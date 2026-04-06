@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ReactElement } from 'react';
 import AppLayout from './layout/AppLayout';
 import { AuthProvider, Role, useAuth } from './context/AuthContext';
@@ -12,6 +12,7 @@ import { TaxonomyPage } from './pages/TaxonomyPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { SettingsIamPage } from './pages/SettingsIamPage';
 import { SettingsClassificationsPage } from './pages/SettingsClassificationsPage';
+import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { LoginPage } from './pages/LoginPage';
 import { PendingClassificationsPage } from './pages/PendingClassificationsPage';
 import { ClassificationsPage } from './pages/ClassificationsPage';
@@ -32,6 +33,7 @@ const App = () => {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/change-password" element={<ProtectedRoute><ChangePasswordPage /></ProtectedRoute>} />
           <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
@@ -65,8 +67,15 @@ type GuardProps = {
 
 export const ProtectedRoute = ({ children, roles }: GuardProps) => {
   const { user, tokens, hasAnyRole } = useAuth();
+  const location = useLocation();
   if (!user || !tokens?.accessToken) {
     return <Navigate to="/login" replace />;
+  }
+  if (user.mustChangePassword && location.pathname !== '/auth/change-password') {
+    return <Navigate to="/auth/change-password" replace />;
+  }
+  if (!user.mustChangePassword && location.pathname === '/auth/change-password') {
+    return <Navigate to="/dashboard" replace />;
   }
   if (roles && !hasAnyRole(roles as any)) {
     return (

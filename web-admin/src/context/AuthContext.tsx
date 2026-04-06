@@ -11,6 +11,7 @@ export type UserProfile = {
   name: string;
   email: string;
   roles: Role[];
+  mustChangePassword?: boolean;
 };
 
 export type AuthTokens = {
@@ -44,6 +45,7 @@ type WhoAmIResponse = {
   username?: string | null;
   email?: string | null;
   display_name?: string | null;
+  must_change_password?: boolean | null;
 };
 
 const knownRoles = new Set<Role>(['policy-admin', 'policy-editor', 'policy-viewer', 'auditor']);
@@ -102,6 +104,7 @@ const readStoredUser = (): UserProfile | null => {
       name: parsed.name,
       email: parsed.email,
       roles: normalizeRoles(parsed.roles),
+      mustChangePassword: parsed.mustChangePassword === true,
     };
   } catch {
     return null;
@@ -210,6 +213,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           name: effectiveName,
           email: effectiveEmail,
           roles: normalizeRoles(data.roles),
+          mustChangePassword:
+            data.must_change_password === undefined || data.must_change_password === null
+              ? user?.mustChangePassword
+              : data.must_change_password,
         });
       } catch {
         // no-op; keep existing session state on transient network errors
@@ -241,6 +248,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           name: profile?.name ?? username ?? email,
           email,
           roles: normalizeRoles(profile?.roles ?? user?.roles),
+          mustChangePassword: profile?.mustChangePassword ?? user?.mustChangePassword,
         });
         if (options?.tokens) {
           setTokens(normalizeToken(options.tokens));

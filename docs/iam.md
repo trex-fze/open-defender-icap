@@ -76,6 +76,18 @@ Response:
 
 Use the token as `Authorization: Bearer <access_token>` for Admin API calls and in the web frontend.
 
+## Forced Password Change Flow
+
+If login returns `must_change_password: true`, web-admin redirects the user to `/auth/change-password` and blocks access to the rest of the app until password change succeeds.
+
+Password update endpoint:
+
+* `POST /api/v1/auth/change-password`
+* Body: `{ "current_password": "...", "new_password": "..." }`
+* Success: `204 No Content`
+
+After successful password change, `must_change_password` is cleared and normal route access resumes.
+
 ## Security Notes
 
 * Failed logins increment counters and temporarily lock accounts after the configured threshold.
@@ -88,9 +100,12 @@ Use the token as `Authorization: Bearer <access_token>` for Admin API calls and 
 * Disable user: `POST /api/v1/iam/users/:id/disable`
 * Enable user: `POST /api/v1/iam/users/:id/enable`
 * Hard delete user: `DELETE /api/v1/iam/users/:id?hard=true`
+* Edit user: `PUT /api/v1/iam/users/:id`
 
 For compatibility, `DELETE /api/v1/iam/users/:id` without `hard=true` behaves as disable.
 
 ### Protected Admin Guardrails
 
 The default local admin account is marked protected (`is_protected=true`) and cannot be disabled, hard-deleted, or stripped in ways that remove the last active `policy-admin` access path. The API returns `409` with `PROTECTED_USER` or `LAST_ACTIVE_ADMIN` when these guardrails trigger.
+
+These guardrails also block operations that would remove the final active `policy-admin` user, even if the target is not marked protected.

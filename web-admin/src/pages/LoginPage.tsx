@@ -61,6 +61,7 @@ export const LoginPage = () => {
           username: payload.user.username ?? undefined,
           email: payload.user.email,
           name: payload.user.display_name || payload.user.username || payload.user.email,
+          mustChangePassword: payload.user.must_change_password === true,
           roles: payload.user.roles.filter(
             (role): role is 'policy-admin' | 'policy-editor' | 'policy-viewer' | 'auditor' =>
               role === 'policy-admin' ||
@@ -76,7 +77,11 @@ export const LoginPage = () => {
           },
         },
       );
-      navigate('/dashboard', { replace: true });
+      if (payload.user.must_change_password) {
+        navigate('/auth/change-password', { replace: true });
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Login failed';
       setError(message);

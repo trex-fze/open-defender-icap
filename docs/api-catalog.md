@@ -100,7 +100,7 @@ Override precedence note: policy-engine evaluates active domain overrides before
 | Method | Path | Description | Roles |
 | --- | --- | --- | --- |
 | `GET`/`POST` | `/api/v1/iam/users` | List or create IAM users (`username` primary, optional `email`, optional OIDC/hybrid `subject`). | `iam:manage` (policy-admin). `GET` is cursor paginated (`limit`, `cursor`) and returns `{ data, meta }`. `POST` requires initial local `password` and supports `must_change_password`. |
-| `GET`/`PUT`/`DELETE` | `/api/v1/iam/users/:id` | Fetch or update a user; `DELETE` supports hard delete with `?hard=true`, otherwise performs disable for compatibility. | `iam:manage` for mutations, `iam:view` for reads. Protected users and last-active-admin operations return `409`. |
+| `GET`/`PUT`/`DELETE` | `/api/v1/iam/users/:id` | Fetch or update a user; `DELETE` supports hard delete with `?hard=true`, otherwise performs disable for compatibility. | `iam:manage` for mutations, `iam:view` for reads. Protected users and last-active-admin operations return `409` (`PROTECTED_USER`, `LAST_ACTIVE_ADMIN`). |
 | `POST` | `/api/v1/iam/users/:id/disable` | Disable a user explicitly. | `iam:manage`; blocked for protected users and last active policy-admin. |
 | `POST` | `/api/v1/iam/users/:id/enable` | Re-enable a disabled user. | `iam:manage`. |
 | `POST`/`DELETE` | `/api/v1/iam/users/:id/roles` | Assign or revoke role bindings for a user. | `iam:manage`. |
@@ -115,7 +115,9 @@ Override precedence note: policy-engine evaluates active domain overrides before
 | `GET`/`POST` | `/api/v1/iam/service-accounts` | List or create service accounts (returns hashed token + rotate endpoint). | `iam:view` / `iam:manage`. `GET` is cursor paginated (`limit`, `cursor`) and returns `{ data, meta }`. |
 | `POST` | `/api/v1/iam/service-accounts/:id/rotate` | Rotate a service-account token (optionally replacing roles). | `iam:manage`. |
 | `DELETE` | `/api/v1/iam/service-accounts/:id` | Disable a service account. | `iam:manage`. |
-| `GET` | `/api/v1/iam/whoami` | Introspect the caller’s effective roles and permissions. | Any authenticated caller. |
+| `GET` | `/api/v1/iam/whoami` | Introspect the caller’s effective roles and permissions. | Any authenticated caller; user principals include `username`, `email`, `display_name`, and `must_change_password` for forced-password-change UX. |
+
+Compatibility note: `DELETE /api/v1/iam/users/:id` without `hard=true` behaves as disable. Use `POST /api/v1/iam/users/:id/disable` and `POST /api/v1/iam/users/:id/enable` for explicit lifecycle transitions, and `DELETE ...?hard=true` for irreversible removal.
 | `GET` | `/api/v1/iam/audit` | Paginated IAM audit log (mutations + metadata). | `iam:view` (policy-admin or auditor). Cursor pagination with `limit` and `cursor`; response is `{ data, meta }`. |
 
 ---

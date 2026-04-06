@@ -1624,6 +1624,7 @@ pub struct WhoAmIResponse {
     pub username: Option<String>,
     pub email: Option<String>,
     pub display_name: Option<String>,
+    pub must_change_password: Option<bool>,
 }
 
 pub async fn list_users_route(
@@ -2501,10 +2502,13 @@ pub async fn whoami_route(
     let mut username = None;
     let mut email = None;
     let mut display_name = None;
+    let mut must_change_password = None;
 
     if let (PrincipalType::User, Some(user_id)) = (&user.principal_type, user.principal_id) {
         let profile =
-            sqlx::query("SELECT username, email, display_name FROM iam_users WHERE id = $1")
+            sqlx::query(
+                "SELECT username, email, display_name, must_change_password FROM iam_users WHERE id = $1",
+            )
                 .bind(user_id)
                 .fetch_optional(state.iam().pool())
                 .await
@@ -2514,6 +2518,7 @@ pub async fn whoami_route(
             username = row.get::<Option<String>, _>("username");
             email = row.get::<Option<String>, _>("email");
             display_name = row.get::<Option<String>, _>("display_name");
+            must_change_password = row.get::<Option<bool>, _>("must_change_password");
         }
     }
 
@@ -2526,6 +2531,7 @@ pub async fn whoami_route(
         username,
         email,
         display_name,
+        must_change_password,
     }))
 }
 
