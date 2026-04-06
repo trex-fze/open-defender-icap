@@ -57,6 +57,7 @@ Override precedence note: policy-engine evaluates active domain overrides before
 | Method | Path | Description | Roles |
 | --- | --- | --- | --- |
 | `GET`/`POST` | `/api/v1/policies` | List or create policies via Admin API. | `policy-viewer` / `policy-editor`. |
+| `GET` | `/api/v1/policies/runtime-sync` | Compare active control-plane policy vs policy-engine runtime (`in_sync`, snapshots, drift reason). | `policy-viewer`. |
 | `GET`/`PUT` | `/api/v1/policies/:id` | Fetch or update a policy by ID. | `policy-viewer` / `policy-editor`. |
 | `GET` | `/api/v1/policies/:id/versions` | List immutable policy version snapshots for a policy (`version`, `status`, `created_by`, `created_at`, `deployed_at`, `rule_count`, `notes`). | `policy-viewer`. |
 | `POST` | `/api/v1/policies/:id/publish` | Mark a policy version as active (publishes notes). | `policy-admin`. |

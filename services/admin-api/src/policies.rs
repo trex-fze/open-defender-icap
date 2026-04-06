@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::{
     auth::{require_roles, UserContext, ROLE_POLICY_EDIT, ROLE_POLICY_PUBLISH, ROLE_POLICY_VIEW},
     pagination::{PageOptions, Paged},
-    ApiError, AppState,
+    ApiError, AppState, PolicyEngineRuntimeSummary,
 };
 
 const POLICY_STATUS_ACTIVE: &str = "active";
@@ -68,6 +68,20 @@ pub struct PolicyVersionSummary {
     pub deployed_at: Option<DateTime<Utc>>,
     pub notes: Option<String>,
     pub rule_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PolicyRuntimeSnapshot {
+    pub policy_id: Option<String>,
+    pub version: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PolicyRuntimeSyncStatus {
+    pub control_plane: Option<PolicyRuntimeSnapshot>,
+    pub runtime: PolicyRuntimeSnapshot,
+    pub in_sync: bool,
+    pub drift_reason: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -185,6 +199,75 @@ pub async fn list_policy_versions(
             })
             .collect(),
     ))
+}
+
+pub async fn policy_runtime_sync(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+) -> Result<Json<PolicyRuntimeSyncStatus>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_POLICY_VIEW)
+        .map_err(|status| (status, Json(ApiError::forbidden())))?;
+
+    let active = sqlx::query(
+        r#"SELECT id::text AS id, version
+           FROM policies
+           WHERE status = $1
+           ORDER BY created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(POLICY_STATUS_ACTIVE)
+    .fetch_optional(state.pool())
+    .await
+    .map_err(map_db_error_tx)?
+    .map(|row| PolicyRuntimeSnapshot {
+        policy_id: row.get::<Option<String>, _>("id"),
+        version: row.get("version"),
+    });
+
+    let runtime = state.fetch_policy_engine_runtime().await.map_err(|err| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(ApiError::new(
+                "POLICY_RUNTIME_UNAVAILABLE",
+                &format!("failed to fetch policy-engine runtime: {err}"),
+            )),
+        )
+    })?;
+    let runtime_snapshot = policy_runtime_snapshot(runtime);
+
+    let (in_sync, drift_reason) = match active.as_ref() {
+        None => (false, Some("no active control-plane policy".to_string())),
+        Some(control) => {
+            let id_matches = control.policy_id == runtime_snapshot.policy_id;
+            let version_matches = control.version == runtime_snapshot.version;
+            if id_matches && version_matches {
+                (true, None)
+            } else {
+                let reason = format!(
+                    "control-plane id/version ({:?}/{}) differs from runtime ({:?}/{})",
+                    control.policy_id,
+                    control.version,
+                    runtime_snapshot.policy_id,
+                    runtime_snapshot.version
+                );
+                (false, Some(reason))
+            }
+        }
+    };
+
+    Ok(Json(PolicyRuntimeSyncStatus {
+        control_plane: active,
+        runtime: runtime_snapshot,
+        in_sync,
+        drift_reason,
+    }))
+}
+
+fn policy_runtime_snapshot(input: PolicyEngineRuntimeSummary) -> PolicyRuntimeSnapshot {
+    PolicyRuntimeSnapshot {
+        policy_id: input.policy_id,
+        version: input.version,
+    }
 }
 
 pub async fn create_policy(

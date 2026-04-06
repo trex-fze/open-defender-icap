@@ -105,6 +105,7 @@ enum AuthCmd {
 #[derive(Subcommand, Debug)]
 enum PolicyCmd {
     List,
+    RuntimeSync,
     Create {
         #[clap(long)]
         file: PathBuf,
@@ -935,6 +936,39 @@ async fn handle_policy(cmd: &PolicyCmd, client: &ApiClient, json: bool) -> Resul
                     })
                     .collect();
                 print_table(&["ID", "Name", "Version", "Status", "Rules"], rows);
+            }
+        }
+        PolicyCmd::RuntimeSync => {
+            let sync: PolicyRuntimeSyncDto =
+                client.get("/api/v1/policies/runtime-sync", &[]).await?;
+            if json {
+                print_json(&sync)?;
+            } else {
+                println!(
+                    "Runtime sync: {}",
+                    if sync.in_sync {
+                        "in-sync"
+                    } else {
+                        "drift-detected"
+                    }
+                );
+                if let Some(control) = sync.control_plane.as_ref() {
+                    println!(
+                        "Control plane: policy_id={} version={}",
+                        control.policy_id.as_deref().unwrap_or("<none>"),
+                        control.version
+                    );
+                } else {
+                    println!("Control plane: <none>");
+                }
+                println!(
+                    "Runtime:       policy_id={} version={}",
+                    sync.runtime.policy_id.as_deref().unwrap_or("<none>"),
+                    sync.runtime.version
+                );
+                if let Some(reason) = sync.drift_reason {
+                    println!("Reason: {reason}");
+                }
             }
         }
         PolicyCmd::Create {
@@ -2535,6 +2569,20 @@ struct PolicyVersionSummaryDto {
     deployed_at: Option<String>,
     notes: Option<String>,
     rule_count: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PolicyRuntimeSnapshotDto {
+    policy_id: Option<String>,
+    version: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PolicyRuntimeSyncDto {
+    control_plane: Option<PolicyRuntimeSnapshotDto>,
+    runtime: PolicyRuntimeSnapshotDto,
+    in_sync: bool,
+    drift_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

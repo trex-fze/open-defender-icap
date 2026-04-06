@@ -369,7 +369,19 @@ async fn main() -> Result<()> {
             .max_connections(5)
             .connect(&db_url)
             .await?;
-        sqlx::migrate!("./migrations").run(&pool).await?;
+        let shared_with_admin_db = admin_db_url
+            .as_deref()
+            .map(|admin_db| admin_db == db_url)
+            .unwrap_or_else(|| activation_db_url.as_deref() == Some(db_url.as_str()));
+        if shared_with_admin_db {
+            warn!(
+                target = "svc-policy",
+                "policy database is shared with admin database; skipping policy-engine local migrations"
+            );
+            ensure_policy_tables(&pool).await?;
+        } else {
+            sqlx::migrate!("./migrations").run(&pool).await?;
+        }
         let activation_pool = if activation_db_url.as_deref() == Some(db_url.as_str()) {
             pool.clone()
         } else if let Some(url) = activation_db_url.as_deref() {
@@ -737,6 +749,64 @@ async fn update_policy(
 
 async fn health() -> &'static str {
     "OK"
+}
+
+async fn ensure_policy_tables(pool: &PgPool) -> Result<()> {
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS policies (
+               id UUID PRIMARY KEY,
+               name TEXT NOT NULL,
+               version TEXT NOT NULL,
+               status TEXT NOT NULL DEFAULT 'active',
+               created_by TEXT,
+               created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+           )"#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS policy_rules (
+               id UUID PRIMARY KEY,
+               policy_id UUID NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+               priority INTEGER NOT NULL,
+               action TEXT NOT NULL,
+               description TEXT,
+               conditions JSONB NOT NULL,
+               created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+           )"#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS policy_rules_policy_priority_idx ON policy_rules (policy_id, priority)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS policy_versions (
+               id UUID PRIMARY KEY,
+               policy_id UUID NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+               version TEXT NOT NULL,
+               status TEXT NOT NULL DEFAULT 'draft',
+               created_by TEXT,
+               created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+               notes TEXT,
+               rules JSONB NOT NULL,
+               deployed_at TIMESTAMPTZ
+           )"#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS policy_versions_policy_idx ON policy_versions (policy_id, created_at DESC)",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]

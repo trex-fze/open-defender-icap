@@ -58,6 +58,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl health` | Run health checks (future) | Will query backend `/health` endpoints. |
 | `odctl smoke [host:port]` | Send sample ICAP REQMOD to adaptor | Defaults to `127.0.0.1:1344`; prints ICAP status line. |
 | `odctl policy list` | List draft/active policies via Admin API | Calls `GET /api/v1/policies?include_drafts=true`; requires admin auth token. |
+| `odctl policy runtime-sync` | Show control-plane vs runtime policy drift status | Calls `GET /api/v1/policies/runtime-sync`; reports `in_sync` and drift reason when present. |
 | `odctl policy create --file policy.json --name "Draft Name" [--version vX]` | Create a new policy draft from DSL document | Validates via `/api/v1/policies/validate`, then creates via `/api/v1/policies`. |
 | `odctl policy show <policy-id>` | Show one policy with rules | Calls `GET /api/v1/policies/:id`. |
 | `odctl policy history <policy-id>` | Show policy version history table | Calls `GET /api/v1/policies/:id/versions`. |
@@ -75,6 +76,8 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl classification export --file bundle.json` | Export domain classifications for backup/share | Calls `GET /api/v1/classifications/export` and writes bundle schema `od-classification-bundle.v1`. |
 | `odctl classification import --file bundle.json --dry-run --recompute` | Import a bundle with optional policy recompute | Calls `POST /api/v1/classifications/import`; use `--no-recompute` to trust imported risk/action/confidence values. Invalid rows are rejected and saved to JSONL error file. |
 | `odctl classification flush --all --dry-run` | Preview or apply bulk classification flush | Calls `POST /api/v1/classifications/flush`; supports `--all`, `--prefix`, or `--keys-file` scopes. |
+
+Smoke verification: run `tests/policy-runtime-smoke.sh` to verify publish -> reload propagation, runtime sync, and decision-path behavior end-to-end in Docker.
 | `odctl iam users disable <id>` | Disable IAM user access | Calls `POST /api/v1/iam/users/:id/disable`; protected/last-admin guardrails may return `409`. |
 | `odctl iam users enable <id>` | Re-enable a disabled IAM user | Calls `POST /api/v1/iam/users/:id/enable`. |
 | `odctl iam users update <id> --username ...` | Edit IAM user identity fields/status | Calls `PUT /api/v1/iam/users/:id`; supports username/email/display/subject/status updates. |

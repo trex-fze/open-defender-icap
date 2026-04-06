@@ -41,6 +41,39 @@ async fn policy_list_hits_admin_api() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn policy_runtime_sync_hits_admin_api() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/policies/runtime-sync"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "control_plane": {
+                "policy_id": "73c3c89b-157f-40c6-9c5b-6dfb4f9e5b3c",
+                "version": "release-20260406"
+            },
+            "runtime": {
+                "policy_id": "73c3c89b-157f-40c6-9c5b-6dfb4f9e5b3c",
+                "version": "release-20260406"
+            },
+            "in_sync": true,
+            "drift_reason": null
+        })))
+        .mount(&server)
+        .await;
+
+    Command::cargo_bin("odctl")
+        .unwrap()
+        .arg("--base-url")
+        .arg(server.uri())
+        .arg("--token")
+        .arg("static")
+        .args(["policy", "runtime-sync"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Runtime sync: in-sync"))
+        .stdout(predicate::str::contains("release-20260406"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn policy_create_validates_then_posts_admin_api() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

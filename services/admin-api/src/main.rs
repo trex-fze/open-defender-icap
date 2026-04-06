@@ -135,6 +135,12 @@ pub struct AppState {
     http_client: reqwest::Client,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PolicyEngineRuntimeSummary {
+    pub policy_id: Option<String>,
+    pub version: String,
+}
+
 impl AppState {
     pub fn pool(&self) -> &PgPool {
         &self.pool
@@ -206,6 +212,32 @@ impl AppState {
             endpoint, "policy-engine reload triggered"
         );
         Ok(())
+    }
+
+    pub async fn fetch_policy_engine_runtime(&self) -> Result<PolicyEngineRuntimeSummary> {
+        let endpoint = format!("{}/api/v1/policies", self.policy_engine_url);
+        let mut request = self.http_client.get(&endpoint);
+        if let Some(token) = self.policy_engine_admin_token.as_deref() {
+            request = request.header("X-Admin-Token", token);
+        }
+        let response = request
+            .send()
+            .await
+            .with_context(|| format!("failed to call policy-engine list at {}", endpoint))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "policy-engine list failed with status {} body={}",
+                status,
+                body
+            ));
+        }
+        let parsed = response
+            .json::<PolicyEngineRuntimeSummary>()
+            .await
+            .context("failed to decode policy-engine runtime payload")?;
+        Ok(parsed)
     }
 
     pub async fn evaluate_policy_decision<T, R>(&self, payload: &T) -> Result<R>
@@ -500,6 +532,10 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/policies",
             get(policies::list_policies).post(policies::create_policy),
+        )
+        .route(
+            "/api/v1/policies/runtime-sync",
+            get(policies::policy_runtime_sync),
         )
         .route("/api/v1/policies/validate", post(policies::validate_policy))
         .route(
