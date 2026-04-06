@@ -200,7 +200,14 @@ fn enrich_squid_event(map: &mut Map<String, Value>) {
                 ensure_value(
                     map,
                     "traffic_class",
-                    Value::String(if inferred == "block" { "blocked" } else { "allowed" }.into()),
+                    Value::String(
+                        if inferred == "block" {
+                            "blocked"
+                        } else {
+                            "allowed"
+                        }
+                        .into(),
+                    ),
                 );
             }
         }
@@ -211,7 +218,9 @@ fn enrich_squid_event(map: &mut Map<String, Value>) {
     }
 
     if let Some(raw_target) = target.as_deref() {
-        if let Some((domain, canonical_url)) = parse_target_domain_url(raw_target, method.as_deref()) {
+        if let Some((domain, canonical_url)) =
+            parse_target_domain_url(raw_target, method.as_deref())
+        {
             ensure_path_str(map, &["destination", "domain"], &domain);
             ensure_path_str(map, &["url", "full"], &canonical_url);
             if let Ok(normalized) = normalize_target(&domain, "/", Some("https")) {
@@ -322,11 +331,15 @@ mod tests {
             Some("dice.com")
         );
         assert_eq!(
-            value.get("recommended_action_inferred").and_then(Value::as_str),
+            value
+                .get("recommended_action_inferred")
+                .and_then(Value::as_str),
             Some("block")
         );
         assert_eq!(
-            value.pointer("/http/response/status_code").and_then(Value::as_i64),
+            value
+                .pointer("/http/response/status_code")
+                .and_then(Value::as_i64),
             Some(403)
         );
     }
@@ -345,7 +358,9 @@ mod tests {
             Some("preset.example")
         );
         assert_eq!(
-            value.get("recommended_action_inferred").and_then(Value::as_str),
+            value
+                .get("recommended_action_inferred")
+                .and_then(Value::as_str),
             Some("allow")
         );
     }

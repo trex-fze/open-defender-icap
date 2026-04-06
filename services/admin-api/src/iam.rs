@@ -1307,7 +1307,12 @@ pub async fn list_users_route(
         None
     };
 
-    Ok(Json(CursorPaged::new(results, limit, has_more, next_cursor)))
+    Ok(Json(CursorPaged::new(
+        results,
+        limit,
+        has_more,
+        next_cursor,
+    )))
 }
 
 pub async fn create_user_route(
@@ -1446,10 +1451,7 @@ pub async fn list_groups_route(
                 Json(ApiError::new("INVALID_CURSOR", message)),
             )
         })?;
-    let cursor_name = cursor
-        .as_ref()
-        .map(|c| c.name.clone())
-        .unwrap_or_default();
+    let cursor_name = cursor.as_ref().map(|c| c.name.clone()).unwrap_or_default();
     let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
 
     let iam = state.iam();
@@ -1499,7 +1501,12 @@ pub async fn list_groups_route(
         None
     };
 
-    Ok(Json(CursorPaged::new(results, limit, has_more, next_cursor)))
+    Ok(Json(CursorPaged::new(
+        results,
+        limit,
+        has_more,
+        next_cursor,
+    )))
 }
 
 pub async fn create_group_route(
@@ -1783,10 +1790,7 @@ pub async fn list_service_accounts_route(
                 Json(ApiError::new("INVALID_CURSOR", message)),
             )
         })?;
-    let cursor_name = cursor
-        .as_ref()
-        .map(|c| c.name.clone())
-        .unwrap_or_default();
+    let cursor_name = cursor.as_ref().map(|c| c.name.clone()).unwrap_or_default();
     let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
 
     let iam = state.iam();
@@ -1831,7 +1835,12 @@ pub async fn list_service_accounts_route(
         None
     };
 
-    Ok(Json(CursorPaged::new(results, limit, has_more, next_cursor)))
+    Ok(Json(CursorPaged::new(
+        results,
+        limit,
+        has_more,
+        next_cursor,
+    )))
 }
 
 pub async fn get_service_account_route(

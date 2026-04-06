@@ -317,7 +317,10 @@ fn derive_registered_domain(hostname: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    let labels: Vec<&str> = trimmed.split('.').filter(|label| !label.is_empty()).collect();
+    let labels: Vec<&str> = trimmed
+        .split('.')
+        .filter(|label| !label.is_empty())
+        .collect();
     if labels.len() <= 2 {
         Some(trimmed)
     } else {
@@ -471,7 +474,11 @@ async fn handle_decision(
         .decision
         .verdict
         .as_ref()
-        .map(|verdict| !state.evaluator.is_category_enabled(&verdict.primary_category))
+        .map(|verdict| {
+            !state
+                .evaluator
+                .is_category_enabled(&verdict.primary_category)
+        })
         .unwrap_or(false);
     simulation.decision.decision_source = Some(if taxonomy_disabled {
         "taxonomy_disabled".to_string()
@@ -891,9 +898,15 @@ mod tests {
     fn domain_scope_matching_honors_subdomain_boundary() {
         assert!(domain_scope_matches_host("mozilla.org", "mozilla.org"));
         assert!(domain_scope_matches_host("mozilla.org", "www.mozilla.org"));
-        assert!(domain_scope_matches_host("*.mozilla.org", "www.mozilla.org"));
+        assert!(domain_scope_matches_host(
+            "*.mozilla.org",
+            "www.mozilla.org"
+        ));
         assert!(!domain_scope_matches_host("mozilla.org", "evilmozilla.org"));
-        assert!(!domain_scope_matches_host("mozilla.org", "mozilla.org.evil"));
+        assert!(!domain_scope_matches_host(
+            "mozilla.org",
+            "mozilla.org.evil"
+        ));
     }
 
     #[test]

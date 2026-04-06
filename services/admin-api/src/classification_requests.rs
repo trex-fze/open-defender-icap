@@ -159,7 +159,12 @@ pub async fn list_pending(
     } else {
         None
     };
-    Ok(Json(CursorPaged::new(records, limit, has_more, next_cursor)))
+    Ok(Json(CursorPaged::new(
+        records,
+        limit,
+        has_more,
+        next_cursor,
+    )))
 }
 
 pub async fn manual_unblock(
@@ -276,7 +281,8 @@ pub async fn manual_classify(
         )
     })?;
 
-    let applied_key = canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+    let applied_key =
+        canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
     let (entity_level, hostname) = parse_normalized_key(&applied_key).ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,
@@ -390,7 +396,8 @@ pub async fn upsert_pending(
         .filter(|value| !value.is_empty())
         .unwrap_or("waiting_content");
 
-    let applied_key = canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+    let applied_key =
+        canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
 
     sqlx::query(
         r#"
@@ -432,7 +439,8 @@ pub async fn clear_pending(
         ));
     }
 
-    let applied_key = canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+    let applied_key =
+        canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
 
     sqlx::query("DELETE FROM classification_requests WHERE normalized_key = $1")
         .bind(&applied_key)

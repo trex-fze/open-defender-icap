@@ -1199,8 +1199,9 @@ async fn handle_report(cmd: &ReportCmd, client: &ApiClient, json: bool) -> Resul
             }
         }
         ReportCmd::Status { range } => {
-            let report: ReportingStatusResponse =
-                client.get("/api/v1/reporting/status", &[("range", range)]).await?;
+            let report: ReportingStatusResponse = client
+                .get("/api/v1/reporting/status", &[("range", range)])
+                .await?;
             if json {
                 print_json(&report)?;
             } else {

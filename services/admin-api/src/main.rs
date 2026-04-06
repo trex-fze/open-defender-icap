@@ -760,7 +760,12 @@ async fn list_overrides(
         None
     };
 
-    Ok(Json(CursorPaged::new(overrides, limit, has_more, next_cursor)))
+    Ok(Json(CursorPaged::new(
+        overrides,
+        limit,
+        has_more,
+        next_cursor,
+    )))
 }
 
 async fn create_override(

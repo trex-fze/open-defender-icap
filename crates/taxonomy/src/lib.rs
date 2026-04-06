@@ -468,11 +468,7 @@ const SUBCATEGORY_ALIAS_PAIRS: &[(&str, &str, &str)] = &[
         "unknown",
         UNKNOWN_DEFAULT_SUBCATEGORY_ID,
     ),
-    (
-        "advertisements",
-        "advertisement",
-        "general-advertising",
-    ),
+    ("advertisements", "advertisement", "general-advertising"),
     ("advertisements", "ads", "general-advertising"),
     (
         "advertisements",

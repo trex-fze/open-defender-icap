@@ -53,10 +53,7 @@ pub async fn list_cli_logs(
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
     let cursor_created_at = cursor.as_ref().map(|c| c.created_at);
-    let cursor_id = cursor
-        .as_ref()
-        .map(|c| c.id)
-        .unwrap_or_else(Uuid::nil);
+    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
 
     let rows = sqlx::query(
         r#"SELECT id, operator_id, command, args_hash, result, created_at
