@@ -140,15 +140,15 @@ export const usePoliciesData = (): PoliciesState => {
 
   if (query.isError) {
     return {
-      data: mockSummaries,
+      data: [],
       loading: false,
       error: query.error instanceof Error ? query.error.message : 'Failed to reach Admin API',
-      isMock: true,
+      isMock: false,
     };
   }
 
   return {
-    data: query.data ?? mockSummaries,
+    data: query.data ?? [],
     loading: query.isLoading,
     error: undefined,
     isMock: false,
@@ -187,15 +187,15 @@ export const usePolicyDetail = (policyId?: string): PolicyDetailState => {
 
   if (query.isError) {
     return {
-      data: fallback,
+      data: undefined,
       loading: false,
       error: query.error instanceof Error ? query.error.message : 'Failed to reach Admin API',
-      isMock: true,
+      isMock: false,
     };
   }
 
   return {
-    data: query.data ?? fallback,
+    data: query.data,
     loading: query.isLoading,
     error: undefined,
     isMock: false,
