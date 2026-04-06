@@ -105,7 +105,20 @@ enum AuthCmd {
 #[derive(Subcommand, Debug)]
 enum PolicyCmd {
     List,
+    Create {
+        #[clap(long)]
+        file: PathBuf,
+        #[clap(long)]
+        name: String,
+        #[clap(long)]
+        version: Option<String>,
+        #[clap(long)]
+        notes: Option<String>,
+    },
     Show {
+        id: String,
+    },
+    History {
         id: String,
     },
     Pull {
@@ -924,9 +937,83 @@ async fn handle_policy(cmd: &PolicyCmd, client: &ApiClient, json: bool) -> Resul
                 print_table(&["ID", "Name", "Version", "Status", "Rules"], rows);
             }
         }
+        PolicyCmd::Create {
+            file,
+            name,
+            version,
+            notes,
+        } => {
+            let doc = load_policy_document(&file)?;
+            let target_version = version.clone().unwrap_or_else(|| doc.version.clone());
+            let rule_payloads = rules_from_document(&doc);
+            let validation_body = PolicyDraftRequestPayload {
+                name: name.trim().to_string(),
+                version: Some(target_version.clone()),
+                created_by: None,
+                notes: notes.clone(),
+                rules: rule_payloads.clone(),
+            };
+            let validation: PolicyValidationResponse = client
+                .post("/api/v1/policies/validate", &validation_body)
+                .await?;
+            if !validation.valid {
+                if json {
+                    print_json(&validation)?;
+                } else {
+                    println!("Policy validation failed: {}", validation.errors.join(", "));
+                }
+                return Err(anyhow!("policy validation failed"));
+            }
+
+            let create_payload = PolicyDraftRequestPayload {
+                name: name.trim().to_string(),
+                version: Some(target_version),
+                created_by: None,
+                notes: notes.clone(),
+                rules: rule_payloads,
+            };
+            let created: PolicyDetail = client.post("/api/v1/policies", &create_payload).await?;
+            if !json {
+                println!("Created policy {} from {}", created.name, file.display());
+            }
+            render_policy(&created, json)?;
+        }
         PolicyCmd::Show { id } => {
             let detail: PolicyDetail = client.get(&format!("/api/v1/policies/{id}"), &[]).await?;
             render_policy(&detail, json)?;
+        }
+        PolicyCmd::History { id } => {
+            let versions: Vec<PolicyVersionSummaryDto> = client
+                .get(&format!("/api/v1/policies/{id}/versions"), &[])
+                .await?;
+            if json {
+                print_json(&versions)?;
+            } else {
+                let rows = versions
+                    .into_iter()
+                    .map(|item| {
+                        vec![
+                            item.version,
+                            item.status,
+                            item.rule_count.to_string(),
+                            item.created_at,
+                            item.deployed_at.unwrap_or_else(|| "-".to_string()),
+                            item.created_by.unwrap_or_else(|| "-".to_string()),
+                        ]
+                    })
+                    .collect();
+                print_table(
+                    &[
+                        "Version",
+                        "Status",
+                        "Rules",
+                        "Created At",
+                        "Deployed At",
+                        "Actor",
+                    ],
+                    rows,
+                );
+            }
         }
         PolicyCmd::Pull { id, file } => {
             let detail: PolicyDetail = client.get(&format!("/api/v1/policies/{id}"), &[]).await?;
@@ -2435,6 +2522,19 @@ struct PolicyDetail {
     status: String,
     rule_count: i64,
     rules: Vec<PolicyRuleResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PolicyVersionSummaryDto {
+    id: Uuid,
+    policy_id: Uuid,
+    version: String,
+    status: String,
+    created_by: Option<String>,
+    created_at: String,
+    deployed_at: Option<String>,
+    notes: Option<String>,
+    rule_count: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -29,15 +29,17 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - Monitoring: tail `target/debug/icap-adaptor` logs and scrape Prometheus metrics from `http://<metrics_host>:<metrics_port>/metrics` (default `19005`).
 
 ## 4. Using the Policy Engine
-- Config file: `config/policy-engine.json` (host/port, DSL path, optional `database_url`, optional `admin_token`, optional `auth.static_roles`). Leave `database_url` as `null` for file-backed mode; set to a Postgres connection string (or export `OD_POLICY_DATABASE_URL`/`DATABASE_URL`) to enable persistent storage. When `admin_token` is set—either in the file or via `OD_POLICY_ADMIN_TOKEN`—policy admin APIs require header `X-Admin-Token` (CLI reads `OD_ADMIN_TOKEN`). The `auth` block controls which roles (`policy-admin`, `policy-editor`, `policy-viewer`) are granted to static tokens.
+- Config file: `config/policy-engine.json` (host/port, DSL path, optional `database_url`, optional `admin_token`, optional `auth.static_roles`). Leave `database_url` as `null` for file-backed mode; set to a Postgres connection string (or export `OD_POLICY_DATABASE_URL`/`DATABASE_URL`) to enable persistent storage. Policy admin APIs always require credentials (`Authorization: Bearer` or `X-Admin-Token`), and the IAM resolver enforces effective roles (`policy-admin`, `policy-editor`, `policy-viewer`).
 - Policies reside in `config/policies.json`; `GET /api/v1/policies` lists active rules, `POST /api/v1/policies/reload` hot-reloads from the DSL/DB, `POST /api/v1/policies` (DB mode only) creates a new policy document, and `POST /api/v1/policies/simulate` evaluates a sample request without enforcing it.
-- Policy updates: `PUT /api/v1/policies/<policy_id|current>` accepts a JSON body (`version`, `status`, optional `notes`, optional `rules`) and requires the `policy-editor` role. Every create/update stores a snapshot in `policy_versions` for audit/history.
+- Policy updates: `PUT /api/v1/policies/<policy_id|current>` accepts a JSON body (`version`, `status=draft|archived`, optional `notes`, optional `rules`) and requires the `policy-editor` role. Promotion to active is only via `POST /api/v1/policies/:id/publish` (`policy-admin`). Every create/update stores a snapshot in `policy_versions` for audit/history.
 - `cargo run -p policy-engine` starts REST API with `/api/v1/decision` + health endpoints. On startup the service applies migrations in `services/policy-engine/migrations/` and seeds from the DSL file if the database is empty.
+- Docker default topology now points both Admin API policy writes and policy-engine runtime reads at `defender_admin` to avoid control-plane/runtime drift unless operators explicitly override `OD_POLICY_DATABASE_URL`.
 - Future operations: manage policies via Admin API/UI/CLI; run simulations for policy changes.
 
 ## 5. Admin API & Overrides
 - Config file: `config/admin-api.json` controls host/port, optional `database_url`, optional `admin_token`, and cache invalidation wiring (`redis_url`, `cache_channel`). Leave `database_url` as `null` for check-ins, but set either `database_url` in the file or `OD_ADMIN_DATABASE_URL`/`DATABASE_URL` env vars in deployment shells; the service refuses to start without one of these values.
 - Cache invalidation: when `redis_url` is configured (or `OD_CACHE_REDIS_URL` env var is set) the Admin API publishes override/policy updates to the `cache_channel` (defaults to `od:cache:invalidate`) and deletes matching Redis keys before returning to the client. Without Redis configured the API logs a warning and skips invalidation, which means cached policy decisions may take up to 5 minutes to expire.
+- Policy propagation: Admin API policy `create`/`update`/`publish` persists in Postgres, invalidates policy cache, and immediately triggers policy-engine reload. If reload fails, the API returns `502 POLICY_RELOAD_FAILED` (the change remains persisted; operators can retry with `POST /api/v1/policies/reload`).
 - Local authentication (default): set `OD_AUTH_MODE=local` and a strong `OD_LOCAL_AUTH_JWT_SECRET` (>=32 chars, non-default). `OD_DEFAULT_ADMIN_PASSWORD` is only required for first bootstrap when no active local `policy-admin` exists.
 - Login endpoint: `POST /api/v1/auth/login` with `{ "username": "admin", "password": "..." }`; use returned bearer token for UI/API calls.
 - Service-account/static tokens remain valid for automation through `X-Admin-Token`.
@@ -54,12 +56,14 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl help` | Display available commands | Lists current subcommands. |
 | `odctl health` | Run health checks (future) | Will query backend `/health` endpoints. |
 | `odctl smoke [host:port]` | Send sample ICAP REQMOD to adaptor | Defaults to `127.0.0.1:1344`; prints ICAP status line. |
-| `odctl policy list` | List active policy rules via policy engine | Respects `OD_POLICY_URL` (default `http://localhost:19010`); add `OD_ADMIN_TOKEN` or a bearer token for protected endpoints. |
-| `odctl policy reload` | Trigger policy reload (file/DB backed) | Requires admin token when configured. |
-| `odctl policy simulate <file>` | Hit `/api/v1/policies/simulate` with a JSON request | JSON must match `DecisionRequest`; requires admin token when configured. |
-| `odctl policy import <file> [name] [created_by]` | Create a DB-backed policy from a DSL file | Wraps `POST /api/v1/policies`; honors `OD_ADMIN_TOKEN`. |
-| `odctl policy update <id|current> <file>` | Update policy metadata/rules with JSON payload | Sends `PUT /api/v1/policies/{id}`; `id` can be `current` to target the active policy. |
-| `odctl policy import/export` | Manage policy packages (future) | Depends on Stage 2 completion. |
+| `odctl policy list` | List draft/active policies via Admin API | Calls `GET /api/v1/policies?include_drafts=true`; requires admin auth token. |
+| `odctl policy create --file policy.json --name "Draft Name" [--version vX]` | Create a new policy draft from DSL document | Validates via `/api/v1/policies/validate`, then creates via `/api/v1/policies`. |
+| `odctl policy show <policy-id>` | Show one policy with rules | Calls `GET /api/v1/policies/:id`. |
+| `odctl policy history <policy-id>` | Show policy version history table | Calls `GET /api/v1/policies/:id/versions`. |
+| `odctl policy pull <policy-id> --file policy.json` | Export current policy detail to DSL file | Writes rules + version to local JSON file. |
+| `odctl policy push <policy-id> --file policy.json [--notes ...]` | Update policy draft from DSL file | Validates then `PUT /api/v1/policies/:id`; publish remains separate. |
+| `odctl policy publish <policy-id> [--version release-...]` | Promote draft to active policy | Calls `POST /api/v1/policies/:id/publish`; requires `policy-admin` role. |
+| `odctl policy validate --file policy.json` | Validate policy DSL payload without persisting | Calls `POST /api/v1/policies/validate`. |
 | `odctl cache lookup/invalidate` | Inspect redis entries (future) | Tied to Stage 3 cache enhancements. |
 | `odctl migrate run [admin|policy|all]` | Apply Postgres migrations for admin/policy services | Reads `OD_ADMIN_DATABASE_URL` / `OD_POLICY_DATABASE_URL` unless `--admin-url/--policy-url` provided; runs both when target omitted. |
 | `odctl seed policies [file] [name] [created_by]` | Load policy DSL file via Policy API | Defaults to `config/policies.json`, `name=default`; requires admin auth token. |

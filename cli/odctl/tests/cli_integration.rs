@@ -41,20 +41,132 @@ async fn policy_list_hits_admin_api() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn policy_create_validates_then_posts_admin_api() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/policies/validate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "valid": true,
+            "errors": []
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/policies"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "73c3c89b-157f-40c6-9c5b-6dfb4f9e5b3c",
+            "name": "CLI Draft",
+            "version": "v99",
+            "status": "draft",
+            "rule_count": 1,
+            "rules": [
+                {
+                    "id": "r1",
+                    "description": "Monitor social",
+                    "priority": 10,
+                    "action": "Monitor",
+                    "conditions": {"categories": ["social-media"]}
+                }
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("policy.json");
+    fs::write(
+        &file,
+        serde_json::to_string_pretty(&json!({
+            "version": "v99",
+            "rules": [
+                {
+                    "id": "r1",
+                    "priority": 10,
+                    "action": "Monitor",
+                    "description": "Monitor social",
+                    "conditions": {"categories": ["social-media"]}
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    Command::cargo_bin("odctl")
+        .unwrap()
+        .arg("--base-url")
+        .arg(server.uri())
+        .arg("--token")
+        .arg("static")
+        .args([
+            "policy",
+            "create",
+            "--file",
+            file.to_str().unwrap(),
+            "--name",
+            "CLI Draft",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created policy CLI Draft"))
+        .stdout(predicate::str::contains("version v99"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn policy_history_hits_admin_api() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v1/policies/73c3c89b-157f-40c6-9c5b-6dfb4f9e5b3c/versions",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": "5a5dcd8b-14ce-4d6a-8f2b-f69894f50111",
+                "policy_id": "73c3c89b-157f-40c6-9c5b-6dfb4f9e5b3c",
+                "version": "release-20260406",
+                "status": "active",
+                "created_by": "ci",
+                "created_at": "2026-04-06T10:00:00Z",
+                "deployed_at": "2026-04-06T10:01:00Z",
+                "notes": "published",
+                "rule_count": 7
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    Command::cargo_bin("odctl")
+        .unwrap()
+        .arg("--base-url")
+        .arg(server.uri())
+        .arg("--token")
+        .arg("static")
+        .args(["policy", "history", "73c3c89b-157f-40c6-9c5b-6dfb4f9e5b3c"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("release-20260406"))
+        .stdout(predicate::str::contains("active"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn override_list_hits_admin_api() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/overrides"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            {
-                "id": "e1c3a558-037f-4e32-874c-a076e7d0b258",
-                "scope_type": "domain",
-                "scope_value": "example.com",
-                "action": "allow",
-                "status": "active",
-                "expires_at": null
-            }
-        ])))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [
+                {
+                    "id": "e1c3a558-037f-4e32-874c-a076e7d0b258",
+                    "scope_type": "domain",
+                    "scope_value": "example.com",
+                    "action": "allow",
+                    "status": "active",
+                    "expires_at": null
+                }
+            ],
+            "meta": {"limit": 50, "has_more": false, "next_cursor": null, "prev_cursor": null}
+        })))
         .mount(&server)
         .await;
 
@@ -76,22 +188,25 @@ async fn iam_users_list_prints_table() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/iam/users"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            {
-                "user": {
-                    "id": "0c2f2b71-9ab6-4f39-905a-0b2d4f0a1111",
-                    "email": "avery@example.com",
-                    "display_name": "Avery Quinn",
-                    "subject": null,
-                    "status": "active",
-                    "created_at": "2026-03-24T00:00:00Z",
-                    "updated_at": "2026-03-24T00:00:00Z",
-                    "last_login_at": null
-                },
-                "roles": ["policy-admin"],
-                "groups": []
-            }
-        ])))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [
+                {
+                    "user": {
+                        "id": "0c2f2b71-9ab6-4f39-905a-0b2d4f0a1111",
+                        "email": "avery@example.com",
+                        "display_name": "Avery Quinn",
+                        "subject": null,
+                        "status": "active",
+                        "created_at": "2026-03-24T00:00:00Z",
+                        "updated_at": "2026-03-24T00:00:00Z",
+                        "last_login_at": null
+                    },
+                    "roles": ["policy-admin"],
+                    "groups": []
+                }
+            ],
+            "meta": {"limit": 100, "has_more": false, "next_cursor": null, "prev_cursor": null}
+        })))
         .mount(&server)
         .await;
 

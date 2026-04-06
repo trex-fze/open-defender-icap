@@ -23,6 +23,17 @@ export type PolicyDetail = {
   rules: PolicyRule[];
 };
 
+export type PolicyVersion = {
+  id: string;
+  version: string;
+  status: string;
+  ruleCount: number;
+  createdAt: string;
+  deployedAt?: string;
+  createdBy?: string;
+  notes?: string;
+};
+
 type PolicyListResponse = {
   data: ApiPolicySummary[];
 };
@@ -52,6 +63,17 @@ type ApiPolicyRule = {
   conditions?: Record<string, unknown>;
 };
 
+type ApiPolicyVersion = {
+  id: string;
+  version: string;
+  status: string;
+  rule_count?: number;
+  created_at: string;
+  deployed_at?: string | null;
+  created_by?: string | null;
+  notes?: string | null;
+};
+
 type PoliciesState = {
   data: PolicyListItem[];
   loading: boolean;
@@ -61,6 +83,13 @@ type PoliciesState = {
 
 type PolicyDetailState = {
   data?: PolicyDetail;
+  loading: boolean;
+  error?: string;
+  isMock: boolean;
+};
+
+type PolicyVersionsState = {
+  data: PolicyVersion[];
   loading: boolean;
   error?: string;
   isMock: boolean;
@@ -173,6 +202,43 @@ export const usePolicyDetail = (policyId?: string): PolicyDetailState => {
   };
 };
 
+export const usePolicyVersions = (policyId?: string): PolicyVersionsState => {
+  const { baseUrl, canCallApi, headers } = useAdminApi();
+  const enabled = Boolean(baseUrl && canCallApi && policyId);
+
+  const query = useQuery({
+    queryKey: queryKeys.policyVersions(baseUrl, policyId),
+    enabled,
+    queryFn: async () => {
+      const body = await adminGetJson<ApiPolicyVersion[]>(
+        { baseUrl, canCallApi, headers } as AdminApiContext,
+        `/api/v1/policies/${policyId}/versions`,
+      );
+      return (body ?? []).map(mapVersion);
+    },
+  });
+
+  if (!enabled) {
+    return { data: [], loading: false, isMock: true };
+  }
+
+  if (query.isError) {
+    return {
+      data: [],
+      loading: false,
+      error: query.error instanceof Error ? query.error.message : 'Failed to reach Admin API',
+      isMock: false,
+    };
+  }
+
+  return {
+    data: query.data ?? [],
+    loading: query.isLoading,
+    error: undefined,
+    isMock: false,
+  };
+};
+
 const mapSummary = (item: ApiPolicySummary): PolicyListItem => ({
   id: item.id,
   name: item.name,
@@ -196,4 +262,15 @@ const mapRule = (rule: ApiPolicyRule): PolicyRule => ({
   priority: rule.priority,
   action: rule.action,
   conditions: rule.conditions ?? {},
+});
+
+const mapVersion = (item: ApiPolicyVersion): PolicyVersion => ({
+  id: item.id,
+  version: item.version,
+  status: item.status,
+  ruleCount: item.rule_count ?? 0,
+  createdAt: item.created_at,
+  deployedAt: item.deployed_at ?? undefined,
+  createdBy: item.created_by ?? undefined,
+  notes: item.notes ?? undefined,
 });

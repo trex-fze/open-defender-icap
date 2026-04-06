@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { adminPostJson, type AdminApiContext } from '../api/adminClient';
+import { adminPostJson, adminPutJson, type AdminApiContext } from '../api/adminClient';
 import { useAdminApi } from './useAdminApi';
 
 export type PolicyCreateInput = {
@@ -29,6 +29,12 @@ type PolicyDetailResponse = {
 
 type PolicyPublishRequest = {
   notes?: string;
+};
+
+type PolicyUpdateRequest = {
+  version?: string;
+  notes?: string;
+  rules?: PolicyRulePayload[];
 };
 
 const defaultStarterRule = (): PolicyRulePayload => ({
@@ -90,9 +96,36 @@ export const usePolicyMutations = () => {
     }
   };
 
+  const updatePolicy = async (
+    policyId: string,
+    input: { version?: string; notes?: string; rules: PolicyRulePayload[] },
+  ): Promise<void> => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const payload: PolicyUpdateRequest = {
+        version: input.version?.trim() || undefined,
+        notes: input.notes?.trim() || undefined,
+        rules: input.rules,
+      };
+      await adminPutJson<unknown, PolicyUpdateRequest>(
+        api as AdminApiContext,
+        `/api/v1/policies/${policyId}`,
+        payload,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update policy';
+      setError(message);
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return {
     createDraft,
     publishPolicy,
+    updatePolicy,
     busy,
     error,
     canCallApi: api.canCallApi,
