@@ -4,6 +4,7 @@ import {
   adminDelete,
   adminGetJson,
   adminPostJson,
+  adminPutJson,
   type AdminApiContext,
 } from '../api/adminClient';
 import { PaginationControls } from '../components/PaginationControls';
@@ -134,6 +135,15 @@ const IamUsersPanel = () => {
     confirmPassword: string;
     mustChangePassword: boolean;
   } | null>(null);
+  const [userEditor, setUserEditor] = useState<{
+    id: string;
+    username: string;
+    email: string;
+    display_name: string;
+    subject: string;
+    status: 'active' | 'disabled';
+    is_protected: boolean;
+  } | null>(null);
 
   const loadUsers = useCallback(async () => {
     if (!api.canCallApi) return;
@@ -259,6 +269,93 @@ const IamUsersPanel = () => {
       setNotice('User disabled.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to disable user');
+    } finally {
+      setBusyUser(undefined);
+    }
+  };
+
+  const enableUser = async (userId: string) => {
+    const confirmed = window.confirm('Enable this user account?');
+    if (!confirmed) return;
+    setBusyUser(userId);
+    try {
+      setNotice(undefined);
+      await adminPostJson(api as AdminApiContext, `/api/v1/iam/users/${userId}/enable`, {});
+      setUsers((prev) =>
+        prev.map((entry) =>
+          entry.user.id === userId
+            ? { ...entry, user: { ...entry.user, status: 'active' } }
+            : entry,
+        ),
+      );
+      loadUsers();
+      setNotice('User enabled.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to enable user');
+    } finally {
+      setBusyUser(undefined);
+    }
+  };
+
+  const hardDeleteUser = async (userId: string, display: string, isProtected: boolean) => {
+    if (isProtected) {
+      setError('Protected local admin cannot be deleted.');
+      return;
+    }
+    const confirmation = window.prompt(`Type DELETE to permanently remove ${display}`);
+    if (confirmation !== 'DELETE') {
+      setNotice('Delete cancelled.');
+      return;
+    }
+    setBusyUser(userId);
+    try {
+      setNotice(undefined);
+      await adminDelete(api as AdminApiContext, `/api/v1/iam/users/${userId}?hard=true`);
+      setUsers((prev) => prev.filter((entry) => entry.user.id !== userId));
+      loadUsers();
+      setNotice('User permanently deleted.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete user');
+    } finally {
+      setBusyUser(undefined);
+    }
+  };
+
+  const openUserEditor = (entry: IamUserDetails) => {
+    setUserEditor({
+      id: entry.user.id,
+      username: entry.user.username || '',
+      email: entry.user.email || '',
+      display_name: entry.user.display_name || '',
+      subject: entry.user.subject || '',
+      status: (entry.user.status === 'disabled' ? 'disabled' : 'active') as 'active' | 'disabled',
+      is_protected: Boolean(entry.user.is_protected),
+    });
+    setError(undefined);
+    setNotice(undefined);
+  };
+
+  const saveUserEditor = async () => {
+    if (!userEditor) return;
+    if (!userEditor.username.trim()) {
+      setError('Username is required');
+      return;
+    }
+    setBusyUser(userEditor.id);
+    try {
+      setNotice(undefined);
+      await adminPutJson(api as AdminApiContext, `/api/v1/iam/users/${userEditor.id}`, {
+        username: userEditor.username.trim(),
+        email: userEditor.email.trim() || null,
+        display_name: userEditor.display_name.trim() || null,
+        subject: userEditor.subject.trim() || null,
+        status: userEditor.status,
+      });
+      setUserEditor(null);
+      loadUsers();
+      setNotice('User updated.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update user');
     } finally {
       setBusyUser(undefined);
     }
@@ -477,6 +574,11 @@ const IamUsersPanel = () => {
                 <tr key={entry.user.id}>
                   <td>
                     <strong>{entry.user.display_name || entry.user.username || entry.user.email || 'Unnamed user'}</strong>
+                    {entry.user.is_protected ? (
+                      <span className="chip subtle" style={{ marginLeft: '0.4rem' }}>
+                        Protected
+                      </span>
+                    ) : null}
                     <div className="muted" style={{ fontSize: '0.85rem' }}>
                       {(entry.user.username || 'no-username')}
                       {entry.user.email ? ` · ${entry.user.email}` : ''} · {entry.user.status}
@@ -545,19 +647,53 @@ const IamUsersPanel = () => {
                         type="button"
                         className="ghost-button"
                         disabled={busyUser === entry.user.id}
+                        onClick={() => openUserEditor(entry)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={busyUser === entry.user.id}
                         onClick={() => createUserApiKey(entry.user.id, entry.user.username || entry.user.email || 'user')}
                       >
                         Create API Key
                       </button>
                     </div>
                     <div style={{ marginTop: '0.5rem' }}>
+                      {entry.user.status === 'disabled' ? (
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          disabled={busyUser === entry.user.id}
+                          onClick={() => enableUser(entry.user.id)}
+                        >
+                          Enable
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          disabled={busyUser === entry.user.id || Boolean(entry.user.is_protected)}
+                          onClick={() => disableUser(entry.user.id)}
+                        >
+                          Disable
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="ghost-button"
-                        disabled={busyUser === entry.user.id || entry.user.status === 'disabled'}
-                        onClick={() => disableUser(entry.user.id)}
+                        style={{ marginLeft: '0.5rem' }}
+                        disabled={busyUser === entry.user.id || Boolean(entry.user.is_protected)}
+                        onClick={() =>
+                          hardDeleteUser(
+                            entry.user.id,
+                            entry.user.username || entry.user.email || entry.user.id,
+                            Boolean(entry.user.is_protected),
+                          )
+                        }
                       >
-                        {entry.user.status === 'disabled' ? 'Disabled' : 'Disable'}
+                        Delete
                       </button>
                     </div>
                   </td>
@@ -628,6 +764,92 @@ const IamUsersPanel = () => {
                 type="button"
                 onClick={() => setPasswordEditor(null)}
                 disabled={busyUser === passwordEditor.userId}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {userEditor && (
+        <div className="glass-panel" style={{ marginTop: '1rem' }}>
+          <p className="section-title">Edit user</p>
+          <form
+            className="iam-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveUserEditor();
+            }}
+          >
+            <label>
+              <span>Username</span>
+              <input
+                value={userEditor.username}
+                onChange={(e) =>
+                  setUserEditor((prev) =>
+                    prev ? { ...prev, username: e.target.value } : prev,
+                  )
+                }
+                required
+              />
+            </label>
+            <label>
+              <span>Email (optional)</span>
+              <input
+                value={userEditor.email}
+                onChange={(e) =>
+                  setUserEditor((prev) =>
+                    prev ? { ...prev, email: e.target.value } : prev,
+                  )
+                }
+              />
+            </label>
+            <label>
+              <span>Display name</span>
+              <input
+                value={userEditor.display_name}
+                onChange={(e) =>
+                  setUserEditor((prev) =>
+                    prev ? { ...prev, display_name: e.target.value } : prev,
+                  )
+                }
+              />
+            </label>
+            <label>
+              <span>Status</span>
+              <select
+                value={userEditor.status}
+                onChange={(e) =>
+                  setUserEditor((prev) =>
+                    prev ? { ...prev, status: e.target.value as 'active' | 'disabled' } : prev,
+                  )
+                }
+                disabled={userEditor.is_protected}
+              >
+                <option value="active">active</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </label>
+            <label>
+              <span>External IdP Subject (optional)</span>
+              <input
+                value={userEditor.subject}
+                onChange={(e) =>
+                  setUserEditor((prev) =>
+                    prev ? { ...prev, subject: e.target.value } : prev,
+                  )
+                }
+              />
+            </label>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button className="cta-button" type="submit" disabled={busyUser === userEditor.id}>
+                {busyUser === userEditor.id ? 'Saving...' : 'Save User'}
+              </button>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => setUserEditor(null)}
+                disabled={busyUser === userEditor.id}
               >
                 Cancel
               </button>

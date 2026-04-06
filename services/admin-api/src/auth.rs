@@ -813,6 +813,10 @@ impl From<IamError> for AuthError {
             IamError::InvalidCredentials => AuthError::InvalidCredentials,
             IamError::Disabled => AuthError::Disabled,
             IamError::Locked(until) => AuthError::Locked(until.to_rfc3339()),
+            IamError::ProtectedUser => AuthError::Internal("protected user mutation blocked".into()),
+            IamError::LastActiveAdmin => {
+                AuthError::Internal("last active admin guard blocked mutation".into())
+            }
         }
     }
 }

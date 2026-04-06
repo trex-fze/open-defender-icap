@@ -571,6 +571,11 @@ async fn main() -> Result<()> {
                 .delete(iam::delete_user_route),
         )
         .route(
+            "/api/v1/iam/users/:id/disable",
+            post(iam::disable_user_route),
+        )
+        .route("/api/v1/iam/users/:id/enable", post(iam::enable_user_route))
+        .route(
             "/api/v1/iam/users/:id/roles",
             post(iam::assign_user_role_route),
         )

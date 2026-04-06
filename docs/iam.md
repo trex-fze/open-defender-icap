@@ -82,3 +82,15 @@ Use the token as `Authorization: Bearer <access_token>` for Admin API calls and 
 * Keep `OD_DEFAULT_ADMIN_PASSWORD` in a secret manager; rotate it immediately after first login.
 * Service account tokens remain available for machine-to-machine automation (`X-Admin-Token`).
 * IAM user API keys (personal tokens) can be created per user for automation flows and are authenticated as that user principal.
+
+## User Lifecycle Semantics
+
+* Disable user: `POST /api/v1/iam/users/:id/disable`
+* Enable user: `POST /api/v1/iam/users/:id/enable`
+* Hard delete user: `DELETE /api/v1/iam/users/:id?hard=true`
+
+For compatibility, `DELETE /api/v1/iam/users/:id` without `hard=true` behaves as disable.
+
+### Protected Admin Guardrails
+
+The default local admin account is marked protected (`is_protected=true`) and cannot be disabled, hard-deleted, or stripped in ways that remove the last active `policy-admin` access path. The API returns `409` with `PROTECTED_USER` or `LAST_ACTIVE_ADMIN` when these guardrails trigger.

@@ -11,6 +11,7 @@ use dirs::config_dir;
 use policy_dsl::{Conditions as RuleConditions, PolicyDocument, PolicyRule as DslPolicyRule};
 use reqwest::{header, Client};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::json;
 use sqlx::{migrate::Migrator, postgres::PgPoolOptions};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -343,6 +344,27 @@ enum IamUsersCmd {
     },
     Disable {
         id: String,
+    },
+    Enable {
+        id: String,
+    },
+    Update {
+        id: String,
+        #[clap(long)]
+        username: Option<String>,
+        #[clap(long)]
+        email: Option<String>,
+        #[clap(long)]
+        display_name: Option<String>,
+        #[clap(long)]
+        subject: Option<String>,
+        #[clap(long)]
+        status: Option<String>,
+    },
+    Delete {
+        id: String,
+        #[clap(long)]
+        yes: bool,
     },
     AssignRole {
         id: String,
@@ -1558,8 +1580,60 @@ async fn handle_iam_users(cmd: &IamUsersCmd, client: &ApiClient, json: bool) -> 
             }
         }
         IamUsersCmd::Disable { id } => {
-            client.delete(&format!("/api/v1/iam/users/{id}")).await?;
+            client
+                .post_no_content(&format!("/api/v1/iam/users/{id}/disable"), &json!({}))
+                .await?;
             println!("Disabled user {id}");
+        }
+        IamUsersCmd::Enable { id } => {
+            client
+                .post_no_content(&format!("/api/v1/iam/users/{id}/enable"), &json!({}))
+                .await?;
+            println!("Enabled user {id}");
+        }
+        IamUsersCmd::Update {
+            id,
+            username,
+            email,
+            display_name,
+            subject,
+            status,
+        } => {
+            let payload = UpdateUserPayload {
+                username: username.clone(),
+                email: email.clone(),
+                display_name: display_name.clone(),
+                subject: subject.clone(),
+                status: status.clone(),
+            };
+            let detail: IamUserDetails = client
+                .put(&format!("/api/v1/iam/users/{id}"), &payload)
+                .await?;
+            if json {
+                print_json(&detail)?;
+            } else {
+                println!(
+                    "Updated user {} ({})",
+                    detail.user.id,
+                    detail
+                        .user
+                        .username
+                        .clone()
+                        .or(detail.user.email.clone())
+                        .unwrap_or_else(|| detail.user.id.to_string())
+                );
+            }
+        }
+        IamUsersCmd::Delete { id, yes } => {
+            if !yes {
+                return Err(anyhow!(
+                    "user delete is destructive; rerun with --yes to confirm"
+                ));
+            }
+            client
+                .delete(&format!("/api/v1/iam/users/{id}?hard=true"))
+                .await?;
+            println!("Deleted user {id}");
         }
         IamUsersCmd::AssignRole { id, role } => {
             let payload = RoleChangePayload { role: role.clone() };
@@ -2080,6 +2154,13 @@ impl ApiClient {
         Ok(resp.json().await?)
     }
 
+    async fn post_no_content(&self, path: &str, body: &impl Serialize) -> Result<()> {
+        let url = format!("{}{}", self.base_url, path);
+        let req = self.http.post(url).json(body);
+        self.send(req).await?;
+        Ok(())
+    }
+
     async fn put<T: DeserializeOwned>(&self, path: &str, body: &impl Serialize) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let req = self.http.put(url).json(body);
@@ -2531,6 +2612,20 @@ struct CreateUserPayload {
     password: String,
     must_change_password: bool,
     status: String,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateUserPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subject: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
 }
 
 #[derive(Serialize)]

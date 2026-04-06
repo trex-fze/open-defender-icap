@@ -5,6 +5,7 @@ export type IamUserRecord = {
   email?: string | null;
   display_name?: string | null;
   status: string;
+  is_protected?: boolean;
   last_login_at?: string | null;
   created_at: string;
   updated_at: string;

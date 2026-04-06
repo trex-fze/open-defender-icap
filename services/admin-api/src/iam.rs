@@ -38,7 +38,7 @@ impl IamService {
     pub async fn list_users(&self) -> Result<Vec<IamUserRecord>, IamError> {
         let users = sqlx::query_as::<_, IamUserRecord>(
             r#"
-            SELECT id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
+            SELECT id, username, subject, email, display_name, status, is_protected, last_login_at, created_at, updated_at
             FROM iam_users
             ORDER BY created_at DESC
         "#,
@@ -51,7 +51,7 @@ impl IamService {
     pub async fn get_user(&self, id: Uuid) -> Result<IamUserRecord, IamError> {
         let user = sqlx::query_as::<_, IamUserRecord>(
             r#"
-            SELECT id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
+            SELECT id, username, subject, email, display_name, status, is_protected, last_login_at, created_at, updated_at
             FROM iam_users
             WHERE id = $1
         "#,
@@ -68,7 +68,7 @@ impl IamService {
     ) -> Result<Option<IamUserRecord>, IamError> {
         let user = sqlx::query_as::<_, IamUserRecord>(
             r#"
-            SELECT id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
+            SELECT id, username, subject, email, display_name, status, is_protected, last_login_at, created_at, updated_at
             FROM iam_users
             WHERE subject = $1
         "#,
@@ -82,7 +82,7 @@ impl IamService {
     pub async fn find_user_by_email(&self, email: &str) -> Result<Option<IamUserRecord>, IamError> {
         let user = sqlx::query_as::<_, IamUserRecord>(
             r#"
-            SELECT id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
+            SELECT id, username, subject, email, display_name, status, is_protected, last_login_at, created_at, updated_at
             FROM iam_users
             WHERE email = $1
         "#,
@@ -118,7 +118,7 @@ impl IamService {
             r#"
             INSERT INTO iam_users (id, username, subject, email, display_name, status, password_hash, password_updated_at, must_change_password)
             VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'active'), $7, CASE WHEN $7 IS NOT NULL THEN NOW() ELSE NULL END, $8)
-            RETURNING id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
+            RETURNING id, username, subject, email, display_name, status, is_protected, last_login_at, created_at, updated_at
         "#,
         )
         .bind(Uuid::new_v4())
@@ -140,6 +140,18 @@ impl IamService {
         id: Uuid,
         payload: UpdateUserRequest,
     ) -> Result<IamUserRecord, IamError> {
+        let disable_requested = payload
+            .status
+            .as_deref()
+            .map(|value| value.eq_ignore_ascii_case("disabled"))
+            .unwrap_or(false);
+        if disable_requested {
+            self.ensure_user_mutation_allowed(id, true).await?;
+        }
+        if payload.username.is_some() && self.user_is_protected(id).await? {
+            return Err(IamError::ProtectedUser);
+        }
+
         let record = sqlx::query_as::<_, IamUserRecord>(
             r#"
             UPDATE iam_users
@@ -150,7 +162,7 @@ impl IamService {
                 status = COALESCE($6, status),
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
+            RETURNING id, username, subject, email, display_name, status, is_protected, last_login_at, created_at, updated_at
         "#,
         )
         .bind(id)
@@ -165,6 +177,7 @@ impl IamService {
     }
 
     pub async fn disable_user(&self, id: Uuid) -> Result<(), IamError> {
+        self.ensure_user_mutation_allowed(id, true).await?;
         let result = sqlx::query(
             r#"UPDATE iam_users SET status = 'disabled', updated_at = NOW() WHERE id = $1"#,
         )
@@ -173,6 +186,119 @@ impl IamService {
         .await?;
         if result.rows_affected() == 0 {
             return Err(IamError::NotFound("user".into()));
+        }
+        Ok(())
+    }
+
+    pub async fn enable_user(&self, id: Uuid) -> Result<(), IamError> {
+        let result = sqlx::query(
+            r#"UPDATE iam_users SET status = 'active', updated_at = NOW() WHERE id = $1"#,
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(IamError::NotFound("user".into()));
+        }
+        Ok(())
+    }
+
+    pub async fn hard_delete_user(&self, id: Uuid) -> Result<(), IamError> {
+        self.ensure_user_mutation_allowed(id, true).await?;
+        let result = sqlx::query("DELETE FROM iam_users WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            return Err(IamError::NotFound("user".into()));
+        }
+        Ok(())
+    }
+
+    async fn user_is_protected(&self, id: Uuid) -> Result<bool, IamError> {
+        let row = sqlx::query("SELECT is_protected FROM iam_users WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else {
+            return Err(IamError::NotFound("user".into()));
+        };
+        Ok(row.get::<bool, _>("is_protected"))
+    }
+
+    async fn user_is_active_policy_admin(&self, id: Uuid) -> Result<bool, IamError> {
+        let row = sqlx::query(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM iam_users u
+                WHERE u.id = $1
+                  AND u.status = 'active'
+                  AND (
+                      EXISTS (
+                          SELECT 1
+                          FROM iam_user_roles ur
+                          JOIN iam_roles r ON r.id = ur.role_id
+                          WHERE ur.user_id = u.id AND r.name = 'policy-admin'
+                      )
+                      OR EXISTS (
+                          SELECT 1
+                          FROM iam_group_members gm
+                          JOIN iam_group_roles gr ON gr.group_id = gm.group_id
+                          JOIN iam_roles r2 ON r2.id = gr.role_id
+                          WHERE gm.user_id = u.id AND r2.name = 'policy-admin'
+                      )
+                  )
+            ) AS is_admin
+        "#,
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<bool, _>("is_admin"))
+    }
+
+    async fn active_policy_admin_count(&self) -> Result<i64, IamError> {
+        let count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM iam_users u
+            WHERE u.status = 'active'
+              AND (
+                  EXISTS (
+                      SELECT 1
+                      FROM iam_user_roles ur
+                      JOIN iam_roles r ON r.id = ur.role_id
+                      WHERE ur.user_id = u.id AND r.name = 'policy-admin'
+                  )
+                  OR EXISTS (
+                      SELECT 1
+                      FROM iam_group_members gm
+                      JOIN iam_group_roles gr ON gr.group_id = gm.group_id
+                      JOIN iam_roles r2 ON r2.id = gr.role_id
+                      WHERE gm.user_id = u.id AND r2.name = 'policy-admin'
+                  )
+              )
+        "#,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count)
+    }
+
+    async fn ensure_user_mutation_allowed(
+        &self,
+        id: Uuid,
+        enforce_last_admin: bool,
+    ) -> Result<(), IamError> {
+        if self.user_is_protected(id).await? {
+            return Err(IamError::ProtectedUser);
+        }
+        if enforce_last_admin && self.user_is_active_policy_admin(id).await? {
+            let active_admins = self.active_policy_admin_count().await?;
+            if active_admins <= 1 {
+                return Err(IamError::LastActiveAdmin);
+            }
         }
         Ok(())
     }
@@ -362,6 +488,9 @@ impl IamService {
         user_id: Uuid,
         role: &str,
     ) -> Result<Vec<String>, IamError> {
+        if role.eq_ignore_ascii_case("policy-admin") {
+            self.ensure_user_mutation_allowed(user_id, true).await?;
+        }
         let role_id = self.role_id_by_name(role).await?;
         sqlx::query(r#"DELETE FROM iam_user_roles WHERE user_id = $1 AND role_id = $2"#)
             .bind(user_id)
@@ -828,13 +957,14 @@ impl IamService {
         let mut tx = self.pool.begin().await?;
         let admin_id = sqlx::query(
             r#"
-            INSERT INTO iam_users (id, username, email, display_name, status, password_hash, password_updated_at, must_change_password)
-            VALUES ($1, 'admin', 'admin@local', 'Default Admin', 'active', $2, NOW(), TRUE)
+            INSERT INTO iam_users (id, username, email, display_name, status, password_hash, password_updated_at, must_change_password, is_protected)
+            VALUES ($1, 'admin', 'admin@local', 'Default Admin', 'active', $2, NOW(), TRUE, TRUE)
             ON CONFLICT (email) DO UPDATE
                 SET username = COALESCE(iam_users.username, EXCLUDED.username),
                     password_hash = COALESCE(iam_users.password_hash, EXCLUDED.password_hash),
                     password_updated_at = COALESCE(iam_users.password_updated_at, EXCLUDED.password_updated_at),
-                    must_change_password = iam_users.must_change_password
+                    must_change_password = iam_users.must_change_password,
+                    is_protected = TRUE
             RETURNING id
         "#,
         )
@@ -1149,6 +1279,10 @@ pub enum IamError {
     Disabled,
     #[error("account locked until {0}")]
     Locked(sqlx::types::chrono::DateTime<Utc>),
+    #[error("protected user cannot be modified destructively")]
+    ProtectedUser,
+    #[error("operation would remove last active policy-admin")]
+    LastActiveAdmin,
 }
 
 impl From<argon2::password_hash::Error> for IamError {
@@ -1202,6 +1336,20 @@ pub(crate) fn map_iam_error(err: IamError) -> (StatusCode, Json<ApiError>) {
                 format!("account locked until {}", until.to_rfc3339()),
             )),
         ),
+        IamError::ProtectedUser => (
+            StatusCode::CONFLICT,
+            Json(ApiError::new(
+                "PROTECTED_USER",
+                "protected local admin cannot be disabled, renamed, or deleted",
+            )),
+        ),
+        IamError::LastActiveAdmin => (
+            StatusCode::CONFLICT,
+            Json(ApiError::new(
+                "LAST_ACTIVE_ADMIN",
+                "operation would remove the last active policy-admin",
+            )),
+        ),
     }
 }
 
@@ -1224,6 +1372,8 @@ pub struct IamUserRecord {
     pub email: Option<String>,
     pub display_name: Option<String>,
     pub status: String,
+    #[sqlx(default)]
+    pub is_protected: bool,
     pub last_login_at: Option<sqlx::types::chrono::DateTime<Utc>>,
     pub created_at: sqlx::types::chrono::DateTime<Utc>,
     pub updated_at: sqlx::types::chrono::DateTime<Utc>,
@@ -1296,6 +1446,11 @@ pub struct UpdateUserRequest {
     pub email: Option<String>,
     pub display_name: Option<String>,
     pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteUserQuery {
+    pub hard: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1497,7 +1652,7 @@ pub async fn list_users_route(
     let iam = state.iam();
     let users = sqlx::query_as::<_, IamUserRecord>(
         r#"
-        SELECT id, username, subject, email, display_name, status, last_login_at, created_at, updated_at
+        SELECT id, username, subject, email, display_name, status, is_protected, last_login_at, created_at, updated_at
         FROM iam_users
         WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2))
         ORDER BY created_at DESC, id DESC
@@ -1663,6 +1818,41 @@ pub async fn delete_user_route(
     State(state): State<AppState>,
     Extension(user): Extension<UserContext>,
     Path(id): Path<Uuid>,
+    Query(query): Query<DeleteUserQuery>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    if query.hard.unwrap_or(false) {
+        iam.hard_delete_user(id).await.map_err(map_iam_error)?;
+        state
+            .log_iam_event(
+                "iam.user.delete",
+                Some(user.actor.clone()),
+                "user",
+                Some(id.to_string()),
+                json!({ "hard": true }),
+            )
+            .await;
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
+    iam.disable_user(id).await.map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.user.disable",
+            Some(user.actor.clone()),
+            "user",
+            Some(id.to_string()),
+            json!({}),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn disable_user_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
     require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
     let iam = state.iam();
@@ -1670,6 +1860,26 @@ pub async fn delete_user_route(
     state
         .log_iam_event(
             "iam.user.disable",
+            Some(user.actor.clone()),
+            "user",
+            Some(id.to_string()),
+            json!({}),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn enable_user_route(
+    State(state): State<AppState>,
+    Extension(user): Extension<UserContext>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_IAM_ADMIN).map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let iam = state.iam();
+    iam.enable_user(id).await.map_err(map_iam_error)?;
+    state
+        .log_iam_event(
+            "iam.user.enable",
             Some(user.actor.clone()),
             "user",
             Some(id.to_string()),

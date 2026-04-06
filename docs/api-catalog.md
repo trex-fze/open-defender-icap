@@ -100,7 +100,9 @@ Override precedence note: policy-engine evaluates active domain overrides before
 | Method | Path | Description | Roles |
 | --- | --- | --- | --- |
 | `GET`/`POST` | `/api/v1/iam/users` | List or create IAM users (`username` primary, optional `email`, optional OIDC/hybrid `subject`). | `iam:manage` (policy-admin). `GET` is cursor paginated (`limit`, `cursor`) and returns `{ data, meta }`. `POST` requires initial local `password` and supports `must_change_password`. |
-| `GET`/`PUT`/`DELETE` | `/api/v1/iam/users/:id` | Fetch, update, or disable a user. | `iam:manage` for mutations, `iam:view` for reads. |
+| `GET`/`PUT`/`DELETE` | `/api/v1/iam/users/:id` | Fetch or update a user; `DELETE` supports hard delete with `?hard=true`, otherwise performs disable for compatibility. | `iam:manage` for mutations, `iam:view` for reads. Protected users and last-active-admin operations return `409`. |
+| `POST` | `/api/v1/iam/users/:id/disable` | Disable a user explicitly. | `iam:manage`; blocked for protected users and last active policy-admin. |
+| `POST` | `/api/v1/iam/users/:id/enable` | Re-enable a disabled user. | `iam:manage`. |
 | `POST`/`DELETE` | `/api/v1/iam/users/:id/roles` | Assign or revoke role bindings for a user. | `iam:manage`. |
 | `POST` | `/api/v1/iam/users/:id/set-password` | Set/reset a local user's password. | `iam:manage`. |
 | `GET`/`POST` | `/api/v1/iam/users/:id/tokens` | List or create personal API keys for a user. | `iam:view` / `iam:manage`; plaintext token is returned only on create. |
