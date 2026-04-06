@@ -532,6 +532,18 @@ async fn main() -> Result<()> {
         )
         .route("/api/v1/classifications", get(classifications::list))
         .route(
+            "/api/v1/classifications/export",
+            get(classifications::export_bundle),
+        )
+        .route(
+            "/api/v1/classifications/import",
+            post(classifications::import_bundle),
+        )
+        .route(
+            "/api/v1/classifications/flush",
+            post(classifications::flush),
+        )
+        .route(
             "/api/v1/classifications/:normalized_key",
             delete(classifications::delete).patch(classifications::update),
         )

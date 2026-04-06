@@ -230,6 +230,38 @@ enum ClassificationCmd {
         #[clap(long)]
         reason: Option<String>,
     },
+    Export {
+        #[clap(long)]
+        file: PathBuf,
+        #[clap(long)]
+        query: Option<String>,
+    },
+    Import {
+        #[clap(long)]
+        file: PathBuf,
+        #[clap(long, default_value = "merge")]
+        mode: String,
+        #[clap(long, takes_value = false, conflicts_with = "no-recompute")]
+        recompute: bool,
+        #[clap(long = "no-recompute", takes_value = false, conflicts_with = "recompute")]
+        no_recompute: bool,
+        #[clap(long)]
+        dry_run: bool,
+        #[clap(long)]
+        errors_file: Option<PathBuf>,
+    },
+    Flush {
+        #[clap(long)]
+        all: bool,
+        #[clap(long)]
+        prefix: Option<String>,
+        #[clap(long)]
+        keys_file: Option<PathBuf>,
+        #[clap(long)]
+        dry_run: bool,
+        #[clap(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1172,6 +1204,139 @@ async fn handle_classification(
                 println!("Updated At : {}", record.updated_at);
             }
         }
+        ClassificationCmd::Export { file, query } => {
+            let mut params: Vec<(String, String)> = Vec::new();
+            if let Some(value) = query {
+                params.push(("q".to_string(), value.clone()));
+            }
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let bundle: ClassificationExchangeBundle =
+                client.get("/api/v1/classifications/export", &refs).await?;
+            fs::write(file, serde_json::to_string_pretty(&bundle)?)
+                .with_context(|| format!("failed writing export to {}", file.display()))?;
+            if !json {
+                println!(
+                    "Exported {} classifications to {}",
+                    bundle.entries.len(),
+                    file.display()
+                );
+            }
+        }
+        ClassificationCmd::Import {
+            file,
+            mode,
+            recompute,
+            no_recompute,
+            dry_run,
+            errors_file,
+        } => {
+            let _recompute_requested = *recompute;
+            let content = fs::read_to_string(file)
+                .with_context(|| format!("failed reading {}", file.display()))?;
+            let bundle: ClassificationExchangeBundle = serde_json::from_str(&content)
+                .with_context(|| format!("invalid classification bundle {}", file.display()))?;
+            let body = ClassificationImportRequestPayload {
+                bundle,
+                mode: mode.to_ascii_lowercase(),
+                recompute_policy_fields: !*no_recompute,
+                dry_run: *dry_run,
+            };
+            let response: ClassificationImportResponse =
+                client.post("/api/v1/classifications/import", &body).await?;
+
+            if let Some(jsonl) = response.invalid_rows_jsonl.as_deref() {
+                if !jsonl.trim().is_empty() {
+                    let path = errors_file.clone().unwrap_or_else(|| {
+                        PathBuf::from(response.invalid_rows_filename.clone().unwrap_or_else(|| {
+                            format!(
+                                "classification-import-invalid-{}.jsonl",
+                                SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0)
+                            )
+                        }))
+                    });
+                    fs::write(&path, jsonl)
+                        .with_context(|| format!("failed writing {}", path.display()))?;
+                    if !json {
+                        println!("Invalid rows saved to {}", path.display());
+                    }
+                }
+            }
+
+            if json {
+                print_json(&response)?;
+            } else {
+                println!("Import mode   : {}", response.mode);
+                println!("Dry run       : {}", response.dry_run);
+                println!("Recompute     : {}", response.recompute_policy_fields);
+                println!("Total entries : {}", response.total_entries);
+                println!("Imported      : {}", response.imported);
+                println!("Updated       : {}", response.updated);
+                println!("Replaced drop : {}", response.replaced_deleted);
+                println!("Invalid       : {}", response.invalid);
+                if response.invalid_rows_truncated {
+                    println!("Invalid rows output was truncated due to size limits.");
+                }
+            }
+        }
+        ClassificationCmd::Flush {
+            all,
+            prefix,
+            keys_file,
+            dry_run,
+            yes,
+        } => {
+            if !dry_run && !yes {
+                return Err(anyhow!(
+                    "flush is destructive; pass --yes to confirm or use --dry-run"
+                ));
+            }
+
+            let (scope, keys, prefix_value) = if *all {
+                ("all".to_string(), None, None)
+            } else if let Some(value) = prefix {
+                ("prefix".to_string(), None, Some(value.clone()))
+            } else if let Some(path) = keys_file {
+                let content = fs::read_to_string(path)
+                    .with_context(|| format!("failed reading {}", path.display()))?;
+                let keys = content
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(|line| line.to_string())
+                    .collect::<Vec<_>>();
+                ("keys".to_string(), Some(keys), None)
+            } else {
+                return Err(anyhow!(
+                    "choose one scope: --all, --prefix <value>, or --keys-file <path>"
+                ));
+            };
+
+            let body = ClassificationFlushRequestPayload {
+                scope,
+                keys,
+                prefix: prefix_value,
+                dry_run: *dry_run,
+            };
+            let response: ClassificationFlushResponse =
+                client.post("/api/v1/classifications/flush", &body).await?;
+            if json {
+                print_json(&response)?;
+            } else {
+                println!("Scope   : {}", response.scope);
+                println!("Dry run : {}", response.dry_run);
+                println!("Matched : {}", response.matched);
+                println!("Deleted : {}", response.deleted);
+                if !response.invalid_keys.is_empty() {
+                    println!("Ignored invalid keys: {}", response.invalid_keys.join(", "));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -2103,6 +2268,67 @@ struct ManualClassificationResponse {
     recommended_action: PolicyAction,
     confidence: f32,
     updated_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ClassificationExchangeBundle {
+    schema_version: String,
+    exported_at: String,
+    taxonomy_version: String,
+    entries: Vec<ClassificationExchangeEntry>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ClassificationExchangeEntry {
+    normalized_key: String,
+    primary_category: String,
+    subcategory: String,
+    risk_level: Option<String>,
+    recommended_action: Option<String>,
+    confidence: Option<f32>,
+    status: Option<String>,
+    flags: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct ClassificationImportRequestPayload {
+    bundle: ClassificationExchangeBundle,
+    mode: String,
+    recompute_policy_fields: bool,
+    dry_run: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ClassificationImportResponse {
+    mode: String,
+    recompute_policy_fields: bool,
+    dry_run: bool,
+    total_entries: usize,
+    imported: usize,
+    updated: usize,
+    skipped: usize,
+    replaced_deleted: usize,
+    invalid: usize,
+    invalid_rows_filename: Option<String>,
+    invalid_rows_jsonl: Option<String>,
+    invalid_rows_truncated: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ClassificationFlushRequestPayload {
+    scope: String,
+    keys: Option<Vec<String>>,
+    prefix: Option<String>,
+    dry_run: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ClassificationFlushResponse {
+    scope: String,
+    dry_run: bool,
+    matched: usize,
+    deleted: usize,
+    invalid_keys: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

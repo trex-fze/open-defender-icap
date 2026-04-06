@@ -341,13 +341,18 @@ a {
 }
 
 .iam-form input,
-.iam-form select {
+.iam-form select,
+.iam-form textarea {
   width: 100%;
   padding: 0.85rem 1rem;
   border-radius: 0.9rem;
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: rgba(4, 13, 26, 0.6);
   color: #f9fbff;
+}
+
+.iam-form textarea {
+  resize: vertical;
 }
 
 .chip-row {

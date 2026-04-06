@@ -66,12 +66,15 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl page show --key <normalized>` | Inspect Crawl4AI excerpts and metadata | Useful when debugging LLM prompts; add `--json` for raw output. |
 | `odctl classification pending` | List sites blocked pending Crawl4AI + LLM verdict | Mirrors `/api/v1/classifications/pending`; shows latest status, base URL, timestamps. In domain-first mode, subdomain requests collapse into canonical `domain:<registered_domain>` pending rows. |
 | `odctl classification unblock --key <normalized> --action Allow ...` | Manually set a verdict to unblock/deny traffic (legacy/manual endpoint) | Sends `POST /api/v1/classifications/:key/unblock`; requires `policy-editor` role and records reason in audit log. |
+| `odctl classification export --file bundle.json` | Export domain classifications for backup/share | Calls `GET /api/v1/classifications/export` and writes bundle schema `od-classification-bundle.v1`. |
+| `odctl classification import --file bundle.json --dry-run --recompute` | Import a bundle with optional policy recompute | Calls `POST /api/v1/classifications/import`; use `--no-recompute` to trust imported risk/action/confidence values. Invalid rows are rejected and saved to JSONL error file. |
+| `odctl classification flush --all --dry-run` | Preview or apply bulk classification flush | Calls `POST /api/v1/classifications/flush`; supports `--all`, `--prefix`, or `--keys-file` scopes. |
 
 Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 OD_ADMIN_TOKEN=secret odctl policy reload`, `OD_ADMIN_TOKEN=secret odctl policy simulate request.json`.
 
 ## 7. React Admin UI
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
-- Routes: Dashboard, Investigations, Policies (+ draft create/publish), **Pending Sites** (manual classification with category/subcategory and policy-computed action; subdomain inputs auto-promote to canonical domain key), **Classifications** (classified/unclassified CRUD management with both `Effective Action` and `Recorded Action` columns), Allow / Deny list (domain + subdomain overrides), Taxonomy (read-only canonical listing with checkbox activation toggles), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs).
+- Routes: Dashboard, Investigations, Policies (+ draft create/publish), **Pending Sites** (manual classification with category/subcategory and policy-computed action; subdomain inputs auto-promote to canonical domain key), **Classifications** (classified/unclassified CRUD management with both `Effective Action` and `Recorded Action` columns), Allow / Deny list (domain + subdomain overrides), Taxonomy (read-only canonical listing with checkbox activation toggles), Reports (aggregates + traffic summary filters), Page Content diagnostics, Cache diagnostics, Settings (RBAC + CLI audit logs + classification exchange import/export/flush).
 - Authentication: local username/password login screen; RBAC controls navigation after token issuance.
 - Build: `npm run build`; deploy static assets behind reverse proxy.
 - Operator runbook and screenshot checklist: `docs/runbooks/stage10-web-admin-operator-runbook.md`.

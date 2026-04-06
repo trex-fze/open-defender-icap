@@ -39,6 +39,17 @@ export const SettingsIamPage = () => {
         </div>
       </div>
       <div className="glass-panel" style={{ paddingBottom: 0 }}>
+        <nav className="iam-tabs" style={{ marginBottom: '1rem' }}>
+          <NavLink to="/settings/iam" className="iam-tab iam-tab--active">
+            IAM Workspace
+          </NavLink>
+          <NavLink
+            to="/settings/classifications"
+            className={({ isActive }) => `iam-tab ${isActive ? 'iam-tab--active' : ''}`}
+          >
+            Classifications Exchange
+          </NavLink>
+        </nav>
         <nav className="iam-tabs">
           {tabs.map((tab) => (
             <NavLink
