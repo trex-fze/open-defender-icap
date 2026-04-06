@@ -10,6 +10,7 @@ use common_types::PolicyAction;
 use policy_dsl::{Conditions, PolicyRule};
 use serde::{Deserialize, Serialize};
 use sqlx::{types::Json as SqlJson, PgPool, Postgres, QueryBuilder, Row, Transaction};
+use taxonomy::FallbackReason;
 use tracing::error;
 use uuid::Uuid;
 
@@ -54,6 +55,19 @@ pub struct PolicyDetail {
     pub created_at: DateTime<Utc>,
     pub rule_count: i64,
     pub rules: Vec<PolicyRuleResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PolicyVersionSummary {
+    pub id: Uuid,
+    pub policy_id: Uuid,
+    pub version: String,
+    pub status: String,
+    pub created_by: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub deployed_at: Option<DateTime<Utc>>,
+    pub notes: Option<String>,
+    pub rule_count: i64,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -137,6 +151,42 @@ pub async fn get_policy(
     Ok(Json(detail))
 }
 
+pub async fn list_policy_versions(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Path(policy_id): Path<Uuid>,
+) -> Result<Json<Vec<PolicyVersionSummary>>, StatusCode> {
+    require_roles(&user, ROLE_POLICY_VIEW)?;
+    let versions = sqlx::query(
+        r#"SELECT id, policy_id, version, status, created_by, created_at, deployed_at, notes,
+                  COALESCE(jsonb_array_length(rules), 0) AS rule_count
+           FROM policy_versions
+           WHERE policy_id = $1
+           ORDER BY created_at DESC"#,
+    )
+    .bind(policy_id)
+    .fetch_all(state.pool())
+    .await
+    .map_err(map_db_error)?;
+
+    Ok(Json(
+        versions
+            .into_iter()
+            .map(|row| PolicyVersionSummary {
+                id: row.get("id"),
+                policy_id: row.get("policy_id"),
+                version: row.get("version"),
+                status: row.get("status"),
+                created_by: row.get("created_by"),
+                created_at: row.get("created_at"),
+                deployed_at: row.get("deployed_at"),
+                notes: row.get("notes"),
+                rule_count: row.get("rule_count"),
+            })
+            .collect(),
+    ))
+}
+
 pub async fn create_policy(
     Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
@@ -149,6 +199,7 @@ pub async fn create_policy(
     }
 
     let rules = normalize_rules(&payload.rules)?;
+    validate_rules_against_taxonomy(&state, &rules)?;
     let version = payload
         .version
         .clone()
@@ -202,6 +253,8 @@ pub async fn create_policy(
         )
         .await;
 
+    propagate_policy_runtime_change(&state, Some(user.actor.as_str()), policy_id, "create").await?;
+
     Ok(Json(detail))
 }
 
@@ -240,6 +293,11 @@ pub async fn update_policy(
     }
     if let Some(value) = payload.status.as_ref() {
         status = normalize_policy_status(value)?;
+        if status == POLICY_STATUS_ACTIVE {
+            return Err(crate::validation_error(
+                "setting status=active via update is not allowed; use publish endpoint",
+            ));
+        }
     }
 
     sqlx::query("UPDATE policies SET name = $1, version = $2, status = $3 WHERE id = $4")
@@ -253,6 +311,7 @@ pub async fn update_policy(
 
     let rules = if let Some(rules) = payload.rules.as_ref() {
         let normalized = normalize_rules(rules)?;
+        validate_rules_against_taxonomy(&state, &normalized)?;
         replace_policy_rules(&mut tx, policy_id, &normalized)
             .await
             .map_err(map_db_error_tx)?;
@@ -294,6 +353,8 @@ pub async fn update_policy(
         )
         .await;
 
+    propagate_policy_runtime_change(&state, Some(user.actor.as_str()), policy_id, "update").await?;
+
     Ok(Json(detail))
 }
 
@@ -320,7 +381,8 @@ pub async fn publish_policy(
         })?;
     drop(exists);
 
-    sqlx::query("UPDATE policies SET status = $1 WHERE status = $1 AND id <> $2")
+    sqlx::query("UPDATE policies SET status = $1 WHERE status = $2 AND id <> $3")
+        .bind(POLICY_STATUS_ARCHIVED)
         .bind(POLICY_STATUS_ACTIVE)
         .bind(policy_id)
         .execute(&mut *tx)
@@ -356,7 +418,6 @@ pub async fn publish_policy(
     .map_err(map_db_error_tx)?;
     tx.commit().await.map_err(map_db_error_tx)?;
 
-    state.invalidate_policy_cache().await;
     let detail = fetch_policy_detail(state.pool(), policy_id)
         .await
         .map_err(map_db_error_tx)?
@@ -372,15 +433,68 @@ pub async fn publish_policy(
             &detail,
         )
         .await;
+
+    propagate_policy_runtime_change(&state, Some(user.actor.as_str()), policy_id, "publish")
+        .await?;
+
     Ok(Json(detail))
+}
+
+async fn propagate_policy_runtime_change(
+    state: &AppState,
+    actor: Option<&str>,
+    policy_id: Uuid,
+    operation: &str,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    state.invalidate_policy_cache().await;
+    if let Err(err) = state.trigger_policy_reload().await {
+        let payload = serde_json::json!({
+            "operation": operation,
+            "result": "failed",
+            "error": err.to_string(),
+            "next_step": "retry /api/v1/policies/reload",
+        });
+        state
+            .log_policy_event(
+                "policy.propagate_runtime_change",
+                actor.map(std::string::ToString::to_string),
+                Some(policy_id.to_string()),
+                payload,
+            )
+            .await;
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(ApiError::new(
+                "POLICY_RELOAD_FAILED",
+                "policy persisted, cache invalidated, but policy-engine reload failed; run /api/v1/policies/reload",
+            )),
+        ));
+    }
+
+    state
+        .log_policy_event(
+            "policy.propagate_runtime_change",
+            actor.map(std::string::ToString::to_string),
+            Some(policy_id.to_string()),
+            serde_json::json!({
+                "operation": operation,
+                "result": "ok",
+            }),
+        )
+        .await;
+    Ok(())
 }
 
 pub async fn validate_policy(
     Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
     Json(payload): Json<PolicyDraftRequest>,
 ) -> Result<Json<PolicyValidationResponse>, StatusCode> {
     require_roles(&user, ROLE_POLICY_EDIT)?;
-    match normalize_rules(&payload.rules) {
+    match normalize_rules(&payload.rules).and_then(|rules| {
+        validate_rules_against_taxonomy(&state, &rules)?;
+        Ok(rules)
+    }) {
         Ok(_) => Ok(Json(PolicyValidationResponse {
             valid: true,
             errors: Vec::new(),
@@ -402,6 +516,7 @@ fn normalize_rules(
         return Err(crate::validation_error("at least one rule required"));
     }
     let mut seen_priorities = HashSet::new();
+    let mut seen_ids = HashSet::new();
     let mut normalized = Vec::with_capacity(rules.len());
     for rule in rules {
         if !seen_priorities.insert(rule.priority) {
@@ -410,10 +525,20 @@ fn normalize_rules(
             ));
         }
         let action = parse_action(&rule.action)?;
+        validate_domain_patterns(&rule.conditions)?;
         let id = rule
             .id
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let id = id.trim().to_string();
+        if id.is_empty() {
+            return Err(crate::validation_error("rule id cannot be empty"));
+        }
+        if !seen_ids.insert(id.clone()) {
+            return Err(crate::validation_error(
+                "duplicate rule ids are not allowed",
+            ));
+        }
         normalized.push(PolicyRule {
             id,
             description: rule.description.clone(),
@@ -423,6 +548,75 @@ fn normalize_rules(
         });
     }
     Ok(normalized)
+}
+
+fn validate_domain_patterns(conditions: &Conditions) -> Result<(), (StatusCode, Json<ApiError>)> {
+    let Some(domains) = conditions.domains.as_ref() else {
+        return Ok(());
+    };
+    for domain in domains {
+        let candidate = domain.trim().to_ascii_lowercase();
+        if candidate.is_empty() {
+            return Err(crate::validation_error(
+                "domain conditions must not contain empty values",
+            ));
+        }
+        if candidate.contains("://") || candidate.contains('/') {
+            return Err(crate::validation_error(
+                "domain conditions must use host patterns only (no scheme/path)",
+            ));
+        }
+        let stripped = candidate.strip_prefix("*.").unwrap_or(candidate.as_str());
+        let labels: Vec<&str> = stripped.split('.').collect();
+        if labels.len() < 2 {
+            return Err(crate::validation_error(
+                "domain conditions must contain a valid host with at least one dot",
+            ));
+        }
+        for label in labels {
+            if label.is_empty() || !is_valid_domain_label(label) {
+                return Err(crate::validation_error(
+                    "domain conditions contain an invalid hostname label",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_valid_domain_label(label: &str) -> bool {
+    let bytes = label.as_bytes();
+    if bytes.is_empty() || bytes[0] == b'-' || bytes[bytes.len() - 1] == b'-' {
+        return false;
+    }
+    bytes
+        .iter()
+        .all(|ch| ch.is_ascii_alphanumeric() || *ch == b'-')
+}
+
+fn validate_rules_against_taxonomy(
+    state: &AppState,
+    rules: &[PolicyRule],
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    let taxonomy = state.taxonomy_store();
+    for rule in rules {
+        let Some(categories) = rule.conditions.categories.as_ref() else {
+            continue;
+        };
+        for category in categories {
+            let validated = taxonomy.validate_category(category);
+            if matches!(
+                validated.fallback_reason,
+                Some(FallbackReason::MissingCategory | FallbackReason::UnknownCategory)
+            ) {
+                return Err(crate::validation_error(&format!(
+                    "rule '{}' references invalid category '{}'",
+                    rule.id, category
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn parse_action(value: &str) -> Result<PolicyAction, (StatusCode, Json<ApiError>)> {

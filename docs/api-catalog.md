@@ -25,6 +25,8 @@ This reference lists every HTTP endpoint exposed by the services in this reposit
 | `POST` | `/api/v1/policies/simulate` | Simulate a policy decision without persisting it. | `policy-viewer` role. | Same as `DecisionRequest`. | `SimulationResponse` (`decision`, `matched_rule_id`, `policy_version`). |
 | `GET` | `/health/ready` | Liveness/readiness probe. | None. | — | `{"status":"OK"}`. |
 
+Policy-engine admin routes do not allow implicit system fallback; requests without `Authorization`/`X-Admin-Token` are rejected with `401`.
+
 ---
 
 ## Admin API (`admin-api`)
@@ -55,8 +57,13 @@ Override precedence note: policy-engine evaluates active domain overrides before
 | --- | --- | --- | --- |
 | `GET`/`POST` | `/api/v1/policies` | List or create policies via Admin API. | `policy-viewer` / `policy-editor`. |
 | `GET`/`PUT` | `/api/v1/policies/:id` | Fetch or update a policy by ID. | `policy-viewer` / `policy-editor`. |
-| `POST` | `/api/v1/policies/:id/publish` | Mark a policy version as active (publishes notes). | `policy-editor`. |
+| `GET` | `/api/v1/policies/:id/versions` | List immutable policy version snapshots for a policy (`version`, `status`, `created_by`, `created_at`, `deployed_at`, `rule_count`, `notes`). | `policy-viewer`. |
+| `POST` | `/api/v1/policies/:id/publish` | Mark a policy version as active (publishes notes). | `policy-admin`. |
 | `POST` | `/api/v1/policies/validate` | Validate a DSL payload without persisting. | `policy-editor`. |
+
+Runtime propagation note: Admin API policy create/update/publish persists first, invalidates policy cache, then triggers policy-engine reload. If reload fails, the API returns `502 POLICY_RELOAD_FAILED` and the persisted policy can be applied with a manual `POST /api/v1/policies/reload`.
+
+Status transition note: `PUT /api/v1/policies/:id` accepts `status=draft|archived`; promoting to `active` is restricted to `POST /api/v1/policies/:id/publish`.
 
 ### Taxonomy
 

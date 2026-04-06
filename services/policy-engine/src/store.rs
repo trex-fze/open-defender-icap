@@ -4,7 +4,7 @@ use common_types::{ClassificationVerdict, PolicyAction, PolicyDecision};
 use parking_lot::RwLock;
 use policy_dsl::{Conditions, PolicyDocument, PolicyRule};
 use serde_json::Value;
-use sqlx::{PgPool, Row};
+use sqlx::{types::Json as SqlJson, PgPool, Row};
 use std::sync::Arc;
 use taxonomy::{FallbackReason, TaxonomyStore, UNKNOWN_CATEGORY_ID};
 use tracing::warn;
@@ -56,20 +56,11 @@ impl PolicyStore {
         let policy_id: Uuid = policy.get("id");
         let version: String = policy.get("version");
 
-        let rules = sqlx::query(
-            "SELECT priority, action, description, conditions FROM policy_rules WHERE policy_id = $1 ORDER BY priority ASC",
-        )
-        .bind(policy_id)
-        .fetch_all(pool)
-        .await?;
-
-        let mut parsed_rules = Vec::with_capacity(rules.len());
-        for row in rules {
-            let priority: i32 = row.get("priority");
-            let action: String = row.get("action");
-            let description: Option<String> = row.get("description");
-            let conditions: Value = row.get("conditions");
-            parsed_rules.push(db_row_to_rule(&action, description, priority, conditions)?);
+        let mut parsed_rules = load_latest_version_rules(pool, policy_id)
+            .await?
+            .unwrap_or_default();
+        if parsed_rules.is_empty() {
+            parsed_rules = load_policy_rules_table(pool, policy_id).await?;
         }
         canonicalize_rules(&taxonomy, &mut parsed_rules)?;
 
@@ -196,7 +187,13 @@ impl PolicyStore {
         request: &DecisionRequest,
     ) -> bool {
         if let Some(domains) = &cond.domains {
-            if !domains.iter().any(|d| request.normalized_key.contains(d)) {
+            let Some(host) = host_from_normalized_key(&request.normalized_key) else {
+                return false;
+            };
+            if !domains
+                .iter()
+                .any(|pattern| domain_pattern_matches_host(pattern, &host))
+            {
                 return false;
             }
         }
@@ -322,12 +319,88 @@ fn db_row_to_rule(
 
     let cond: Conditions = serde_json::from_value(conditions)?;
     Ok(PolicyRule {
-        id: Uuid::new_v4().to_string(),
+        id: format!("db-rule-{}-{}", priority, action.to_ascii_lowercase()),
         description,
         priority: priority as u32,
         action: action_enum,
         conditions: cond,
     })
+}
+
+async fn load_latest_version_rules(
+    pool: &PgPool,
+    policy_id: Uuid,
+) -> Result<Option<Vec<PolicyRule>>> {
+    let rules = sqlx::query_scalar::<_, SqlJson<Vec<PolicyRule>>>(
+        "SELECT rules FROM policy_versions WHERE policy_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(policy_id)
+    .fetch_optional(pool)
+    .await?
+    .map(|SqlJson(rules)| rules);
+    Ok(rules)
+}
+
+async fn load_policy_rules_table(pool: &PgPool, policy_id: Uuid) -> Result<Vec<PolicyRule>> {
+    let rows = sqlx::query(
+        "SELECT priority, action, description, conditions FROM policy_rules WHERE policy_id = $1 ORDER BY priority ASC",
+    )
+    .bind(policy_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut parsed_rules = Vec::with_capacity(rows.len());
+    for row in rows {
+        let priority: i32 = row.get("priority");
+        let action: String = row.get("action");
+        let description: Option<String> = row.get("description");
+        let conditions: Value = row.get("conditions");
+        parsed_rules.push(db_row_to_rule(&action, description, priority, conditions)?);
+    }
+    Ok(parsed_rules)
+}
+
+fn host_from_normalized_key(normalized_key: &str) -> Option<String> {
+    if let Some(host) = normalized_key
+        .strip_prefix("domain:")
+        .or_else(|| normalized_key.strip_prefix("subdomain:"))
+    {
+        let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        return if host.is_empty() { None } else { Some(host) };
+    }
+
+    let raw_url = normalized_key.strip_prefix("url:")?;
+    let without_scheme = raw_url
+        .trim()
+        .split_once("://")
+        .map(|(_, tail)| tail)
+        .unwrap_or(raw_url);
+    let host_port = without_scheme.split('/').next().unwrap_or("");
+    let host = host_port.split('@').next_back().unwrap_or("");
+    let host = host
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host)
+    }
+}
+
+fn domain_pattern_matches_host(pattern: &str, host: &str) -> bool {
+    let normalized = pattern.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+    let scope = normalized.strip_prefix("*.").unwrap_or(normalized.as_str());
+    if host == scope {
+        return true;
+    }
+    host.ends_with(&format!(".{scope}"))
 }
 
 async fn record_policy_version(
@@ -654,6 +727,48 @@ mod tests {
         assert_eq!(
             store.simulate(&request).decision.action,
             PolicyAction::Monitor
+        );
+    }
+
+    #[test]
+    fn domain_condition_honors_hostname_boundaries() {
+        let taxonomy = Arc::new(TaxonomyStore::load_default().unwrap());
+        let rule = PolicyRule {
+            id: "domain-boundary".into(),
+            description: Some("Block mozilla".into()),
+            priority: 1,
+            action: PolicyAction::Block,
+            conditions: Conditions {
+                domains: Some(vec!["mozilla.org".into()]),
+                ..Default::default()
+            },
+        };
+        let store = PolicyStore::from_document(
+            PolicyDocument {
+                version: "v1".into(),
+                rules: vec![rule],
+            },
+            taxonomy,
+        )
+        .unwrap();
+
+        let mut req = base_request();
+        req.normalized_key = "domain:evilmozilla.org".into();
+        assert_eq!(store.simulate(&req).decision.action, PolicyAction::Allow);
+
+        req.normalized_key = "subdomain:www.mozilla.org".into();
+        assert_eq!(store.simulate(&req).decision.action, PolicyAction::Block);
+    }
+
+    #[test]
+    fn host_extraction_supports_url_keys() {
+        assert_eq!(
+            host_from_normalized_key("url:https://www.mozilla.org/path"),
+            Some("www.mozilla.org".to_string())
+        );
+        assert_eq!(
+            host_from_normalized_key("domain:mozilla.org"),
+            Some("mozilla.org".to_string())
         );
     }
 }

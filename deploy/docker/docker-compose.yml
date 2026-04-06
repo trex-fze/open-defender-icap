@@ -100,7 +100,7 @@ services:
     command: ["policy-engine"]
     environment:
       RUST_LOG: ${RUST_LOG:-info}
-      OD_POLICY_DATABASE_URL: ${OD_POLICY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_policy}
+      OD_POLICY_DATABASE_URL: ${OD_POLICY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_admin}
       OD_TAXONOMY_DATABASE_URL: ${OD_TAXONOMY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_admin}
       OD_POLICY_ADMIN_TOKEN: ${OD_POLICY_ADMIN_TOKEN:-changeme-admin}
       OD_IAM_RESOLVER_URL: ${OD_IAM_RESOLVER_URL:-http://admin-api:19000/api/v1/iam/whoami}
@@ -372,7 +372,7 @@ services:
       OD_POLICY_URL: ${OD_POLICY_URL:-http://policy-engine:19010}
       OD_ADMIN_TOKEN: ${OD_ADMIN_TOKEN:-changeme-admin}
       OD_ADMIN_DATABASE_URL: ${OD_ADMIN_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_admin}
-      OD_POLICY_DATABASE_URL: ${OD_POLICY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_policy}
+      OD_POLICY_DATABASE_URL: ${OD_POLICY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_admin}
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
       - ../../config:/app/config:ro

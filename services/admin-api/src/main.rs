@@ -507,6 +507,10 @@ async fn main() -> Result<()> {
             get(policies::get_policy).put(policies::update_policy),
         )
         .route(
+            "/api/v1/policies/:id/versions",
+            get(policies::list_policy_versions),
+        )
+        .route(
             "/api/v1/policies/:id/publish",
             post(policies::publish_policy),
         )

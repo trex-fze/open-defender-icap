@@ -55,7 +55,7 @@ impl AdminAuth {
         let has_auth = bearer.is_some() || admin.is_some();
 
         if !has_auth {
-            return Ok(UserContext::system());
+            return Err(StatusCode::UNAUTHORIZED);
         }
 
         let mut builder = self.client.get(&self.resolver_url);
@@ -118,13 +118,6 @@ pub struct UserContext {
 }
 
 impl UserContext {
-    fn system() -> Self {
-        Self {
-            actor: "system".into(),
-            roles: default_roles().into_iter().collect(),
-        }
-    }
-
     fn from_identity(identity: ResolverIdentity) -> Self {
         Self {
             actor: identity.actor,
@@ -145,14 +138,6 @@ struct ResolverIdentity {
     permissions: Vec<String>,
 }
 
-fn default_roles() -> Vec<String> {
-    vec![
-        ROLE_POLICY_ADMIN.into(),
-        ROLE_POLICY_EDITOR.into(),
-        ROLE_POLICY_VIEWER.into(),
-    ]
-}
-
 pub fn require_roles(ctx: &UserContext, roles: &[&str]) -> Result<(), StatusCode> {
     if roles.iter().any(|role| ctx.has_role(role)) {
         Ok(())
@@ -164,3 +149,22 @@ pub fn require_roles(ctx: &UserContext, roles: &[&str]) -> Result<(), StatusCode
 pub const ROLE_POLICY_VIEWER_ROLES: &[&str] =
     &[ROLE_POLICY_ADMIN, ROLE_POLICY_EDITOR, ROLE_POLICY_VIEWER];
 pub const ROLE_POLICY_EDITOR_ROLES: &[&str] = &[ROLE_POLICY_ADMIN, ROLE_POLICY_EDITOR];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn authenticate_requires_credentials() {
+        let auth = AdminAuth {
+            resolver_url: "http://localhost:19000/api/v1/iam/whoami".to_string(),
+            client: Client::builder().build().expect("client"),
+        };
+
+        let status = auth
+            .authenticate(None, None)
+            .await
+            .expect_err("missing credentials must be rejected");
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+}

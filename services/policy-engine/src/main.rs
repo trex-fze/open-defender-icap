@@ -342,6 +342,17 @@ async fn main() -> Result<()> {
         .clone()
         .or_else(|| env::var("OD_POLICY_DATABASE_URL").ok())
         .or_else(|| env::var("DATABASE_URL").ok());
+    let admin_db_url = env::var("OD_ADMIN_DATABASE_URL").ok();
+    if let (Some(policy_db), Some(admin_db)) = (db_url.as_ref(), admin_db_url.as_ref()) {
+        if policy_db != admin_db {
+            warn!(
+                target = "svc-policy",
+                policy_database = %policy_db,
+                admin_database = %admin_db,
+                "policy/admin databases differ; policy updates may drift from enforcement runtime"
+            );
+        }
+    }
     let activation_db_url = cfg
         .activation_database_url
         .clone()
@@ -420,6 +431,18 @@ async fn main() -> Result<()> {
         audit_logger,
         classification_pool,
     };
+
+    let loaded_policy_id = state
+        .evaluator
+        .policy_id()
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "<none>".to_string());
+    info!(
+        target = "svc-policy",
+        policy_id = loaded_policy_id,
+        policy_version = %state.evaluator.version(),
+        "policy runtime initialized"
+    );
 
     let auth_layer = {
         let auth = admin_auth.clone();
