@@ -132,7 +132,7 @@ LLM failover safety controls (env overrides for `config/llm-worker.json` routing
 - `OD_LLM_ONLINE_CONTEXT_MODE`: online-provider content mode `required|preferred|metadata_only` (default `required`)
 - `OD_LLM_CONTENT_REQUIRED_MODE`: content gating mode `required|auto` (default `auto`)
 - `OD_LLM_METADATA_ONLY_ALLOWED_FOR`: metadata-only scope `online|all` (default `all`)
-- `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD`: fallback threshold for fetch failures before metadata-only classification (default `2`)
+- `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD`: fallback threshold for fetch failures before metadata-only classification (default `1`)
 - `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES`: terminal fetch statuses treated as no-content targets (default `failed,unsupported,blocked`)
 - `OD_LLM_METADATA_ONLY_FORCE_ACTION`: force action when online call runs metadata-only (default `Monitor`)
 - `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`: cap confidence for metadata-only outputs (default `0.4`)
@@ -141,9 +141,9 @@ LLM failover safety controls (env overrides for `config/llm-worker.json` routing
 - `OD_PENDING_RECONCILE_INTERVAL_SECS`: reconcile loop interval in seconds (default `60`)
 - `OD_PENDING_RECONCILE_STALE_MINUTES`: age threshold for reconciling stale pending rows (default `10`)
 - `OD_PENDING_RECONCILE_BATCH`: max pending rows reconciled per cycle (default `100`)
-- `config/page-fetcher.json.terminal_retry_cooldown_seconds`: cooldown for retrying recently failed keys (default `21600`)
-- `config/page-fetcher.json.blocked_retry_cooldown_seconds`: cooldown for retrying recently blocked keys (default `21600`)
-- `config/page-fetcher.json.unsupported_retry_cooldown_seconds`: cooldown for retrying `unsupported` keys such as asset endpoints (default `43200`)
+- `config/page-fetcher.json.terminal_retry_cooldown_seconds`: cooldown for retrying recently failed keys (default `1200`)
+- `config/page-fetcher.json.blocked_retry_cooldown_seconds`: cooldown for retrying recently blocked keys (default `14400`)
+- `config/page-fetcher.json.unsupported_retry_cooldown_seconds`: cooldown for retrying `unsupported` keys such as asset endpoints (default `21600`)
 - `config/page-fetcher.json.unsupported_host_allowlist`: host/domain allowlist to bypass asset-host prefilter
 - `CRAWL4AI_WAIT_UNTIL`: Playwright wait mode used by crawl4ai (`load` recommended for anti-bot challenge pages)
 - `CRAWL4AI_DELAY_BEFORE_RETURN_HTML`: post-load delay seconds before HTML extraction (default `0.2`)
@@ -154,7 +154,7 @@ Recommended local-first profile (current compose defaults):
 - `OD_LLM_STALE_PENDING_MINUTES=0`
 - `OD_LLM_CONTENT_REQUIRED_MODE=auto`
 - `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all`
-- `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2`
+- `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=1`
 - `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES=failed,unsupported,blocked`
 - `OD_LLM_METADATA_ONLY_FORCE_ACTION=Monitor`
 - `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE=0.4`
@@ -274,7 +274,7 @@ Use `down -v` only when you explicitly need a clean local data state.
   - Yes. Set `OD_LLM_ONLINE_CONTEXT_MODE` to `required` (always send excerpt), `preferred` (send when available), or `metadata_only` (never send excerpt).
   - In metadata-only mode, guardrails force conservative action/confidence via `OD_LLM_METADATA_ONLY_FORCE_ACTION` and `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`.
 - What if a site is API-like and page content never renders?
-  - Set `OD_LLM_CONTENT_REQUIRED_MODE=auto` and keep `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2` so repeated terminal fetch failures can fall back to metadata-only classification.
+  - Set `OD_LLM_CONTENT_REQUIRED_MODE=auto` and keep `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=1` so a first terminal fetch failure can fall back to metadata-only classification.
   - Use `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES` to tune what counts as terminal content failure.
 - What if I run offline-only models?
   - Set `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all` so metadata-only fallback is available to offline providers too.
@@ -289,7 +289,7 @@ Use `down -v` only when you explicitly need a clean local data state.
   - Recommended baseline for local-first/hybrid deployments:
     - `OD_LLM_CONTENT_REQUIRED_MODE=auto`
     - `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all`
-    - `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2`
+    - `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=1`
   - This keeps content-aware classification when excerpt exists, but avoids infinite pending loops for API/non-renderable sites.
 - Why did pending shrink but some keys moved to `unknown-unclassified / insufficient-evidence`?
   - This is expected terminal fallback behavior after repeated terminal fetch failures or output-invalid verification failures.

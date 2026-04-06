@@ -12,8 +12,8 @@
   "ttl_seconds": 21600,
   "fetch_timeout_seconds": 60,
   "database_pool_size": 5,
-  "terminal_retry_cooldown_seconds": 21600,
-  "blocked_retry_cooldown_seconds": 21600,
-  "unsupported_retry_cooldown_seconds": 43200,
+  "terminal_retry_cooldown_seconds": 1200,
+  "blocked_retry_cooldown_seconds": 14400,
+  "unsupported_retry_cooldown_seconds": 21600,
   "unsupported_host_allowlist": []
 }

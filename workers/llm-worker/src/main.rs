@@ -454,7 +454,7 @@ const DEFAULT_METADATA_ONLY_MAX_CONFIDENCE: f32 = 0.40;
 const DEFAULT_METADATA_ONLY_REQUEUE_FOR_CONTENT: bool = true;
 const DEFAULT_CONTENT_REQUIRED_MODE: &str = "auto";
 const DEFAULT_METADATA_ONLY_ALLOWED_FOR: &str = "all";
-const DEFAULT_METADATA_ONLY_FETCH_FAILURE_THRESHOLD: usize = 2;
+const DEFAULT_METADATA_ONLY_FETCH_FAILURE_THRESHOLD: usize = 1;
 const DEFAULT_METADATA_ONLY_NO_CONTENT_STATUSES: &[&str] = &["failed", "unsupported", "blocked"];
 const DEFAULT_PENDING_RECONCILE_ENABLED: bool = true;
 const DEFAULT_PENDING_RECONCILE_INTERVAL_SECS: u64 = 60;
@@ -3411,7 +3411,7 @@ mod tests {
         assert!(runtime.metadata_only_requeue_for_content);
         assert_eq!(runtime.content_required_mode.as_str(), "auto");
         assert_eq!(runtime.metadata_only_allowed_for.as_str(), "all");
-        assert_eq!(runtime.metadata_only_fetch_failure_threshold, 2);
+        assert_eq!(runtime.metadata_only_fetch_failure_threshold, 1);
         assert!(runtime.metadata_only_no_content_statuses.contains("failed"));
     }
 

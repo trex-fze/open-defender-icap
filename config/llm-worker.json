@@ -41,7 +41,7 @@
     "metadata_only_requeue_for_content": false,
     "content_required_mode": "auto",
     "metadata_only_allowed_for": "all",
-    "metadata_only_fetch_failure_threshold": 2,
+    "metadata_only_fetch_failure_threshold": 1,
     "metadata_only_no_content_statuses": ["failed", "unsupported", "blocked"],
     "pending_reconcile_enabled": true,
     "pending_reconcile_interval_secs": 60,

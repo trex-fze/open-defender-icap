@@ -99,15 +99,15 @@ const fn default_pool_size() -> u32 {
 }
 
 const fn default_terminal_retry_cooldown_seconds() -> u64 {
-    21_600
+    1_200
 }
 
 const fn default_blocked_retry_cooldown_seconds() -> u64 {
-    21_600
+    14_400
 }
 
 const fn default_unsupported_retry_cooldown_seconds() -> u64 {
-    43_200
+    21_600
 }
 
 #[derive(Debug, Deserialize)]
