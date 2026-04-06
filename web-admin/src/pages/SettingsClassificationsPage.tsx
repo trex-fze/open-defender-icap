@@ -322,7 +322,10 @@ export const SettingsClassificationsPage = () => {
                     Recompute is disabled. Imported risk/action/confidence values will be trusted as-is.
                   </div>
                 )}
-                <button className="cta-button" disabled={!api.canCallApi || busy === 'import' || !importText.trim()}>
+                <button
+                  className="cta-button exchange-action-button"
+                  disabled={!api.canCallApi || busy === 'import' || !importText.trim()}
+                >
                   {busy === 'import' ? 'Importing...' : importDryRun ? 'Preview Import' : 'Apply Import'}
                 </button>
               </form>
@@ -339,7 +342,11 @@ export const SettingsClassificationsPage = () => {
               <form className="iam-form" onSubmit={handleFlush}>
                 <label>
                   <span>Scope</span>
-                  <select value={flushScope} onChange={(e) => setFlushScope(e.target.value as 'all' | 'prefix' | 'keys')}>
+                  <select
+                    className="exchange-scope-select"
+                    value={flushScope}
+                    onChange={(e) => setFlushScope(e.target.value as 'all' | 'prefix' | 'keys')}
+                  >
                     <option value="all">all</option>
                     <option value="prefix">prefix</option>
                     <option value="keys">keys</option>
@@ -376,7 +383,7 @@ export const SettingsClassificationsPage = () => {
                     <input value={flushConfirm} onChange={(e) => setFlushConfirm(e.target.value)} />
                   </label>
                 )}
-                <button className="cta-button" disabled={!api.canCallApi || busy === 'flush'}>
+                <button className="cta-button exchange-action-button" disabled={!api.canCallApi || busy === 'flush'}>
                   {busy === 'flush' ? 'Running...' : flushDryRun ? 'Preview Flush' : 'Apply Flush'}
                 </button>
               </form>

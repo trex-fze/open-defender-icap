@@ -355,6 +355,30 @@ a {
   resize: vertical;
 }
 
+.exchange-action-button {
+  align-self: flex-start;
+  width: auto;
+  min-width: 200px;
+}
+
+.exchange-scope-select {
+  width: auto !important;
+  min-width: 180px;
+  max-width: 240px;
+}
+
+@media (max-width: 640px) {
+  .exchange-action-button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .exchange-scope-select {
+    width: 100% !important;
+    max-width: none;
+  }
+}
+
 .chip-row {
   display: flex;
   flex-wrap: wrap;
