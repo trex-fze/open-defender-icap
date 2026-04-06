@@ -26,6 +26,7 @@ This reference lists every HTTP endpoint exposed by the services in this reposit
 | `GET` | `/health/ready` | Liveness/readiness probe. | None. | — | `{"status":"OK"}`. |
 
 Policy-engine admin routes do not allow implicit system fallback; requests without `Authorization`/`X-Admin-Token` are rejected with `401`.
+Policy-engine policy admin routes are compatibility endpoints and emit deprecation headers (`Deprecation`, `Warning`, `Sunset`) to steer operators toward Admin API policy routes.
 
 ---
 

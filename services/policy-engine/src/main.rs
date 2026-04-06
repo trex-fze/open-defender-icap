@@ -13,8 +13,9 @@ use auth::{
 };
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderValue, StatusCode},
     middleware,
+    response::Response,
     routing::{get, post, put},
     Extension, Json, Router,
 };
@@ -452,12 +453,15 @@ async fn main() -> Result<()> {
         })
     };
 
+    let deprecation_layer = middleware::from_fn(deprecated_policy_admin_middleware);
+
     let admin_routes = Router::new()
         .route("/api/v1/policies", get(list_policies).post(create_policy))
         .route("/api/v1/policies/reload", post(reload_policies))
         .route("/api/v1/policies/simulate", post(simulate_policy))
         .route("/api/v1/policies/:id", put(update_policy))
         .with_state(state.clone())
+        .layer(deprecation_layer)
         .layer(auth_layer);
 
     let app = Router::new()
@@ -471,6 +475,31 @@ async fn main() -> Result<()> {
     info!(target = "svc-policy", %addr, "policy engine listening");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+async fn deprecated_policy_admin_middleware(
+    req: axum::http::Request<axum::body::Body>,
+    next: middleware::Next,
+) -> Response {
+    warn!(
+        target = "svc-policy",
+        method = %req.method(),
+        path = %req.uri().path(),
+        "policy-engine policy admin endpoint is deprecated; use admin-api /api/v1/policies"
+    );
+    let mut response = next.run(req).await;
+    response
+        .headers_mut()
+        .insert("deprecation", HeaderValue::from_static("true"));
+    response.headers_mut().insert(
+        "warning",
+        HeaderValue::from_static("299 - \"Deprecated API: use admin-api /api/v1/policies\""),
+    );
+    response.headers_mut().insert(
+        "sunset",
+        HeaderValue::from_static("Wed, 31 Dec 2026 23:59:59 GMT"),
+    );
+    response
 }
 
 async fn handle_decision(
@@ -800,6 +829,37 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn deprecation_middleware_adds_headers() {
+        async fn ok() -> &'static str {
+            "ok"
+        }
+
+        let app = Router::new()
+            .route("/api/v1/policies", get(ok))
+            .layer(middleware::from_fn(deprecated_policy_admin_middleware));
+
+        let response = app
+            .oneshot(
+                Request::get("/api/v1/policies")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("deprecation")
+                .and_then(|value| value.to_str().ok()),
+            Some("true")
+        );
+        assert!(response.headers().get("warning").is_some());
+        assert!(response.headers().get("sunset").is_some());
     }
 
     #[test]
