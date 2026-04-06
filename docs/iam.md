@@ -5,6 +5,7 @@ Stage 11 now supports **local username/password auth** without an IdP. RBAC stil
 ## Local Identity Model
 
 For local auth, `username` is the primary login identity. `email` is optional.
+When provisioning users through IAM APIs/UI/CLI, an initial password is required.
 
 `subject` is optional and only required when mapping external IdP identities in `hybrid` or `oidc` mode.
 

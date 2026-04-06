@@ -101,21 +101,18 @@ impl IamService {
             .email
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
-        let password_hash = if let Some(raw_password) = payload.password.as_deref() {
-            let trimmed = raw_password.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                if trimmed.len() < 8 {
-                    return Err(IamError::Validation(
-                        "password must be at least 8 characters".into(),
-                    ));
-                }
-                Some(hash_token(trimmed)?)
-            }
-        } else {
-            None
-        };
+        let trimmed_password = payload.password.trim();
+        if trimmed_password.is_empty() {
+            return Err(IamError::Validation(
+                "password is required for user creation".into(),
+            ));
+        }
+        if trimmed_password.len() < 8 {
+            return Err(IamError::Validation(
+                "password must be at least 8 characters".into(),
+            ));
+        }
+        let password_hash = Some(hash_token(trimmed_password)?);
         let must_change_password = payload.must_change_password.unwrap_or(true);
         let record = sqlx::query_as::<_, IamUserRecord>(
             r#"
@@ -1288,7 +1285,7 @@ pub struct CreateUserRequest {
     pub email: Option<String>,
     pub display_name: Option<String>,
     pub status: Option<String>,
-    pub password: Option<String>,
+    pub password: String,
     pub must_change_password: Option<bool>,
 }
 

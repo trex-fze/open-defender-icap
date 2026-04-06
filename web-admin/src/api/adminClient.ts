@@ -96,7 +96,18 @@ export const adminPostJson = async <TResponse, TBody = unknown>(
   if (!resp.ok) {
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
-  return (await resp.json()) as TResponse;
+  if (resp.status === 204 || resp.status === 205) {
+    return undefined as TResponse;
+  }
+  const contentType = resp.headers.get('Content-Type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    return undefined as TResponse;
+  }
+  const text = await resp.text();
+  if (!text.trim()) {
+    return undefined as TResponse;
+  }
+  return JSON.parse(text) as TResponse;
 };
 
 export const adminPutJson = async <TResponse, TBody = unknown>(

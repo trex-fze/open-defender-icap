@@ -115,6 +115,7 @@ const IamUsersPanel = () => {
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
   const [selectedRole, setSelectedRole] = useState<Record<string, string>>({});
   const [busyUser, setBusyUser] = useState<string>();
   const [form, setForm] = useState({
@@ -127,6 +128,12 @@ const IamUsersPanel = () => {
     status: 'active',
   });
   const [lastUserToken, setLastUserToken] = useState<{ userId: string; username: string; token: string }>();
+  const [passwordEditor, setPasswordEditor] = useState<{
+    userId: string;
+    password: string;
+    confirmPassword: string;
+    mustChangePassword: boolean;
+  } | null>(null);
 
   const loadUsers = useCallback(async () => {
     if (!api.canCallApi) return;
@@ -169,13 +176,18 @@ const IamUsersPanel = () => {
       setError('Username is required');
       return;
     }
+    if (!form.password.trim()) {
+      setError('Initial password is required');
+      return;
+    }
     try {
       setLastUserToken(undefined);
+      setNotice(undefined);
       await adminPostJson(api as AdminApiContext, '/api/v1/iam/users', {
         username: form.username.trim(),
         email: form.email.trim() || undefined,
         display_name: form.display_name.trim() || undefined,
-        password: form.password.trim() || undefined,
+        password: form.password.trim(),
         must_change_password: form.must_change_password,
         subject: form.subject.trim() || undefined,
         status: form.status,
@@ -190,6 +202,7 @@ const IamUsersPanel = () => {
         status: 'active',
       });
       loadUsers();
+      setNotice('User created successfully.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create user');
     }
@@ -200,11 +213,13 @@ const IamUsersPanel = () => {
     if (!role) return;
     setBusyUser(userId);
     try {
+      setNotice(undefined);
       await adminPostJson(api as AdminApiContext, `/api/v1/iam/users/${userId}/roles`, {
         role,
       });
       setSelectedRole((prev) => ({ ...prev, [userId]: '' }));
       loadUsers();
+      setNotice(`Assigned role ${role}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to assign role');
     } finally {
@@ -215,8 +230,10 @@ const IamUsersPanel = () => {
   const revokeRole = async (userId: string, role: string) => {
     setBusyUser(userId);
     try {
+      setNotice(undefined);
       await adminDelete(api as AdminApiContext, `/api/v1/iam/users/${userId}/roles/${role}`);
       loadUsers();
+      setNotice(`Removed role ${role}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove role');
     } finally {
@@ -225,10 +242,21 @@ const IamUsersPanel = () => {
   };
 
   const disableUser = async (userId: string) => {
+    const confirmed = window.confirm('Disable this user account? They will no longer be able to log in.');
+    if (!confirmed) return;
     setBusyUser(userId);
     try {
+      setNotice(undefined);
       await adminDelete(api as AdminApiContext, `/api/v1/iam/users/${userId}`);
+      setUsers((prev) =>
+        prev.map((entry) =>
+          entry.user.id === userId
+            ? { ...entry, user: { ...entry.user, status: 'disabled' } }
+            : entry,
+        ),
+      );
       loadUsers();
+      setNotice('User disabled.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to disable user');
     } finally {
@@ -236,16 +264,43 @@ const IamUsersPanel = () => {
     }
   };
 
-  const setUserPassword = async (userId: string) => {
-    const nextPassword = window.prompt('Enter new password');
-    if (!nextPassword) return;
+  const openPasswordEditor = (userId: string) => {
+    setPasswordEditor({
+      userId,
+      password: '',
+      confirmPassword: '',
+      mustChangePassword: true,
+    });
+    setError(undefined);
+    setNotice(undefined);
+  };
+
+  const setUserPassword = async () => {
+    if (!passwordEditor) return;
+    if (!passwordEditor.password.trim()) {
+      setError('New password is required');
+      return;
+    }
+    if (passwordEditor.password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+    if (passwordEditor.password !== passwordEditor.confirmPassword) {
+      setError('Password confirmation does not match');
+      return;
+    }
+
+    const userId = passwordEditor.userId;
     setBusyUser(userId);
     try {
+      setNotice(undefined);
       await adminPostJson(api as AdminApiContext, `/api/v1/iam/users/${userId}/set-password`, {
-        password: nextPassword,
-        must_change_password: true,
+        password: passwordEditor.password,
+        must_change_password: passwordEditor.mustChangePassword,
       });
       setError(undefined);
+      setNotice('Password updated.');
+      setPasswordEditor(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to set user password');
     } finally {
@@ -258,6 +313,7 @@ const IamUsersPanel = () => {
     if (!name) return;
     setBusyUser(userId);
     try {
+      setNotice(undefined);
       const response = await adminPostJson<{ token: string } & Record<string, any>>(
         api as AdminApiContext,
         `/api/v1/iam/users/${userId}/tokens`,
@@ -265,6 +321,7 @@ const IamUsersPanel = () => {
       );
       setLastUserToken({ userId, username, token: response.token });
       setError(undefined);
+      setNotice('API key created. Copy it now.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create user API key');
     } finally {
@@ -308,12 +365,13 @@ const IamUsersPanel = () => {
             />
           </label>
           <label>
-            <span>Initial password (optional)</span>
+            <span>Initial password</span>
             <input
               value={form.password}
               onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
               type="password"
-              placeholder="Set a temporary password"
+              placeholder="Set initial password"
+              required
             />
           </label>
           <label>
@@ -374,6 +432,7 @@ const IamUsersPanel = () => {
           </p>
         </div>
       )}
+      {notice && <div className="muted" style={{ marginBottom: '0.75rem' }}>{notice}</div>}
       {error && <div className="error-banner">{error}</div>}
       <PaginationControls
         limit={meta.limit}
@@ -475,13 +534,15 @@ const IamUsersPanel = () => {
                   <td>
                     <div className="button-stack" style={{ gap: '0.5rem' }}>
                       <button
+                        type="button"
                         className="ghost-button"
                         disabled={busyUser === entry.user.id}
-                        onClick={() => setUserPassword(entry.user.id)}
+                        onClick={() => openPasswordEditor(entry.user.id)}
                       >
                         Set Password
                       </button>
                       <button
+                        type="button"
                         className="ghost-button"
                         disabled={busyUser === entry.user.id}
                         onClick={() => createUserApiKey(entry.user.id, entry.user.username || entry.user.email || 'user')}
@@ -490,13 +551,14 @@ const IamUsersPanel = () => {
                       </button>
                     </div>
                     <div style={{ marginTop: '0.5rem' }}>
-                    <button
-                      className="ghost-button"
-                      disabled={busyUser === entry.user.id}
-                      onClick={() => disableUser(entry.user.id)}
-                    >
-                      Disable
-                    </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={busyUser === entry.user.id || entry.user.status === 'disabled'}
+                        onClick={() => disableUser(entry.user.id)}
+                      >
+                        {entry.user.status === 'disabled' ? 'Disabled' : 'Disable'}
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -505,6 +567,74 @@ const IamUsersPanel = () => {
           </table>
         )}
       </div>
+      {passwordEditor && (
+        <div className="glass-panel" style={{ marginTop: '1rem' }}>
+          <p className="section-title">Set user password</p>
+          <form
+            className="iam-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setUserPassword();
+            }}
+          >
+            <label>
+              <span>New password</span>
+              <input
+                type="password"
+                value={passwordEditor.password}
+                onChange={(e) =>
+                  setPasswordEditor((prev) =>
+                    prev ? { ...prev, password: e.target.value } : prev,
+                  )
+                }
+                autoComplete="new-password"
+                required
+              />
+            </label>
+            <label>
+              <span>Confirm password</span>
+              <input
+                type="password"
+                value={passwordEditor.confirmPassword}
+                onChange={(e) =>
+                  setPasswordEditor((prev) =>
+                    prev ? { ...prev, confirmPassword: e.target.value } : prev,
+                  )
+                }
+                autoComplete="new-password"
+                required
+              />
+            </label>
+            <label>
+              <span>Require password change at next login</span>
+              <select
+                value={passwordEditor.mustChangePassword ? 'yes' : 'no'}
+                onChange={(e) =>
+                  setPasswordEditor((prev) =>
+                    prev ? { ...prev, mustChangePassword: e.target.value === 'yes' } : prev,
+                  )
+                }
+              >
+                <option value="yes">yes</option>
+                <option value="no">no</option>
+              </select>
+            </label>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button className="cta-button" type="submit" disabled={busyUser === passwordEditor.userId}>
+                {busyUser === passwordEditor.userId ? 'Saving...' : 'Save Password'}
+              </button>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => setPasswordEditor(null)}
+                disabled={busyUser === passwordEditor.userId}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </section>
   );
 };

@@ -335,7 +335,7 @@ enum IamUsersCmd {
         #[clap(long)]
         subject: Option<String>,
         #[clap(long)]
-        password: Option<String>,
+        password: String,
         #[clap(long, default_value_t = true)]
         must_change_password: bool,
         #[clap(long, default_value = "active")]
@@ -2528,8 +2528,7 @@ struct CreateUserPayload {
     display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     subject: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    password: Option<String>,
+    password: String,
     must_change_password: bool,
     status: String,
 }
