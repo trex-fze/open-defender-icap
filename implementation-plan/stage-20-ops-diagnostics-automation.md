@@ -1,6 +1,6 @@
 # Stage 20 Implementation Plan - Ops Diagnostics and Runbook Automation
 
-**Status**: In Progress  
+**Status**: Complete  
 **Primary Owners**: SRE + SWG + Docs  
 **Created**: 2026-04-07
 
@@ -17,8 +17,8 @@
 | --- | --- | --- | --- | --- |
 | S20-T1 | Implement pending diagnostics collector script | SRE + SWG | [x] | Added `tests/ops/content-pending-diagnostics.sh`. |
 | S20-T2 | Standardize artifact output paths and host/key naming | SRE | [x] | Output path uses timestamped folder + host-safe key. |
-| S20-T3 | Add runbook invocation guidance + artifact mapping | Docs | [ ] | Link collector output to troubleshooting sequence. |
-| S20-T4 | Add quick triage checklist for first 15 minutes | SRE + Docs | [ ] | Decision tree for pending/content delays. |
+| S20-T3 | Add runbook invocation guidance + artifact mapping | Docs | [x] | Added command examples and artifact mapping in Stage 10 runbook troubleshooting section. |
+| S20-T4 | Add quick triage checklist for first 15 minutes | SRE + Docs | [x] | Added interpretation guide + escalation thresholds and reliability gate command. |
 
 ## Evidence
 - Script outputs: `tests/artifacts/ops-triage/*`

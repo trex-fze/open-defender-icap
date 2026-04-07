@@ -7,13 +7,13 @@
 - [x] Capture queue snapshots (`classification-jobs`, `page-fetch-jobs`).
 
 ## Runbook
-- [ ] Add collector usage examples.
-- [ ] Add artifact interpretation guide.
-- [ ] Add escalation criteria with thresholds.
+- [x] Add collector usage examples.
+- [x] Add artifact interpretation guide.
+- [x] Add escalation criteria with thresholds.
 
 ## Validation
 - [x] Run collector on a known key and verify artifact completeness.
 - [x] Record sample output in verification log.
 
 ## Completion
-- [ ] Mark Stage 20 complete in `implementation-plan/stage-plan.md`.
+- [x] Mark Stage 20 complete in `implementation-plan/stage-plan.md`.

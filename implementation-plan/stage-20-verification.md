@@ -13,4 +13,7 @@ Date: 2026-04-07
   - Bundle includes DB snapshots, stream tails, and service logs plus key-filtered log extracts.
 
 ## Pending Verification
-- Add runbook examples and triage interpretation notes.
+- Added runbook examples, artifact interpretation quick guide, escalation thresholds, and reliability gate command reference in `docs/runbooks/stage10-web-admin-operator-runbook.md`.
+
+## Stage status
+- Stage 20 validation and documentation requirements completed.

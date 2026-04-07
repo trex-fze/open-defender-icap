@@ -19,16 +19,16 @@ This roadmap mirrors the RFC tracker and captures actionable work items, owners,
 | 15. Cursor Pagination Hard Cutover (✅) | Replace mixed list responses with cursor pagination (`limit` + `cursor`, `{data, meta}`), migrate web-admin + odctl, add keyset indexes | Backend + Frontend + DevTools | Stages 5, 10, 11, 14 | Stage 15 RFC/plan, migration 0016, cargo/web test evidence, docker runtime cursor-chain smoke |
 | 16. Policy Action Outcome Hardening (✅) | Action semantics hardening (`Review`/`ContentPending`), strict condition validation, activation parity, runtime-parity simulation | Platform Security + Policy + Backend + SWG + QA | Stages 2, 4, 10, 15 | Stage 16 plan/checklist + `implementation-plan/stage-16-verification.md` evidence log |
 | 17. ContentPending Reliability and Terminalization (✅) | Timeout diagnostics, pending->terminal reliability hardening, multi-run smoke stabilization | Classification + SWG + SRE + QA | Stages 4, 14, 16 | Stage 17 plan/checklist + verification log with reliability matrix |
-| 18. Facebook E2E Reliability Hardening (In Progress) | Multi-run reliability gate + deterministic failure diagnostics for facebook end-to-end smoke | SWG + Classification + SRE + QA | Stages 9, 17 | Stage 18 plan/checklist + `tests/security/facebook-e2e-reliability.sh` harness + verification log |
+| 18. Facebook E2E Reliability Hardening (✅) | Multi-run reliability gate + deterministic failure diagnostics for facebook end-to-end smoke | SWG + Classification + SRE + QA | Stages 9, 17 | Stage 18 plan/checklist + `tests/security/facebook-e2e-reliability.sh` harness + verification log |
 | 19. Taxonomy Enforcement Parity (Planned) | Cross-service canonicalization/activation/persistence parity matrix and tests | Classification + Policy + Backend + QA | Stages 12, 16, 17 | Stage 19 plan/checklist + verification log |
-| 20. Ops Diagnostics and Runbook Automation (In Progress) | One-command pending diagnostics collector + runbook triage automation | SRE + SWG + Docs | Stages 17, 18 | Stage 20 plan/checklist + `tests/ops/content-pending-diagnostics.sh` + verification log |
+| 20. Ops Diagnostics and Runbook Automation (✅) | One-command pending diagnostics collector + runbook triage automation | SRE + SWG + Docs | Stages 17, 18 | Stage 20 plan/checklist + `tests/ops/content-pending-diagnostics.sh` + verification log |
 | 21. Stream Consumer-Group Migration (Planned) | Restart-safe Redis stream processing (`XREADGROUP`, ACK/claim, poison handling) | Backend + Classification + SRE | Stages 4, 14, 17 | Stage 21 plan/checklist + verification log |
 | 22. Cursor Parity for Policy/Reporting APIs (Planned) | Convert remaining policy/reporting page-offset list APIs to cursor/keyset parity | Backend + Frontend + DevTools + QA | Stages 15, 16 | Stage 22 plan/checklist + verification log |
 
 ## Current Focus
 
-1. Execute Stage 18 reliability matrix with `tests/security/facebook-e2e-reliability.sh` and capture baseline/gate evidence.
-2. Implement Stage 20 runbook automation around `tests/ops/content-pending-diagnostics.sh` and validate first-response triage workflow.
-3. Execute Stage 19 taxonomy parity matrix across llm-worker/reclass-worker/policy-engine/admin-api flows.
-4. Implement Stage 21 stream consumer-group migration (`XREADGROUP` + ACK/claim) with restart simulation tests.
-5. Implement Stage 22 cursor parity for remaining policy/reporting list APIs.
+1. Execute Stage 19 taxonomy parity matrix across llm-worker/reclass-worker/policy-engine/admin-api flows.
+2. Implement Stage 21 stream consumer-group migration (`XREADGROUP` + ACK/claim) with restart simulation tests.
+3. Implement Stage 22 cursor parity for remaining policy/reporting list APIs.
+4. Keep Stage 18 reliability gate green in routine regression runs (`RUNS=10`).
+5. Keep Stage 20 diagnostics collector/runbook path validated in on-call drills.

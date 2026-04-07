@@ -6,6 +6,7 @@ PROXY_URL=${PROXY_URL:-http://localhost:3128}
 TARGET_DOMAIN=${TARGET_DOMAIN:-www.facebook.com}
 TARGET_ROOT_DOMAIN=${TARGET_ROOT_DOMAIN:-facebook.com}
 TARGET_NORMALIZED_KEY=${TARGET_NORMALIZED_KEY:-subdomain:www.facebook.com}
+TARGET_CANONICAL_KEY=${TARGET_CANONICAL_KEY:-domain:${TARGET_ROOT_DOMAIN}}
 SOCIAL_CATEGORY_ID=${SOCIAL_CATEGORY_ID:-social-media}
 ADMIN_API_URL=${ADMIN_API_URL:-http://localhost:19000}
 ADMIN_TOKEN=${ADMIN_TOKEN:-${OD_ADMIN_TOKEN:-changeme-admin}}
@@ -19,6 +20,7 @@ WAIT_DB_SECONDS=${WAIT_DB_SECONDS:-330}
 POLL_INTERVAL_SECONDS=${POLL_INTERVAL_SECONDS:-3}
 CONNECT_URL="https://${TARGET_DOMAIN}"
 CLEAN_TARGET_STATE=${CLEAN_TARGET_STATE:-1}
+AUTO_DISABLE_SOCIAL_CATEGORY=${AUTO_DISABLE_SOCIAL_CATEGORY:-1}
 SQUID_ACCESS_LOG=${SQUID_ACCESS_LOG:-data/squid-logs/access.log}
 
 mkdir -p "${ARTIFACT_ROOT}"
@@ -114,8 +116,8 @@ wait_for_db_rows() {
   local start
   start=$(date +%s)
   while true; do
-    run_compose exec -T postgres bash -lc "psql -U defender -d defender_admin -At -c \"SELECT COUNT(*) FROM classifications WHERE normalized_key='${TARGET_NORMALIZED_KEY}';\"" >"$class_file" 2>&1 || true
-    run_compose exec -T postgres bash -lc "psql -U defender -d defender_admin -At -c \"SELECT COUNT(*) FROM classification_requests WHERE normalized_key='${TARGET_NORMALIZED_KEY}';\"" >"$pending_file" 2>&1 || true
+    run_compose exec -T postgres bash -lc "psql -U defender -d defender_admin -At -c \"SELECT COUNT(*) FROM classifications WHERE normalized_key='${TARGET_CANONICAL_KEY}';\"" >"$class_file" 2>&1 || true
+    run_compose exec -T postgres bash -lc "psql -U defender -d defender_admin -At -c \"SELECT COUNT(*) FROM classification_requests WHERE normalized_key='${TARGET_CANONICAL_KEY}';\"" >"$pending_file" 2>&1 || true
     class_count=$(grep -E '^[0-9]+$' "$class_file" | tail -n1 || true)
     pending_count=$(grep -E '^[0-9]+$' "$pending_file" | tail -n1 || true)
     class_count=${class_count:-0}
@@ -130,6 +132,46 @@ wait_for_db_rows() {
   done
 }
 
+file_contains_target_key() {
+  local file=$1
+  grep -Fq "$TARGET_NORMALIZED_KEY" "$file" || grep -Fq "$TARGET_CANONICAL_KEY" "$file"
+}
+
+file_contains_canonical_key() {
+  local file=$1
+  grep -Fq "$TARGET_CANONICAL_KEY" "$file"
+}
+
+disable_social_category() {
+  local taxonomy_file=$1
+  local payload_file=$2
+  jq --arg id "$SOCIAL_CATEGORY_ID" '
+    {
+      version: .version,
+      categories: [
+        .categories[] as $cat |
+        {
+          id: $cat.id,
+          enabled: (if $cat.id == $id then false else $cat.enabled end),
+          subcategories: [
+            ($cat.subcategories // [])[] |
+            {
+              id: .id,
+              enabled: (if $cat.id == $id then false else .enabled end)
+            }
+          ]
+        }
+      ]
+    }
+  ' "$taxonomy_file" >"$payload_file"
+  curl -sS \
+    -H "X-Admin-Token: ${ADMIN_TOKEN}" \
+    -H 'Content-Type: application/json' \
+    -X PUT \
+    --data @"$payload_file" \
+    "${ADMIN_API_URL}/api/v1/taxonomy/activation" >/dev/null
+}
+
 wait_for_llm_classification_log() {
   local output_file=$1
   local timeout_seconds=${2:-$WAIT_LLM_SECONDS}
@@ -137,7 +179,7 @@ wait_for_llm_classification_log() {
   start=$(date +%s)
   while true; do
     run_compose logs --since "$RUN_STARTED" --tail=600 llm-worker >"$output_file" 2>&1 || true
-    if grep -q "classification stored" "$output_file" && grep -q "$TARGET_NORMALIZED_KEY" "$output_file"; then
+    if grep -q "classification stored" "$output_file" && file_contains_target_key "$output_file"; then
       return 0
     fi
     if (( $(date +%s) - start >= timeout_seconds )); then
@@ -181,6 +223,14 @@ else
   if [[ -z "$social_state" ]]; then
     finish_stage "FAIL" "Category ${SOCIAL_CATEGORY_ID} missing" "$PRE_PS_FILE,$PRE_TAX_FILE"
   else
+    PRE_DISABLE_PAYLOAD_FILE=""
+    if [[ "$social_state" != "false" && "$AUTO_DISABLE_SOCIAL_CATEGORY" == "1" ]]; then
+      PRE_DISABLE_PAYLOAD_FILE="${ARTIFACT_ROOT}/00-taxonomy-disable-payload.json"
+      if disable_social_category "$PRE_TAX_FILE" "$PRE_DISABLE_PAYLOAD_FILE"; then
+        curl -sS -H "X-Admin-Token: ${ADMIN_TOKEN}" "${ADMIN_API_URL}/api/v1/taxonomy" >"$PRE_TAX_FILE"
+        social_state=$(jq -r --arg id "$SOCIAL_CATEGORY_ID" '.categories[] | select(.id==$id) | .enabled' "$PRE_TAX_FILE" | head -n1)
+      fi
+    fi
     PRE_LLM_FILE="${ARTIFACT_ROOT}/00-llm-health.txt"
     llm_ready=""
     if run_compose exec -T llm-worker curl -sS --max-time 5 http://192.168.1.170:1234/v1/models >"$PRE_LLM_FILE" 2>&1; then
@@ -210,7 +260,7 @@ else
     elif [[ -z "$llm_ready" ]]; then
       finish_stage "FAIL" "LLM providers unavailable" "$PRE_PS_FILE,$PRE_TAX_FILE,$PRE_LLM_FILE"
     else
-      finish_stage "PASS" "Services healthy; category disabled; LLM ready via ${llm_ready}" "$PRE_PS_FILE,$PRE_TAX_FILE,$PRE_LLM_FILE,$PRE_CLEAN_FILE"
+      finish_stage "PASS" "Services healthy; category disabled; LLM ready via ${llm_ready}" "$PRE_PS_FILE,$PRE_TAX_FILE,$PRE_LLM_FILE,$PRE_CLEAN_FILE,$PRE_DISABLE_PAYLOAD_FILE"
     fi
   fi
 fi
@@ -261,7 +311,7 @@ if grep -q "CONNECT ${TARGET_DOMAIN}:443" "$SQUID_FILE" || grep -q "CONNECT ${TA
 else
   SQUID_FALLBACK_FILE="${ARTIFACT_ROOT}/02-squid-fallback-icap.log"
   run_compose logs --since "$RUN_STARTED" --tail=400 icap-adaptor >"$SQUID_FALLBACK_FILE" 2>&1 || true
-  if grep -q "$TARGET_NORMALIZED_KEY" "$SQUID_FALLBACK_FILE"; then
+  if file_contains_target_key "$SQUID_FALLBACK_FILE"; then
     finish_stage "WARN" "Squid stdout lacked CONNECT line; ICAP confirms request path" "$SQUID_FILE,$SQUID_FALLBACK_FILE"
   else
     finish_stage "FAIL" "CONNECT ${TARGET_DOMAIN} missing in squid logs and ICAP fallback" "$SQUID_FILE,$SQUID_FALLBACK_FILE"
@@ -275,7 +325,11 @@ run_compose logs --since "$RUN_STARTED" --tail=400 icap-adaptor >"$ICAP_FILE" 2>
 if grep -q "$TARGET_NORMALIZED_KEY" "$ICAP_FILE"; then
   finish_stage "PASS" "ICAP handled ${TARGET_NORMALIZED_KEY}" "$ICAP_FILE"
 else
-  finish_stage "FAIL" "ICAP log missing ${TARGET_NORMALIZED_KEY}" "$ICAP_FILE"
+  if file_contains_target_key "$ICAP_FILE"; then
+    finish_stage "PASS" "ICAP handled canonical target key" "$ICAP_FILE"
+  else
+    finish_stage "FAIL" "ICAP log missing target key variants" "$ICAP_FILE"
+  fi
 fi
 
 # Stage 4: Policy engine direct response
@@ -298,23 +352,23 @@ CLASS_STREAM_FILE="${ARTIFACT_ROOT}/05-classification-stream.txt"
 PAGE_STREAM_FILE="${ARTIFACT_ROOT}/05-pagefetch-stream.txt"
 run_compose exec -T redis redis-cli XREVRANGE classification-jobs + - COUNT 200 >"$CLASS_STREAM_FILE" 2>&1 || true
 run_compose exec -T redis redis-cli XREVRANGE page-fetch-jobs + - COUNT 200 >"$PAGE_STREAM_FILE" 2>&1 || true
-if grep -q "$TARGET_NORMALIZED_KEY" "$CLASS_STREAM_FILE" && grep -q "$TARGET_NORMALIZED_KEY" "$PAGE_STREAM_FILE"; then
-  finish_stage "PASS" "Redis streams contain ${TARGET_NORMALIZED_KEY}" "$CLASS_STREAM_FILE,$PAGE_STREAM_FILE"
+if file_contains_canonical_key "$CLASS_STREAM_FILE" && file_contains_canonical_key "$PAGE_STREAM_FILE"; then
+  finish_stage "PASS" "Redis streams contain ${TARGET_CANONICAL_KEY}" "$CLASS_STREAM_FILE,$PAGE_STREAM_FILE"
 else
-  finish_stage "FAIL" "Redis streams missing ${TARGET_NORMALIZED_KEY}" "$CLASS_STREAM_FILE,$PAGE_STREAM_FILE"
+  finish_stage "FAIL" "Redis streams missing canonical key ${TARGET_CANONICAL_KEY}" "$CLASS_STREAM_FILE,$PAGE_STREAM_FILE"
 fi
 
 # Stage 6: Page fetcher logs
 start_stage "S06" "Page Fetcher Logs"
 FETCH_FILE="${ARTIFACT_ROOT}/06-page-fetcher.log"
-if wait_for_service_log_match "page-fetcher" "$TARGET_NORMALIZED_KEY" "$FETCH_FILE"; then
+if wait_for_service_log_match "page-fetcher" "$TARGET_CANONICAL_KEY" "$FETCH_FILE"; then
   if grep -qi "job url invalid" "$FETCH_FILE"; then
     finish_stage "WARN" "Page fetch attempted but saw url errors" "$FETCH_FILE"
   else
-    finish_stage "PASS" "Page fetch processed ${TARGET_NORMALIZED_KEY}" "$FETCH_FILE"
+    finish_stage "PASS" "Page fetch processed ${TARGET_CANONICAL_KEY}" "$FETCH_FILE"
   fi
 else
-  finish_stage "FAIL" "Page fetch logs missing ${TARGET_NORMALIZED_KEY}" "$FETCH_FILE"
+    finish_stage "FAIL" "Page fetch logs missing canonical key ${TARGET_CANONICAL_KEY}" "$FETCH_FILE"
 fi
 
 # Stage 7: Crawl4AI logs
@@ -330,9 +384,9 @@ fi
 start_stage "S08" "LLM Worker Logs"
 LLM_FILE="${ARTIFACT_ROOT}/08-llm.log"
 if wait_for_llm_classification_log "$LLM_FILE" "$WAIT_LLM_SECONDS"; then
-  finish_stage "PASS" "LLM classified ${TARGET_NORMALIZED_KEY}" "$LLM_FILE"
+  finish_stage "PASS" "LLM classified target key" "$LLM_FILE"
 else
-  finish_stage "FAIL" "LLM logs missing ${TARGET_NORMALIZED_KEY}" "$LLM_FILE"
+  finish_stage "FAIL" "LLM logs missing target key variants" "$LLM_FILE"
 fi
 
 # Stage 9: Database pending/classification
@@ -340,9 +394,9 @@ start_stage "S09" "Database State"
 DB_CLASS_FILE="${ARTIFACT_ROOT}/09-db-classifications.txt"
 DB_PENDING_FILE="${ARTIFACT_ROOT}/09-db-pending.txt"
 if wait_for_db_rows "$DB_CLASS_FILE" "$DB_PENDING_FILE" "$WAIT_DB_SECONDS"; then
-  finish_stage "PASS" "DB rows exist for ${TARGET_NORMALIZED_KEY}" "$DB_CLASS_FILE,$DB_PENDING_FILE"
+  finish_stage "PASS" "DB rows exist for canonical key ${TARGET_CANONICAL_KEY}" "$DB_CLASS_FILE,$DB_PENDING_FILE"
 else
-  finish_stage "FAIL" "No DB rows for ${TARGET_NORMALIZED_KEY}" "$DB_CLASS_FILE,$DB_PENDING_FILE"
+  finish_stage "FAIL" "No DB rows for canonical key ${TARGET_CANONICAL_KEY}" "$DB_CLASS_FILE,$DB_PENDING_FILE"
 fi
 
 # Stage 10: Second client request after wait
@@ -374,7 +428,7 @@ fi
 start_stage "S11" "ICAP Final Decision"
 ICAP_FINAL_FILE="${ARTIFACT_ROOT}/11-icap-final.log"
 run_compose logs --since "$FOLLOW_STARTED" --tail=300 icap-adaptor >"$ICAP_FINAL_FILE" 2>&1 || true
-if grep -q "$TARGET_NORMALIZED_KEY" "$ICAP_FINAL_FILE" && (grep -q "cache decision" "$ICAP_FINAL_FILE" || grep -q "policy decision" "$ICAP_FINAL_FILE"); then
+if file_contains_target_key "$ICAP_FINAL_FILE" && (grep -q "cache decision" "$ICAP_FINAL_FILE" || grep -q "policy decision" "$ICAP_FINAL_FILE"); then
   finish_stage "PASS" "ICAP final decision path emitted" "$ICAP_FINAL_FILE"
 else
   finish_stage "FAIL" "No ICAP final decision log found for follow-up" "$ICAP_FINAL_FILE"

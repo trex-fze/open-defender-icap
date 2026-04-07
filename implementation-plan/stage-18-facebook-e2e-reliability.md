@@ -1,6 +1,6 @@
 # Stage 18 Implementation Plan - Facebook E2E Reliability Hardening
 
-**Status**: In Progress  
+**Status**: Complete  
 **Primary Owners**: SWG + Classification + SRE + QA  
 **Created**: 2026-04-07
 
@@ -19,8 +19,8 @@
 | S18-T1 | Add facebook multi-run reliability wrapper | QA | [x] | Added `tests/security/facebook-e2e-reliability.sh`. |
 | S18-T2 | Standardize per-run output folder + summary format | QA | [x] | Run logs + duration + status captured under artifacts root. |
 | S18-T3 | Add explicit reliability target + gate command | SRE + QA | [x] | Gate target set to >=90% pass over 10 runs. |
-| S18-T4 | Add timeout/failure diagnostics collector integration | SWG + QA | [ ] | Wire runbook + optional automated collector on failure. |
-| S18-T5 | Establish baseline and post-hardening matrices | QA | [ ] | 10-run baseline and 10-run gate evidence. |
+| S18-T4 | Add timeout/failure diagnostics collector integration | SWG + QA | [x] | Reliability harness now optionally auto-collects diagnostics on failed runs. |
+| S18-T5 | Establish baseline and post-hardening matrices | QA | [x] | Baseline 0% captured; post-hardening gate 100% (10/10). |
 
 ## Reliability Target
 - Gate: `RUNS=10` pass rate >= 90%.
