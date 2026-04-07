@@ -240,6 +240,8 @@ impl PageFetcher {
             .unwrap_or_else(|_| self.cfg.queue_name.clone());
         let start_id = env::var("OD_PAGE_FETCH_STREAM_GROUP_START_ID")
             .unwrap_or_else(|_| self.cfg.stream_start_id.clone());
+        let dead_letter_stream = env::var("OD_PAGE_FETCH_STREAM_DEAD_LETTER")
+            .unwrap_or_else(|_| "page-fetch-jobs-dlq".into());
         let claim_idle_ms = env::var("OD_PAGE_FETCH_STREAM_CLAIM_IDLE_MS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
@@ -282,17 +284,38 @@ impl PageFetcher {
                         continue;
                     }
                     if let Some(payload) = entry.get::<String>("payload") {
+                        let parseable = serde_json::from_str::<PageFetchJob>(&payload).is_ok();
                         if let Err(err) = self.process_job(&payload).await {
                             self.metrics.record_job_failed();
                             let key = serde_json::from_str::<PageFetchJob>(&payload)
                                 .map(|job| job.normalized_key)
                                 .unwrap_or_else(|_| "unknown".into());
                             error!(target = "svc-page-fetcher", %err, key, "pending job failed");
+                            if !parseable {
+                                let _ = publish_dead_letter(
+                                    &mut conn,
+                                    &dead_letter_stream,
+                                    &self.cfg.stream,
+                                    &entry.id,
+                                    "invalid_payload",
+                                    Some(&payload),
+                                )
+                                .await;
+                            }
                         } else {
                             self.metrics.record_job_completed();
                         }
                     } else {
                         warn!(target = "svc-page-fetcher", entry_id = %entry.id, "pending stream entry missing payload field");
+                        let _ = publish_dead_letter(
+                            &mut conn,
+                            &dead_letter_stream,
+                            &self.cfg.stream,
+                            &entry.id,
+                            "missing_payload",
+                            None,
+                        )
+                        .await;
                     }
                     let _ = redis::cmd("XACK")
                         .arg(&self.cfg.stream)
@@ -318,17 +341,38 @@ impl PageFetcher {
                         continue;
                     }
                     if let Some(payload) = entry.get::<String>("payload") {
+                        let parseable = serde_json::from_str::<PageFetchJob>(&payload).is_ok();
                         if let Err(err) = self.process_job(&payload).await {
                             self.metrics.record_job_failed();
                             let key = serde_json::from_str::<PageFetchJob>(&payload)
                                 .map(|job| job.normalized_key)
                                 .unwrap_or_else(|_| "unknown".into());
                             error!(target = "svc-page-fetcher", %err, key, "job failed");
+                            if !parseable {
+                                let _ = publish_dead_letter(
+                                    &mut conn,
+                                    &dead_letter_stream,
+                                    &self.cfg.stream,
+                                    &entry.id,
+                                    "invalid_payload",
+                                    Some(&payload),
+                                )
+                                .await;
+                            }
                         } else {
                             self.metrics.record_job_completed();
                         }
                     } else {
                         warn!(target = "svc-page-fetcher", entry_id = %entry.id, "stream entry missing payload field");
+                        let _ = publish_dead_letter(
+                            &mut conn,
+                            &dead_letter_stream,
+                            &self.cfg.stream,
+                            &entry.id,
+                            "missing_payload",
+                            None,
+                        )
+                        .await;
                     }
                     let _ = redis::cmd("XACK")
                         .arg(&self.cfg.stream)
@@ -871,6 +915,30 @@ async fn claim_stale_entries(
         .arg(batch.max(1) as i64)
         .arg("JUSTID")
         .query_async(conn)
+        .await?;
+    Ok(())
+}
+
+async fn publish_dead_letter(
+    conn: &mut redis::aio::Connection,
+    dlq_stream: &str,
+    source_stream: &str,
+    entry_id: &str,
+    reason: &str,
+    payload: Option<&str>,
+) -> Result<(), redis::RedisError> {
+    redis::cmd("XADD")
+        .arg(dlq_stream)
+        .arg("*")
+        .arg("source_stream")
+        .arg(source_stream)
+        .arg("entry_id")
+        .arg(entry_id)
+        .arg("reason")
+        .arg(reason)
+        .arg("payload")
+        .arg(payload.unwrap_or_default())
+        .query_async::<_, ()>(conn)
         .await?;
     Ok(())
 }

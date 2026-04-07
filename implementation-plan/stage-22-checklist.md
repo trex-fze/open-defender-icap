@@ -6,16 +6,16 @@
 
 ## Backend Migration
 - [x] Convert selected endpoints to cursor contract.
-- [ ] Add/verify keyset indexes via migration.
-- [ ] Add backward compatibility/deprecation behavior where required.
+- [x] Add/verify keyset indexes via migration.
+- [x] Add backward compatibility/deprecation behavior where required.
 
 ## Client Migration
-- [ ] Update web-admin hooks/types/components.
+- [x] Update web-admin hooks/types/components.
 - [x] Update odctl commands and help docs.
 
 ## Validation
-- [ ] Add cursor-chain tests (forward/empty/invalid cursor).
-- [ ] Verify endpoint latency and DB plan quality.
+- [x] Add cursor-chain tests (forward/empty/invalid cursor).
+- [x] Verify endpoint latency and DB plan quality.
 
 ## Completion
-- [ ] Mark Stage 22 complete in `implementation-plan/stage-plan.md`.
+- [x] Mark Stage 22 complete in `implementation-plan/stage-plan.md`.

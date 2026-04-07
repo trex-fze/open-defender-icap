@@ -1304,6 +1304,8 @@ impl JobConsumer {
         let stream_consumer = env::var("OD_LLM_STREAM_CONSUMER")
             .unwrap_or_else(|_| "llm-worker".into());
         let start_id = env::var("OD_LLM_STREAM_GROUP_START_ID").unwrap_or_else(|_| "$".into());
+        let dead_letter_stream =
+            env::var("OD_LLM_STREAM_DEAD_LETTER").unwrap_or_else(|_| "classification-jobs-dlq".into());
         let claim_idle_ms = env_u64("OD_LLM_STREAM_CLAIM_IDLE_MS").unwrap_or(30_000);
         let claim_batch = env_usize("OD_LLM_STREAM_CLAIM_BATCH").unwrap_or(25);
         ensure_stream_group(&mut conn, &self.stream, &stream_group, &start_id).await?;
@@ -1341,11 +1343,32 @@ impl JobConsumer {
                         continue;
                     }
                     if let Some(payload) = entry.get::<String>("payload") {
+                        let parseable = serde_json::from_str::<ClassificationJobPayload>(&payload).is_ok();
                         if let Err(err) = self.process_job(&payload).await {
                             error!(target = "svc-llm-worker", %err, "failed to process pending job");
+                            if !parseable {
+                                let _ = publish_dead_letter(
+                                    &mut conn,
+                                    &dead_letter_stream,
+                                    &self.stream,
+                                    &entry.id,
+                                    "invalid_payload",
+                                    Some(&payload),
+                                )
+                                .await;
+                            }
                         }
                     } else {
                         warn!(target = "svc-llm-worker", entry_id = %entry.id, "pending stream entry missing payload field");
+                        let _ = publish_dead_letter(
+                            &mut conn,
+                            &dead_letter_stream,
+                            &self.stream,
+                            &entry.id,
+                            "missing_payload",
+                            None,
+                        )
+                        .await;
                     }
                     let _ = redis::cmd("XACK")
                         .arg(&self.stream)
@@ -1371,11 +1394,32 @@ impl JobConsumer {
                         continue;
                     }
                     if let Some(payload) = entry.get::<String>("payload") {
+                        let parseable = serde_json::from_str::<ClassificationJobPayload>(&payload).is_ok();
                         if let Err(err) = self.process_job(&payload).await {
                             error!(target = "svc-llm-worker", %err, "failed to process job");
+                            if !parseable {
+                                let _ = publish_dead_letter(
+                                    &mut conn,
+                                    &dead_letter_stream,
+                                    &self.stream,
+                                    &entry.id,
+                                    "invalid_payload",
+                                    Some(&payload),
+                                )
+                                .await;
+                            }
                         }
                     } else {
                         warn!(target = "svc-llm-worker", entry_id = %entry.id, "stream entry missing payload field");
+                        let _ = publish_dead_letter(
+                            &mut conn,
+                            &dead_letter_stream,
+                            &self.stream,
+                            &entry.id,
+                            "missing_payload",
+                            None,
+                        )
+                        .await;
                     }
                     let _ = redis::cmd("XACK")
                         .arg(&self.stream)
@@ -2530,6 +2574,30 @@ async fn claim_stale_entries(
         .arg(batch.max(1) as i64)
         .arg("JUSTID")
         .query_async(conn)
+        .await?;
+    Ok(())
+}
+
+async fn publish_dead_letter(
+    conn: &mut redis::aio::Connection,
+    dlq_stream: &str,
+    source_stream: &str,
+    entry_id: &str,
+    reason: &str,
+    payload: Option<&str>,
+) -> Result<(), redis::RedisError> {
+    redis::cmd("XADD")
+        .arg(dlq_stream)
+        .arg("*")
+        .arg("source_stream")
+        .arg(source_stream)
+        .arg("entry_id")
+        .arg(entry_id)
+        .arg("reason")
+        .arg(reason)
+        .arg("payload")
+        .arg(payload.unwrap_or_default())
+        .query_async::<_, ()>(conn)
         .await?;
     Ok(())
 }

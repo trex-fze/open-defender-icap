@@ -36,6 +36,11 @@ export type PolicyVersion = {
 
 type PolicyListResponse = {
   data: ApiPolicySummary[];
+  meta?: {
+    has_more?: boolean;
+    next_cursor?: string;
+    limit?: number;
+  };
 };
 
 type ApiPolicySummary = {
@@ -76,6 +81,11 @@ type ApiPolicyVersion = {
 
 type PoliciesState = {
   data: PolicyListItem[];
+  meta?: {
+    has_more: boolean;
+    next_cursor?: string;
+    limit: number;
+  };
   loading: boolean;
   error?: string;
   isMock: boolean;
@@ -117,30 +127,43 @@ const mockDetail = (policyId: string | undefined): PolicyDetail | undefined => {
   };
 };
 
-export const usePoliciesData = (): PoliciesState => {
+export const usePoliciesData = (cursor?: string, limit = 50): PoliciesState => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
   const enabled = Boolean(baseUrl && canCallApi);
 
   const query = useQuery({
-    queryKey: queryKeys.policies(baseUrl),
+    queryKey: queryKeys.policies(baseUrl, cursor ?? '', limit),
     enabled,
     queryFn: async () => {
       const body = await adminGetJson<PolicyListResponse>(
         { baseUrl, canCallApi, headers } as AdminApiContext,
         '/api/v1/policies',
-        { include_drafts: true },
+        { include_drafts: true, limit, cursor },
       );
-      return (body.data ?? []).map(mapSummary);
+      return {
+        data: (body.data ?? []).map(mapSummary),
+        meta: {
+          has_more: Boolean(body.meta?.has_more),
+          next_cursor: body.meta?.next_cursor ?? undefined,
+          limit: body.meta?.limit ?? limit,
+        },
+      };
     },
   });
 
   if (!enabled) {
-    return { data: mockSummaries, loading: false, isMock: true };
+    return {
+      data: mockSummaries,
+      meta: { has_more: false, next_cursor: undefined, limit },
+      loading: false,
+      isMock: true,
+    };
   }
 
   if (query.isError) {
     return {
       data: [],
+      meta: { has_more: false, next_cursor: undefined, limit },
       loading: false,
       error: query.error instanceof Error ? query.error.message : 'Failed to reach Admin API',
       isMock: false,
@@ -148,7 +171,8 @@ export const usePoliciesData = (): PoliciesState => {
   }
 
   return {
-    data: query.data ?? [],
+    data: query.data?.data ?? [],
+    meta: query.data?.meta ?? { has_more: false, next_cursor: undefined, limit },
     loading: query.isLoading,
     error: undefined,
     isMock: false,

@@ -28,6 +28,10 @@ const POLICY_STATUS_ARCHIVED: &str = "archived";
 pub struct PolicyListParams {
     limit: Option<u32>,
     cursor: Option<String>,
+    #[serde(default)]
+    page: Option<u32>,
+    #[serde(default)]
+    page_size: Option<u32>,
     status: Option<String>,
     search: Option<String>,
     #[serde(default)]
@@ -145,7 +149,8 @@ pub async fn list_policies(
     Query(params): Query<PolicyListParams>,
 ) -> Result<Json<CursorPaged<PolicySummary>>, StatusCode> {
     require_roles(&user, ROLE_POLICY_VIEW)?;
-    let limit = cursor_limit(params.limit);
+    let limit = cursor_limit(params.limit.or(params.page_size));
+    let legacy_page = params.page.unwrap_or(1).max(1);
     let cursor = params
         .cursor
         .as_deref()
@@ -170,6 +175,11 @@ pub async fn list_policies(
         .push("))")
         .push(" ORDER BY p.created_at DESC, p.id DESC LIMIT ")
         .push_bind((limit + 1) as i64);
+
+    if params.cursor.is_none() && legacy_page > 1 {
+        qb.push(" OFFSET ")
+            .push_bind(((legacy_page - 1) * limit) as i64);
+    }
 
     let rows = qb.build().fetch_all(state.pool()).await.map_err(map_db_error)?;
     let has_more = rows.len() > limit as usize;

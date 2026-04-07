@@ -1,9 +1,15 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { PaginationControls } from '../components/PaginationControls';
 import { usePoliciesData } from '../hooks/usePoliciesData';
 
 export const PoliciesPage = () => {
   const navigate = useNavigate();
-  const { data: policyRows, loading, error, isMock } = usePoliciesData();
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const [limit, setLimit] = useState(50);
+  const { data: policyRows, meta, loading, error, isMock } = usePoliciesData(cursor, limit);
+  const paginationMeta = meta ?? { has_more: false, next_cursor: undefined, limit };
 
   return (
     <div>
@@ -73,6 +79,30 @@ export const PoliciesPage = () => {
             </table>
           </div>
         )}
+
+        <PaginationControls
+          limit={limit}
+          loading={loading}
+          hasMore={Boolean(paginationMeta.next_cursor) && paginationMeta.has_more}
+          canGoBack={cursorStack.length > 0}
+          onLimitChange={(nextLimit) => {
+            setLimit(nextLimit);
+            setCursor(undefined);
+            setCursorStack([]);
+          }}
+          onPrev={() => {
+            if (cursorStack.length === 0) return;
+            const stack = [...cursorStack];
+            const prev = stack.pop();
+            setCursorStack(stack);
+            setCursor(prev || undefined);
+          }}
+          onNext={() => {
+            if (!paginationMeta.next_cursor) return;
+            setCursorStack((prev) => [...prev, cursor ?? '']);
+            setCursor(paginationMeta.next_cursor);
+          }}
+        />
       </div>
     </div>
   );

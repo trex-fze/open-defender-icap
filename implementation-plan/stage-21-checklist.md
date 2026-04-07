@@ -11,13 +11,13 @@
 - [x] Add stale-claim policy (`XPENDING` + `XAUTOCLAIM`/`XCLAIM`).
 
 ## Reliability
-- [ ] Add max delivery / poison-message handling.
-- [ ] Add dead-letter stream or terminal status fallback.
-- [ ] Validate idempotent persistence under redelivery.
+- [x] Add max delivery / poison-message handling.
+- [x] Add dead-letter stream or terminal status fallback.
+- [x] Validate idempotent persistence under redelivery.
 
 ## Testing
-- [ ] Add restart simulation tests (kill consumer mid-flight).
-- [ ] Verify no dropped jobs and bounded duplicates.
+- [x] Add restart simulation tests (kill consumer mid-flight).
+- [x] Verify no dropped jobs and bounded duplicates.
 
 ## Completion
-- [ ] Mark Stage 21 complete in `implementation-plan/stage-plan.md`.
+- [x] Mark Stage 21 complete in `implementation-plan/stage-plan.md`.
