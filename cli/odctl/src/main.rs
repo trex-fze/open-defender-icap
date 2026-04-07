@@ -916,7 +916,7 @@ async fn handle_env(url: &str) -> Result<()> {
 async fn handle_policy(cmd: &PolicyCmd, client: &ApiClient, json: bool) -> Result<()> {
     match cmd {
         PolicyCmd::List => {
-            let response: Paged<PolicySummary> = client
+            let response: CursorPaged<PolicySummary> = client
                 .get("/api/v1/policies", &[("include_drafts", "true")])
                 .await?;
             if json {
@@ -2533,9 +2533,13 @@ struct CursorPaged<T> {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct CursorMeta {
+    #[serde(default)]
     limit: u32,
+    #[serde(default)]
     has_more: bool,
+    #[serde(default)]
     next_cursor: Option<String>,
+    #[serde(default)]
     prev_cursor: Option<String>,
 }
 

@@ -15,3 +15,11 @@ Date: 2026-04-07
 ## Pending Verification
 - Cursor-chain correctness test evidence.
 - Web-admin and odctl parity verification.
+
+## Implemented migration slice
+
+- Converted Admin API policy list endpoint (`GET /api/v1/policies`) from page/offset to cursor contract (`limit` + `cursor`, `{data, meta}`).
+- Updated odctl policy list parsing to consume cursor meta response shape.
+- Validation:
+  - `cargo test -p admin-api` passed
+  - `cargo test -p odctl` passed

@@ -10,10 +10,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use std::collections::HashMap;
+use std::{collections::HashMap, env};
 use tokio::signal;
 use tokio::time::Instant;
-use tracing::{error, info, Level};
+use tracing::{error, info, warn, Level};
 use url::Url;
 use uuid::Uuid;
 
@@ -234,16 +234,30 @@ impl PageFetcher {
     async fn run(self) -> Result<()> {
         let redis = redis::Client::open(self.cfg.redis_url.clone())?;
         let mut conn = redis.get_async_connection().await?;
-        let options = StreamReadOptions::default().block(5000).count(10);
-        let mut last_id = self.cfg.stream_start_id.clone();
+        let stream_group = env::var("OD_PAGE_FETCH_STREAM_GROUP")
+            .unwrap_or_else(|_| "page-fetcher".into());
+        let stream_consumer = env::var("OD_PAGE_FETCH_STREAM_CONSUMER")
+            .unwrap_or_else(|_| format!("page-fetcher-{}", std::process::id()));
+        let start_id = env::var("OD_PAGE_FETCH_STREAM_GROUP_START_ID")
+            .unwrap_or_else(|_| self.cfg.stream_start_id.clone());
+        ensure_stream_group(&mut conn, &self.cfg.stream, &stream_group, &start_id).await?;
+        let options = StreamReadOptions::default()
+            .group(&stream_group, &stream_consumer)
+            .block(5000)
+            .count(10);
         loop {
             let reply: StreamReadReply = conn
-                .xread_options(&[&self.cfg.stream], &[last_id.as_str()], &options)
+                .xread_options(&[&self.cfg.stream], &[">"], &options)
                 .await?;
             for stream in &reply.keys {
                 for entry in &stream.ids {
-                    last_id = entry.id.clone();
                     if entry_too_old(&entry.id, 300_000) {
+                        let _ = redis::cmd("XACK")
+                            .arg(&self.cfg.stream)
+                            .arg(&stream_group)
+                            .arg(&entry.id)
+                            .query_async::<_, i64>(&mut conn)
+                            .await;
                         continue;
                     }
                     if let Some(payload) = entry.get::<String>("payload") {
@@ -255,7 +269,21 @@ impl PageFetcher {
                             error!(target = "svc-page-fetcher", %err, key, "job failed");
                         } else {
                             self.metrics.record_job_completed();
+                            let _ = redis::cmd("XACK")
+                                .arg(&self.cfg.stream)
+                                .arg(&stream_group)
+                                .arg(&entry.id)
+                                .query_async::<_, i64>(&mut conn)
+                                .await;
                         }
+                    } else {
+                        warn!(target = "svc-page-fetcher", entry_id = %entry.id, "stream entry missing payload field");
+                        let _ = redis::cmd("XACK")
+                            .arg(&self.cfg.stream)
+                            .arg(&stream_group)
+                            .arg(&entry.id)
+                            .query_async::<_, i64>(&mut conn)
+                            .await;
                     }
                 }
             }
@@ -746,6 +774,32 @@ fn entry_too_old(entry_id: &str, max_age_ms: u64) -> bool {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(ts_ms);
     now_ms.saturating_sub(ts_ms) > max_age_ms
+}
+
+async fn ensure_stream_group(
+    conn: &mut redis::aio::Connection,
+    stream: &str,
+    group: &str,
+    start_id: &str,
+) -> Result<(), redis::RedisError> {
+    match redis::cmd("XGROUP")
+        .arg("CREATE")
+        .arg(stream)
+        .arg(group)
+        .arg(start_id)
+        .arg("MKSTREAM")
+        .query_async::<_, String>(conn)
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            if err.to_string().contains("BUSYGROUP") {
+                Ok(())
+            } else {
+                Err(err)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

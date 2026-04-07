@@ -5,13 +5,13 @@
 - [x] Prioritize by data volume and UI/CLI usage.
 
 ## Backend Migration
-- [ ] Convert selected endpoints to cursor contract.
+- [x] Convert selected endpoints to cursor contract.
 - [ ] Add/verify keyset indexes via migration.
 - [ ] Add backward compatibility/deprecation behavior where required.
 
 ## Client Migration
 - [ ] Update web-admin hooks/types/components.
-- [ ] Update odctl commands and help docs.
+- [x] Update odctl commands and help docs.
 
 ## Validation
 - [ ] Add cursor-chain tests (forward/empty/invalid cursor).

@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::{require_roles, UserContext, ROLE_POLICY_EDIT, ROLE_POLICY_PUBLISH, ROLE_POLICY_VIEW},
-    pagination::{PageOptions, Paged},
+    pagination::{cursor_limit, decode_cursor, encode_cursor, CursorPaged},
     ApiError, AppState, PolicyEngineRuntimeSummary,
 };
 
@@ -26,12 +26,18 @@ const POLICY_STATUS_ARCHIVED: &str = "archived";
 
 #[derive(Debug, Deserialize)]
 pub struct PolicyListParams {
-    page: Option<u32>,
-    page_size: Option<u32>,
+    limit: Option<u32>,
+    cursor: Option<String>,
     status: Option<String>,
     search: Option<String>,
     #[serde(default)]
     include_drafts: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PolicyCursor {
+    created_at: DateTime<Utc>,
+    id: Uuid,
 }
 
 #[derive(Debug, Serialize)]
@@ -137,19 +143,68 @@ pub async fn list_policies(
     Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
     Query(params): Query<PolicyListParams>,
-) -> Result<Json<Paged<PolicySummary>>, StatusCode> {
+) -> Result<Json<CursorPaged<PolicySummary>>, StatusCode> {
     require_roles(&user, ROLE_POLICY_VIEW)?;
-    let opts = PageOptions::new(params.page, params.page_size);
-    let total = build_policy_count_query(state.pool(), &params)
-        .await
-        .map_err(map_db_error)?;
-    if total == 0 {
-        return Ok(Json(Paged::new(Vec::new(), 0, opts)));
-    }
-    let data = build_policy_list_query(state.pool(), &params, &opts)
-        .await
-        .map_err(map_db_error)?;
-    Ok(Json(Paged::new(data, total, opts)))
+    let limit = cursor_limit(params.limit);
+    let cursor = params
+        .cursor
+        .as_deref()
+        .map(decode_cursor::<PolicyCursor>)
+        .transpose()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let cursor_created_at = cursor.as_ref().map(|c| c.created_at);
+    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+
+    let mut qb = QueryBuilder::new(
+        "SELECT p.id, p.name, p.version, p.status, p.created_by, p.created_at,
+                COALESCE((SELECT COUNT(*) FROM policy_rules pr WHERE pr.policy_id = p.id), 0) as rule_count
+         FROM policies p",
+    );
+    apply_filters(&mut qb, &params);
+    qb.push(" AND (")
+        .push_bind(cursor_created_at)
+        .push(" IS NULL OR (p.created_at, p.id) < (")
+        .push_bind(cursor_created_at)
+        .push(", ")
+        .push_bind(cursor_id)
+        .push("))")
+        .push(" ORDER BY p.created_at DESC, p.id DESC LIMIT ")
+        .push_bind((limit + 1) as i64);
+
+    let rows = qb.build().fetch_all(state.pool()).await.map_err(map_db_error)?;
+    let has_more = rows.len() > limit as usize;
+    let mut data: Vec<PolicySummary> = rows
+        .into_iter()
+        .take(limit as usize)
+        .map(|row| PolicySummary {
+            id: row.get("id"),
+            name: row.get("name"),
+            version: row.get("version"),
+            status: row.get("status"),
+            created_by: row.get("created_by"),
+            created_at: row.get("created_at"),
+            rule_count: row.get("rule_count"),
+        })
+        .collect();
+
+    let next_cursor = if has_more {
+        data.last().and_then(|item| {
+            encode_cursor(&PolicyCursor {
+                created_at: item.created_at,
+                id: item.id,
+            })
+            .ok()
+        })
+    } else {
+        None
+    };
+
+    Ok(Json(CursorPaged::new(
+        std::mem::take(&mut data),
+        limit,
+        has_more,
+        next_cursor,
+    )))
 }
 
 pub async fn get_policy(
@@ -746,46 +801,6 @@ fn normalize_policy_status(value: &str) -> Result<String, (StatusCode, Json<ApiE
             "status must be active|draft|archived",
         )),
     }
-}
-
-async fn build_policy_count_query(
-    pool: &PgPool,
-    params: &PolicyListParams,
-) -> Result<i64, sqlx::Error> {
-    let mut qb = QueryBuilder::new("SELECT COUNT(*) as count FROM policies p");
-    apply_filters(&mut qb, params);
-    qb.build_query_scalar().fetch_one(pool).await
-}
-
-async fn build_policy_list_query(
-    pool: &PgPool,
-    params: &PolicyListParams,
-    opts: &PageOptions,
-) -> Result<Vec<PolicySummary>, sqlx::Error> {
-    let mut qb = QueryBuilder::new(
-        "SELECT p.id, p.name, p.version, p.status, p.created_by, p.created_at,
-                COALESCE((SELECT COUNT(*) FROM policy_rules pr WHERE pr.policy_id = p.id), 0) as rule_count
-         FROM policies p",
-    );
-    apply_filters(&mut qb, params);
-    qb.push(" ORDER BY p.created_at DESC LIMIT ")
-        .push_bind(opts.page_size as i64)
-        .push(" OFFSET ")
-        .push_bind(opts.offset());
-
-    qb.build().fetch_all(pool).await.map(|rows| {
-        rows.into_iter()
-            .map(|row| PolicySummary {
-                id: row.get("id"),
-                name: row.get("name"),
-                version: row.get("version"),
-                status: row.get("status"),
-                created_by: row.get("created_by"),
-                created_at: row.get("created_at"),
-                rule_count: row.get("rule_count"),
-            })
-            .collect()
-    })
 }
 
 fn apply_filters(qb: &mut QueryBuilder<Postgres>, params: &PolicyListParams) {

@@ -1300,22 +1300,50 @@ impl JobConsumer {
     async fn consume(&self) -> Result<(), redis::RedisError> {
         let client = redis::Client::open(self.redis_url.clone())?;
         let mut conn = client.get_async_connection().await?;
-        let options = StreamReadOptions::default().block(5000).count(10);
-        let mut last_id = "$".to_string();
+        let stream_group = env::var("OD_LLM_STREAM_GROUP").unwrap_or_else(|_| "llm-worker".into());
+        let stream_consumer = env::var("OD_LLM_STREAM_CONSUMER")
+            .unwrap_or_else(|_| format!("llm-worker-{}", std::process::id()));
+        let start_id = env::var("OD_LLM_STREAM_GROUP_START_ID").unwrap_or_else(|_| "$".into());
+        ensure_stream_group(&mut conn, &self.stream, &stream_group, &start_id).await?;
+
+        let options = StreamReadOptions::default()
+            .group(&stream_group, &stream_consumer)
+            .block(5000)
+            .count(10);
         loop {
             let reply: StreamReadReply = conn
-                .xread_options(&[&self.stream], &[last_id.as_str()], &options)
+                .xread_options(&[&self.stream], &[">"], &options)
                 .await?;
             for stream in reply.keys {
                 for entry in stream.ids {
-                    last_id = entry.id.clone();
                     if entry_too_old(&entry.id, 300_000) {
+                        let _ = redis::cmd("XACK")
+                            .arg(&self.stream)
+                            .arg(&stream_group)
+                            .arg(&entry.id)
+                            .query_async::<_, i64>(&mut conn)
+                            .await;
                         continue;
                     }
                     if let Some(payload) = entry.get::<String>("payload") {
                         if let Err(err) = self.process_job(&payload).await {
                             error!(target = "svc-llm-worker", %err, "failed to process job");
+                        } else {
+                            let _ = redis::cmd("XACK")
+                                .arg(&self.stream)
+                                .arg(&stream_group)
+                                .arg(&entry.id)
+                                .query_async::<_, i64>(&mut conn)
+                                .await;
                         }
+                    } else {
+                        warn!(target = "svc-llm-worker", entry_id = %entry.id, "stream entry missing payload field");
+                        let _ = redis::cmd("XACK")
+                            .arg(&self.stream)
+                            .arg(&stream_group)
+                            .arg(&entry.id)
+                            .query_async::<_, i64>(&mut conn)
+                            .await;
                     }
                 }
             }
@@ -2417,6 +2445,32 @@ impl JobConsumer {
             tokio::time::sleep(std::time::Duration::from_secs(CONTENT_WAIT_DELAY_SECS)).await;
         }
         Err(ContentNotReady.into())
+    }
+}
+
+async fn ensure_stream_group(
+    conn: &mut redis::aio::Connection,
+    stream: &str,
+    group: &str,
+    start_id: &str,
+) -> Result<(), redis::RedisError> {
+    match redis::cmd("XGROUP")
+        .arg("CREATE")
+        .arg(stream)
+        .arg(group)
+        .arg(start_id)
+        .arg("MKSTREAM")
+        .query_async::<_, String>(conn)
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            if err.to_string().contains("BUSYGROUP") {
+                Ok(())
+            } else {
+                Err(err)
+            }
+        }
     }
 }
 

@@ -5,9 +5,9 @@
 - [x] Define group naming and consumer identity strategy.
 
 ## Migration
-- [ ] Add idempotent group creation at startup.
-- [ ] Replace `XREAD` loops with `XREADGROUP`.
-- [ ] ACK only after successful processing.
+- [x] Add idempotent group creation at startup.
+- [x] Replace `XREAD` loops with `XREADGROUP`.
+- [x] ACK only after successful processing.
 - [ ] Add stale-claim policy (`XPENDING` + `XAUTOCLAIM`/`XCLAIM`).
 
 ## Reliability

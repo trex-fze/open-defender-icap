@@ -18,3 +18,14 @@ Date: 2026-04-07
 - Consumer-group migration implementation evidence.
 - Restart-safe processing simulation outputs.
 - Poison-message handling verification.
+
+## Implemented migration slice
+
+- Updated llm-worker stream consumer to:
+  - create stream group idempotently (`XGROUP CREATE ... MKSTREAM`, BUSYGROUP-tolerant)
+  - consume with `XREADGROUP`
+  - ACK on successful processing (`XACK`)
+- Updated page-fetcher stream consumer with the same group/create/read/ack pattern.
+- Validation:
+  - `cargo test -p llm-worker` passed
+  - `cargo test -p page-fetcher` passed
