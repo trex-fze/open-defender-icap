@@ -240,6 +240,14 @@ impl PageFetcher {
             .unwrap_or_else(|_| self.cfg.queue_name.clone());
         let start_id = env::var("OD_PAGE_FETCH_STREAM_GROUP_START_ID")
             .unwrap_or_else(|_| self.cfg.stream_start_id.clone());
+        let claim_idle_ms = env::var("OD_PAGE_FETCH_STREAM_CLAIM_IDLE_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(30_000);
+        let claim_batch = env::var("OD_PAGE_FETCH_STREAM_CLAIM_BATCH")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(25);
         ensure_stream_group(&mut conn, &self.cfg.stream, &stream_group, &start_id).await?;
         let options_pending = StreamReadOptions::default()
             .group(&stream_group, &stream_consumer)
@@ -249,6 +257,16 @@ impl PageFetcher {
             .block(5000)
             .count(10);
         loop {
+            let _ = claim_stale_entries(
+                &mut conn,
+                &self.cfg.stream,
+                &stream_group,
+                &stream_consumer,
+                claim_idle_ms,
+                claim_batch,
+            )
+            .await;
+
             let pending_reply: StreamReadReply = conn
                 .xread_options(&[&self.cfg.stream], &["0"], &options_pending)
                 .await?;
@@ -833,6 +851,28 @@ async fn ensure_stream_group(
             }
         }
     }
+}
+
+async fn claim_stale_entries(
+    conn: &mut redis::aio::Connection,
+    stream: &str,
+    group: &str,
+    consumer: &str,
+    min_idle_ms: u64,
+    batch: usize,
+) -> Result<(), redis::RedisError> {
+    let _: redis::Value = redis::cmd("XAUTOCLAIM")
+        .arg(stream)
+        .arg(group)
+        .arg(consumer)
+        .arg(min_idle_ms)
+        .arg("0-0")
+        .arg("COUNT")
+        .arg(batch.max(1) as i64)
+        .arg("JUSTID")
+        .query_async(conn)
+        .await?;
+    Ok(())
 }
 
 #[cfg(test)]

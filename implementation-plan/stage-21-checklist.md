@@ -8,7 +8,7 @@
 - [x] Add idempotent group creation at startup.
 - [x] Replace `XREAD` loops with `XREADGROUP`.
 - [x] ACK only after successful processing.
-- [ ] Add stale-claim policy (`XPENDING` + `XAUTOCLAIM`/`XCLAIM`).
+- [x] Add stale-claim policy (`XPENDING` + `XAUTOCLAIM`/`XCLAIM`).
 
 ## Reliability
 - [ ] Add max delivery / poison-message handling.

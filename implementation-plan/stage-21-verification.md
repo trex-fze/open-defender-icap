@@ -26,6 +26,7 @@ Date: 2026-04-07
   - consume with `XREADGROUP`
   - ACK on successful processing (`XACK`)
 - Updated page-fetcher stream consumer with the same group/create/read/ack pattern.
+- Added stale-entry claim pre-pass in both workers using `XAUTOCLAIM ... JUSTID` before pending/new reads so entries abandoned by inactive consumers are reassigned for processing.
 - Validation:
   - `cargo test -p llm-worker` passed
   - `cargo test -p page-fetcher` passed

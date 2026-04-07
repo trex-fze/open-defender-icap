@@ -1302,8 +1302,10 @@ impl JobConsumer {
         let mut conn = client.get_async_connection().await?;
         let stream_group = env::var("OD_LLM_STREAM_GROUP").unwrap_or_else(|_| "llm-worker".into());
         let stream_consumer = env::var("OD_LLM_STREAM_CONSUMER")
-            .unwrap_or_else(|_| format!("llm-worker-{}", std::process::id()));
+            .unwrap_or_else(|_| "llm-worker".into());
         let start_id = env::var("OD_LLM_STREAM_GROUP_START_ID").unwrap_or_else(|_| "$".into());
+        let claim_idle_ms = env_u64("OD_LLM_STREAM_CLAIM_IDLE_MS").unwrap_or(30_000);
+        let claim_batch = env_usize("OD_LLM_STREAM_CLAIM_BATCH").unwrap_or(25);
         ensure_stream_group(&mut conn, &self.stream, &stream_group, &start_id).await?;
 
         let options_pending = StreamReadOptions::default()
@@ -1314,6 +1316,16 @@ impl JobConsumer {
             .block(5000)
             .count(10);
         loop {
+            let _ = claim_stale_entries(
+                &mut conn,
+                &self.stream,
+                &stream_group,
+                &stream_consumer,
+                claim_idle_ms,
+                claim_batch,
+            )
+            .await;
+
             let pending_reply: StreamReadReply = conn
                 .xread_options(&[&self.stream], &["0"], &options_pending)
                 .await?;
@@ -2498,6 +2510,28 @@ async fn ensure_stream_group(
             }
         }
     }
+}
+
+async fn claim_stale_entries(
+    conn: &mut redis::aio::Connection,
+    stream: &str,
+    group: &str,
+    consumer: &str,
+    min_idle_ms: u64,
+    batch: usize,
+) -> Result<(), redis::RedisError> {
+    let _: redis::Value = redis::cmd("XAUTOCLAIM")
+        .arg(stream)
+        .arg(group)
+        .arg(consumer)
+        .arg(min_idle_ms)
+        .arg("0-0")
+        .arg("COUNT")
+        .arg(batch.max(1) as i64)
+        .arg("JUSTID")
+        .query_async(conn)
+        .await?;
+    Ok(())
 }
 
 fn entry_too_old(entry_id: &str, max_age_ms: u64) -> bool {
