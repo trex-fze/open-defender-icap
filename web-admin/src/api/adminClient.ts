@@ -58,6 +58,16 @@ const parseErrorBody = async (resp: Response): Promise<string> => {
   return `Request failed (${resp.status})`;
 };
 
+const mapNetworkError = (err: unknown): AdminApiError => {
+  if (err instanceof AdminApiError) {
+    return err;
+  }
+  if (err instanceof Error && err.message.trim().length > 0) {
+    return new AdminApiError(0, `Network error: unable to reach Admin API (${err.message})`);
+  }
+  return new AdminApiError(0, 'Network error: unable to reach Admin API (check URL/CORS/service health)');
+};
+
 export const adminGetJson = async <T>(
   ctx: AdminApiContext,
   path: string,
@@ -65,11 +75,16 @@ export const adminGetJson = async <T>(
   init?: RequestInit,
 ): Promise<T> => {
   ensureCallable(ctx);
-  const resp = await fetch(buildUrl(ctx.baseUrl, path, params), {
-    ...init,
-    method: 'GET',
-    headers: withHeaders(ctx.headers, init),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(buildUrl(ctx.baseUrl, path, params), {
+      ...init,
+      method: 'GET',
+      headers: withHeaders(ctx.headers, init),
+    });
+  } catch (err) {
+    throw mapNetworkError(err);
+  }
   if (!resp.ok) {
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
@@ -87,12 +102,17 @@ export const adminPostJson = async <TResponse, TBody = unknown>(
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  const resp = await fetch(buildUrl(ctx.baseUrl, path), {
-    ...init,
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(buildUrl(ctx.baseUrl, path), {
+      ...init,
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    throw mapNetworkError(err);
+  }
   if (!resp.ok) {
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
@@ -121,12 +141,17 @@ export const adminPutJson = async <TResponse, TBody = unknown>(
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  const resp = await fetch(buildUrl(ctx.baseUrl, path), {
-    ...init,
-    method: 'PUT',
-    headers,
-    body: JSON.stringify(body),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(buildUrl(ctx.baseUrl, path), {
+      ...init,
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    throw mapNetworkError(err);
+  }
   if (!resp.ok) {
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
@@ -139,11 +164,16 @@ export const adminDelete = async (
   init?: RequestInit,
 ): Promise<void> => {
   ensureCallable(ctx);
-  const resp = await fetch(buildUrl(ctx.baseUrl, path), {
-    ...init,
-    method: 'DELETE',
-    headers: withHeaders(ctx.headers, init),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(buildUrl(ctx.baseUrl, path), {
+      ...init,
+      method: 'DELETE',
+      headers: withHeaders(ctx.headers, init),
+    });
+  } catch (err) {
+    throw mapNetworkError(err);
+  }
   if (!resp.ok) {
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
@@ -160,12 +190,17 @@ export const adminPatchJson = async <TResponse, TBody = unknown>(
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  const resp = await fetch(buildUrl(ctx.baseUrl, path), {
-    ...init,
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify(body),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(buildUrl(ctx.baseUrl, path), {
+      ...init,
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    throw mapNetworkError(err);
+  }
   if (!resp.ok) {
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }

@@ -137,7 +137,8 @@ flowchart LR
 | --- | --- |
 | `OD_ADMIN_TOKEN` | Shared secret for Admin API/CLI auth (used by `odctl` and tests). Required for AI-assisted dashboards/CLI. |
 | `OD_ADMIN_DATABASE_URL` / `DATABASE_URL` | Postgres connection string for Admin API. |
-| `OD_POLICY_DATABASE_URL` | Postgres URL for Policy Engine. |
+| `OD_POLICY_DATABASE_URL` | Postgres URL for Policy Engine (compose defaults this to the shared `defender_admin` DB; override only when intentionally separating runtime storage). |
+| `OD_ADMIN_CORS_ALLOW_ORIGIN` | Allowed browser origin for Admin API CORS responses (default `http://localhost:19001` for local web-admin). |
 | `OD_CACHE_REDIS_URL` | Redis address for cache invalidation. |
 | `OD_CACHE_CHANNEL` | Redis pub/sub channel for cache busting. |
 | `OD_OIDC_ISSUER` / `OD_OIDC_AUDIENCE` / `OD_OIDC_HS256_SECRET` | Enables HS256 or OIDC device flow auth so AI tooling honors RBAC. |

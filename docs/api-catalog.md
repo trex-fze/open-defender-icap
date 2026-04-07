@@ -67,6 +67,8 @@ Runtime propagation note: Admin API policy create/update/publish persists first,
 
 Status transition note: `PUT /api/v1/policies/:id` accepts `status=draft|archived`; promoting to `active` is restricted to `POST /api/v1/policies/:id/publish`.
 
+Policy history note: `GET /api/v1/policies/:id/versions` is served from immutable `policy_versions` snapshots; `rule_count` is computed from the stored `rules` array for each snapshot and returned as an integer.
+
 ### Taxonomy
 
 | Method | Path | Description | Roles | Request Schema | Response |

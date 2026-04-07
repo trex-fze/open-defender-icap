@@ -173,7 +173,7 @@ pub async fn list_policy_versions(
     require_roles(&user, ROLE_POLICY_VIEW)?;
     let versions = sqlx::query(
         r#"SELECT id, policy_id, version, status, created_by, created_at, deployed_at, notes,
-                  COALESCE(jsonb_array_length(rules), 0) AS rule_count
+                  COALESCE(jsonb_array_length(rules), 0)::bigint AS rule_count
            FROM policy_versions
            WHERE policy_id = $1
            ORDER BY created_at DESC"#,
@@ -183,22 +183,41 @@ pub async fn list_policy_versions(
     .await
     .map_err(map_db_error)?;
 
-    Ok(Json(
-        versions
-            .into_iter()
-            .map(|row| PolicyVersionSummary {
-                id: row.get("id"),
-                policy_id: row.get("policy_id"),
-                version: row.get("version"),
-                status: row.get("status"),
-                created_by: row.get("created_by"),
-                created_at: row.get("created_at"),
-                deployed_at: row.get("deployed_at"),
-                notes: row.get("notes"),
-                rule_count: row.get("rule_count"),
+    let mapped = versions
+        .into_iter()
+        .map(|row| {
+            Ok(PolicyVersionSummary {
+                id: row.try_get("id").map_err(map_policy_version_row_error)?,
+                policy_id: row
+                    .try_get("policy_id")
+                    .map_err(map_policy_version_row_error)?,
+                version: row
+                    .try_get("version")
+                    .map_err(map_policy_version_row_error)?,
+                status: row.try_get("status").map_err(map_policy_version_row_error)?,
+                created_by: row
+                    .try_get("created_by")
+                    .map_err(map_policy_version_row_error)?,
+                created_at: row
+                    .try_get("created_at")
+                    .map_err(map_policy_version_row_error)?,
+                deployed_at: row
+                    .try_get("deployed_at")
+                    .map_err(map_policy_version_row_error)?,
+                notes: row.try_get("notes").map_err(map_policy_version_row_error)?,
+                rule_count: row
+                    .try_get("rule_count")
+                    .map_err(map_policy_version_row_error)?,
             })
-            .collect(),
-    ))
+        })
+        .collect::<Result<Vec<_>, StatusCode>>()?;
+
+    Ok(Json(mapped))
+}
+
+fn map_policy_version_row_error(err: sqlx::Error) -> StatusCode {
+    error!(target = "svc-admin", %err, "failed to map policy version history row");
+    StatusCode::INTERNAL_SERVER_ERROR
 }
 
 pub async fn policy_runtime_sync(

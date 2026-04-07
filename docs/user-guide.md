@@ -35,6 +35,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - Policy updates: `PUT /api/v1/policies/<policy_id|current>` accepts a JSON body (`version`, `status=draft|archived`, optional `notes`, optional `rules`) and requires the `policy-editor` role. Promotion to active is only via `POST /api/v1/policies/:id/publish` (`policy-admin`). Every create/update stores a snapshot in `policy_versions` for audit/history.
 - `cargo run -p policy-engine` starts REST API with `/api/v1/decision` + health endpoints. On startup the service applies migrations in `services/policy-engine/migrations/` and seeds from the DSL file if the database is empty.
 - Docker default topology now points both Admin API policy writes and policy-engine runtime reads at `defender_admin` to avoid control-plane/runtime drift unless operators explicitly override `OD_POLICY_DATABASE_URL`.
+- When `OD_POLICY_DATABASE_URL` and `OD_ADMIN_DATABASE_URL` resolve to the same database, policy-engine startup uses a shared-DB bootstrap path that ensures required runtime tables (`policies`, `policy_rules`, `policy_versions`, `policy_audit_events`) exist before serving requests.
 - Future operations: manage policies via Admin API/UI/CLI; run simulations for policy changes.
 
 ## 5. Admin API & Overrides
@@ -110,6 +111,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - **ICAP errors**: Check adaptor logs for parse errors; ensure Squid metadata headers present; verify `policy_endpoint` reachable.
 - **Redis issues**: Confirm `redis_url` configured; check `redis-cli INFO` for latency; fallback memory cache will emit warnings if Redis unreachable.
 - **Policy errors**: 400 from `/api/v1/decision` indicates validation failure; inspect request body for missing `normalized_key`.
+- **Policies -> Version History shows `Failed to fetch`**: verify Admin API readiness (`curl http://localhost:19000/health/ready`), ensure `OD_ADMIN_CORS_ALLOW_ORIGIN` matches the UI origin (default `http://localhost:19001`), and confirm the browser is using the expected `VITE_ADMIN_API_URL` target.
 - **CLI auth failures**: Ensure config token valid; inspect `~/.odctl/logs` (future) for stack traces.
 - **Forgot local admin password**: run `odctl iam recover-admin-password` from a trusted host with DB access; include incident reason and rotate credentials immediately after regaining access.
 - **IAM disable/delete blocked with 409**: `PROTECTED_USER` means target is protected (default local admin). `LAST_ACTIVE_ADMIN` means operation would remove final active `policy-admin`; promote another admin first.
