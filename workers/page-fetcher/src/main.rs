@@ -237,15 +237,54 @@ impl PageFetcher {
         let stream_group = env::var("OD_PAGE_FETCH_STREAM_GROUP")
             .unwrap_or_else(|_| "page-fetcher".into());
         let stream_consumer = env::var("OD_PAGE_FETCH_STREAM_CONSUMER")
-            .unwrap_or_else(|_| format!("page-fetcher-{}", std::process::id()));
+            .unwrap_or_else(|_| self.cfg.queue_name.clone());
         let start_id = env::var("OD_PAGE_FETCH_STREAM_GROUP_START_ID")
             .unwrap_or_else(|_| self.cfg.stream_start_id.clone());
         ensure_stream_group(&mut conn, &self.cfg.stream, &stream_group, &start_id).await?;
+        let options_pending = StreamReadOptions::default()
+            .group(&stream_group, &stream_consumer)
+            .count(10);
         let options = StreamReadOptions::default()
             .group(&stream_group, &stream_consumer)
             .block(5000)
             .count(10);
         loop {
+            let pending_reply: StreamReadReply = conn
+                .xread_options(&[&self.cfg.stream], &["0"], &options_pending)
+                .await?;
+            for stream in &pending_reply.keys {
+                for entry in &stream.ids {
+                    if entry_too_old(&entry.id, 300_000) {
+                        let _ = redis::cmd("XACK")
+                            .arg(&self.cfg.stream)
+                            .arg(&stream_group)
+                            .arg(&entry.id)
+                            .query_async::<_, i64>(&mut conn)
+                            .await;
+                        continue;
+                    }
+                    if let Some(payload) = entry.get::<String>("payload") {
+                        if let Err(err) = self.process_job(&payload).await {
+                            self.metrics.record_job_failed();
+                            let key = serde_json::from_str::<PageFetchJob>(&payload)
+                                .map(|job| job.normalized_key)
+                                .unwrap_or_else(|_| "unknown".into());
+                            error!(target = "svc-page-fetcher", %err, key, "pending job failed");
+                        } else {
+                            self.metrics.record_job_completed();
+                        }
+                    } else {
+                        warn!(target = "svc-page-fetcher", entry_id = %entry.id, "pending stream entry missing payload field");
+                    }
+                    let _ = redis::cmd("XACK")
+                        .arg(&self.cfg.stream)
+                        .arg(&stream_group)
+                        .arg(&entry.id)
+                        .query_async::<_, i64>(&mut conn)
+                        .await;
+                }
+            }
+
             let reply: StreamReadReply = conn
                 .xread_options(&[&self.cfg.stream], &[">"], &options)
                 .await?;
@@ -269,22 +308,16 @@ impl PageFetcher {
                             error!(target = "svc-page-fetcher", %err, key, "job failed");
                         } else {
                             self.metrics.record_job_completed();
-                            let _ = redis::cmd("XACK")
-                                .arg(&self.cfg.stream)
-                                .arg(&stream_group)
-                                .arg(&entry.id)
-                                .query_async::<_, i64>(&mut conn)
-                                .await;
                         }
                     } else {
                         warn!(target = "svc-page-fetcher", entry_id = %entry.id, "stream entry missing payload field");
-                        let _ = redis::cmd("XACK")
-                            .arg(&self.cfg.stream)
-                            .arg(&stream_group)
-                            .arg(&entry.id)
-                            .query_async::<_, i64>(&mut conn)
-                            .await;
                     }
+                    let _ = redis::cmd("XACK")
+                        .arg(&self.cfg.stream)
+                        .arg(&stream_group)
+                        .arg(&entry.id)
+                        .query_async::<_, i64>(&mut conn)
+                        .await;
                 }
             }
         }

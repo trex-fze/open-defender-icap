@@ -1306,11 +1306,44 @@ impl JobConsumer {
         let start_id = env::var("OD_LLM_STREAM_GROUP_START_ID").unwrap_or_else(|_| "$".into());
         ensure_stream_group(&mut conn, &self.stream, &stream_group, &start_id).await?;
 
+        let options_pending = StreamReadOptions::default()
+            .group(&stream_group, &stream_consumer)
+            .count(10);
         let options = StreamReadOptions::default()
             .group(&stream_group, &stream_consumer)
             .block(5000)
             .count(10);
         loop {
+            let pending_reply: StreamReadReply = conn
+                .xread_options(&[&self.stream], &["0"], &options_pending)
+                .await?;
+            for stream in pending_reply.keys {
+                for entry in stream.ids {
+                    if entry_too_old(&entry.id, 300_000) {
+                        let _ = redis::cmd("XACK")
+                            .arg(&self.stream)
+                            .arg(&stream_group)
+                            .arg(&entry.id)
+                            .query_async::<_, i64>(&mut conn)
+                            .await;
+                        continue;
+                    }
+                    if let Some(payload) = entry.get::<String>("payload") {
+                        if let Err(err) = self.process_job(&payload).await {
+                            error!(target = "svc-llm-worker", %err, "failed to process pending job");
+                        }
+                    } else {
+                        warn!(target = "svc-llm-worker", entry_id = %entry.id, "pending stream entry missing payload field");
+                    }
+                    let _ = redis::cmd("XACK")
+                        .arg(&self.stream)
+                        .arg(&stream_group)
+                        .arg(&entry.id)
+                        .query_async::<_, i64>(&mut conn)
+                        .await;
+                }
+            }
+
             let reply: StreamReadReply = conn
                 .xread_options(&[&self.stream], &[">"], &options)
                 .await?;
@@ -1328,23 +1361,16 @@ impl JobConsumer {
                     if let Some(payload) = entry.get::<String>("payload") {
                         if let Err(err) = self.process_job(&payload).await {
                             error!(target = "svc-llm-worker", %err, "failed to process job");
-                        } else {
-                            let _ = redis::cmd("XACK")
-                                .arg(&self.stream)
-                                .arg(&stream_group)
-                                .arg(&entry.id)
-                                .query_async::<_, i64>(&mut conn)
-                                .await;
                         }
                     } else {
                         warn!(target = "svc-llm-worker", entry_id = %entry.id, "stream entry missing payload field");
-                        let _ = redis::cmd("XACK")
-                            .arg(&self.stream)
-                            .arg(&stream_group)
-                            .arg(&entry.id)
-                            .query_async::<_, i64>(&mut conn)
-                            .await;
                     }
+                    let _ = redis::cmd("XACK")
+                        .arg(&self.stream)
+                        .arg(&stream_group)
+                        .arg(&entry.id)
+                        .query_async::<_, i64>(&mut conn)
+                        .await;
                 }
             }
         }
