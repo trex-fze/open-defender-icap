@@ -71,6 +71,10 @@ Operators are responsible for confirming that the Stage 12 canonical taxonomy lo
 
 If fallback or blocked-mutation metrics climb steadily for more than 5 minutes, halt any rollout, collect the offending payloads, and page the taxonomy owner.
 
+Taxonomy parity validation command:
+
+- `bash tests/taxonomy-parity.sh` executes the cross-service canonicalization/activation regression set and writes evidence to `tests/artifacts/taxonomy-parity/<timestamp>/summary.tsv`.
+
 ## Stage 12 Rollout / Rollback Procedure
 
 1. **Pre-flight**
