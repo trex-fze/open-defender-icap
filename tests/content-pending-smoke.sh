@@ -10,7 +10,11 @@ NORMALIZED_KEY="domain:${TARGET_HOST}"
 ADMIN_TOKEN=${OD_ADMIN_TOKEN:-changeme-admin}
 KEEP_STACK=${KEEP_STACK:-0}
 BUILD_IMAGES=${BUILD_IMAGES:-0}
+QUIET_RECLASS_WORKER=${QUIET_RECLASS_WORKER:-1}
 WAIT_HTTP_TRIES=${WAIT_HTTP_TRIES:-120}
+WAIT_PAGE_TRIES=${WAIT_PAGE_TRIES:-60}
+WAIT_CLASSIFICATION_TRIES=${WAIT_CLASSIFICATION_TRIES:-120}
+WAIT_PENDING_CLEAR_TRIES=${WAIT_PENDING_CLEAR_TRIES:-30}
 PGUSER=${POSTGRES_USER:-defender}
 PGADMIN_DB=${PGADMIN_DB:-defender_admin}
 
@@ -38,6 +42,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "$ARTIFACT_DIR"
+rm -f "$ARTIFACT_DIR"/*
 
 log() {
   printf '[content-pending] %s\n' "$*"
@@ -46,6 +51,20 @@ log() {
 die() {
   log "ERROR: $*"
   exit 1
+}
+
+capture_timeout_diagnostics() {
+  local phase="$1"
+  log "Capturing diagnostics (${phase})"
+  exec_pg "SELECT normalized_key, status, base_url, requested_at, updated_at, last_error FROM classification_requests WHERE normalized_key = '${NORMALIZED_KEY}' ORDER BY updated_at DESC LIMIT 5" >"$ARTIFACT_DIR/diag-classification-requests-${phase}.txt" || true
+  exec_pg "SELECT normalized_key, fetch_status, fetch_reason, fetch_version, fetched_at FROM page_contents WHERE normalized_key = '${NORMALIZED_KEY}' ORDER BY fetch_version DESC LIMIT 5" >"$ARTIFACT_DIR/diag-page-contents-${phase}.txt" || true
+  exec_pg "SELECT normalized_key, recommended_action, primary_category, subcategory, updated_at FROM classifications WHERE normalized_key = '${NORMALIZED_KEY}' ORDER BY updated_at DESC LIMIT 5" >"$ARTIFACT_DIR/diag-classifications-${phase}.txt" || true
+  compose logs --no-color --tail=200 llm-worker >"$ARTIFACT_DIR/diag-llm-worker-${phase}.log" || true
+  compose logs --no-color --tail=200 page-fetcher >"$ARTIFACT_DIR/diag-page-fetcher-${phase}.log" || true
+  compose logs --no-color --tail=200 reclass-worker >"$ARTIFACT_DIR/diag-reclass-worker-${phase}.log" || true
+  compose logs --no-color --tail=200 admin-api >"$ARTIFACT_DIR/diag-admin-api-${phase}.log" || true
+  grep -F "$NORMALIZED_KEY" "$ARTIFACT_DIR/diag-llm-worker-${phase}.log" >"$ARTIFACT_DIR/diag-llm-worker-${phase}-${TARGET_HOST}.log" || true
+  grep -F "$NORMALIZED_KEY" "$ARTIFACT_DIR/diag-page-fetcher-${phase}.log" >"$ARTIFACT_DIR/diag-page-fetcher-${phase}-${TARGET_HOST}.log" || true
 }
 
 compose() {
@@ -57,6 +76,9 @@ start_stack() {
     compose up -d --build
   else
     compose up -d
+  fi
+  if [[ $QUIET_RECLASS_WORKER -eq 1 ]]; then
+    compose stop reclass-worker >/dev/null 2>&1 || true
   fi
 }
 
@@ -127,7 +149,7 @@ verify_pending_entry() {
 
 wait_for_page_content() {
   log "Waiting for Crawl4AI/page-fetcher to store content"
-  for ((i = 1; i <= 60; i++)); do
+  for ((i = 1; i <= WAIT_PAGE_TRIES; i++)); do
     local status
     status=$(exec_pg "SELECT fetch_status FROM page_contents WHERE normalized_key = '${NORMALIZED_KEY}' ORDER BY fetch_version DESC LIMIT 1") || status=""
     if [[ "$status" == "ok" ]]; then
@@ -136,12 +158,13 @@ wait_for_page_content() {
     fi
     sleep 2
   done
+  capture_timeout_diagnostics "page-content-timeout"
   die "Timed out waiting for page_contents for ${NORMALIZED_KEY}"
 }
 
 wait_for_classification() {
   log "Waiting for LLM verdict"
-  for ((i = 1; i <= 60; i++)); do
+  for ((i = 1; i <= WAIT_CLASSIFICATION_TRIES; i++)); do
     local action
     action=$(exec_pg "SELECT recommended_action FROM classifications WHERE normalized_key = '${NORMALIZED_KEY}'") || action=""
     if [[ -n "$action" ]]; then
@@ -150,15 +173,21 @@ wait_for_classification() {
     fi
     sleep 2
   done
+  capture_timeout_diagnostics "classification-timeout"
   die "Timed out waiting for classification for ${NORMALIZED_KEY}"
 }
 
 check_pending_cleared() {
-  local row
-  row=$(exec_pg "SELECT status FROM classification_requests WHERE normalized_key = '${NORMALIZED_KEY}'") || row=""
-  if [[ -n "$row" ]]; then
-    die "Pending row still present after classification"
-  fi
+  for ((i = 1; i <= WAIT_PENDING_CLEAR_TRIES; i++)); do
+    local row
+    row=$(exec_pg "SELECT status FROM classification_requests WHERE normalized_key = '${NORMALIZED_KEY}'") || row=""
+    if [[ -z "$row" ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  capture_timeout_diagnostics "pending-clear-timeout"
+  die "Pending row still present after classification"
 }
 
 check_cli_pending() {

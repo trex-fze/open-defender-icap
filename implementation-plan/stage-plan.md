@@ -18,12 +18,13 @@ This roadmap mirrors the RFC tracker and captures actionable work items, owners,
 | 14. Pending Hardening & Output-Invalid Fallback (✅) | Persist terminal crawl failures, avoid metadata requeue loops, online verification for local output-invalid errors, terminal insufficient-evidence fallback | Classification + Backend + SRE | Stages 4, 9, 13 | Stage 14 RFC/plan, llm-worker/page-fetcher test runs, runtime pending-loop reduction evidence |
 | 15. Cursor Pagination Hard Cutover (✅) | Replace mixed list responses with cursor pagination (`limit` + `cursor`, `{data, meta}`), migrate web-admin + odctl, add keyset indexes | Backend + Frontend + DevTools | Stages 5, 10, 11, 14 | Stage 15 RFC/plan, migration 0016, cargo/web test evidence, docker runtime cursor-chain smoke |
 | 16. Policy Action Outcome Hardening (✅) | Action semantics hardening (`Review`/`ContentPending`), strict condition validation, activation parity, runtime-parity simulation | Platform Security + Policy + Backend + SWG + QA | Stages 2, 4, 10, 15 | Stage 16 plan/checklist + `implementation-plan/stage-16-verification.md` evidence log |
+| 17. ContentPending Reliability and Terminalization (In Progress) | Timeout diagnostics, pending->terminal reliability hardening, multi-run smoke stabilization | Classification + SWG + SRE + QA | Stages 4, 14, 16 | Stage 17 plan/checklist + verification log with reliability matrix |
 
 ## Current Focus
 
-1. Keep strict content-aware behavior stable in production-like smoke runs (`tests/security/facebook-e2e-smoke.sh`).
-2. Maintain canonical taxonomy enforcement paths (prompt contract, alias mapping, persistence validation).
-3. Improve operator diagnostics and runbook automation around pending classifications and Crawl4AI health.
-4. Harden domain-first scope follow-ups (PSL registrable-domain derivation and collapse metrics).
+1. Execute Stage 17 reliability matrix for `tests/content-pending-smoke.sh` and collect diagnostic evidence.
+2. Keep strict content-aware behavior stable in production-like smoke runs (`tests/security/facebook-e2e-smoke.sh`).
+3. Maintain canonical taxonomy enforcement paths (prompt contract, alias mapping, persistence validation).
+4. Improve operator diagnostics and runbook automation around pending classifications and Crawl4AI health.
 5. Execute stream consumer-group migration for restart-safe queue processing semantics.
 6. Convert remaining policy/reporting page-based APIs to cursor parity where heavy-read patterns warrant keyset traversal.
