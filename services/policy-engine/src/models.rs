@@ -47,6 +47,35 @@ pub struct SimulationResponse {
     pub decision: PolicyDecision,
     pub matched_rule_id: Option<String>,
     pub policy_version: String,
+    pub mode: String,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SimulationMode {
+    Runtime,
+    PolicyOnly,
+}
+
+impl SimulationMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SimulationMode::Runtime => "runtime",
+            SimulationMode::PolicyOnly => "policy_only",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SimulatePolicyRequest {
+    #[serde(default = "default_simulation_mode")]
+    pub mode: SimulationMode,
+    #[serde(flatten)]
+    pub request: DecisionRequest,
+}
+
+fn default_simulation_mode() -> SimulationMode {
+    SimulationMode::Runtime
 }
 
 impl PolicyListResponse {
@@ -106,5 +135,33 @@ impl ErrorResponse {
             error_code: "FORBIDDEN",
             message: "insufficient privileges".into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simulate_request_defaults_to_runtime_mode() {
+        let payload = serde_json::json!({
+            "normalized_key": "domain:example.com",
+            "entity_level": "domain",
+            "source_ip": "192.0.2.10"
+        });
+        let parsed: SimulatePolicyRequest = serde_json::from_value(payload).expect("parse request");
+        assert_eq!(parsed.mode, SimulationMode::Runtime);
+    }
+
+    #[test]
+    fn simulate_request_accepts_policy_only_mode() {
+        let payload = serde_json::json!({
+            "mode": "policy_only",
+            "normalized_key": "domain:example.com",
+            "entity_level": "domain",
+            "source_ip": "192.0.2.10"
+        });
+        let parsed: SimulatePolicyRequest = serde_json::from_value(payload).expect("parse request");
+        assert_eq!(parsed.mode, SimulationMode::PolicyOnly);
     }
 }

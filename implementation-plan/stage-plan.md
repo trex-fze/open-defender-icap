@@ -17,6 +17,7 @@ This roadmap mirrors the RFC tracker and captures actionable work items, owners,
 | 13. Domain-First Classification Scope (✅) | Canonical domain-key dedupe across pending, page fetch, and classification persistence while preserving subdomain override matching | Platform + Backend | Stages 2, 4, 9 | Stage 13 RFC/plan, migration 0015, ICAP smoke evidence (`www` + `api` -> single domain key) |
 | 14. Pending Hardening & Output-Invalid Fallback (✅) | Persist terminal crawl failures, avoid metadata requeue loops, online verification for local output-invalid errors, terminal insufficient-evidence fallback | Classification + Backend + SRE | Stages 4, 9, 13 | Stage 14 RFC/plan, llm-worker/page-fetcher test runs, runtime pending-loop reduction evidence |
 | 15. Cursor Pagination Hard Cutover (✅) | Replace mixed list responses with cursor pagination (`limit` + `cursor`, `{data, meta}`), migrate web-admin + odctl, add keyset indexes | Backend + Frontend + DevTools | Stages 5, 10, 11, 14 | Stage 15 RFC/plan, migration 0016, cargo/web test evidence, docker runtime cursor-chain smoke |
+| 16. Policy Action Outcome Hardening (✅) | Action semantics hardening (`Review`/`ContentPending`), strict condition validation, activation parity, runtime-parity simulation | Platform Security + Policy + Backend + SWG + QA | Stages 2, 4, 10, 15 | Stage 16 plan/checklist + `implementation-plan/stage-16-verification.md` evidence log |
 
 ## Current Focus
 

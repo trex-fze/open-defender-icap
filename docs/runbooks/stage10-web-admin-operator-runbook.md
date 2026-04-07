@@ -117,6 +117,9 @@ Store screenshots under `docs/evidence/stage10-web-admin/` using this naming con
 
 - **UI shows mock mode unexpectedly**: verify `VITE_ADMIN_API_URL`/`VITE_ADMIN_API_FALLBACK` resolve to the live Admin API and that a bootstrap token (`VITE_ADMIN_TOKEN` or `VITE_DEFAULT_ADMIN_TOKEN`) is present in local storage.
 - **Policy Version History shows `Failed to load version history: Failed to fetch`**: confirm `http://localhost:19000/health/ready` is healthy, verify `OD_ADMIN_CORS_ALLOW_ORIGIN` allows the web-admin origin (`http://localhost:19001` by default), and check browser devtools for blocked CORS/network requests.
+- **Recorded action differs from effective action in Classifications**: this is expected when overrides, policy updates, or taxonomy activation changed after persistence. Use `effective_action` and `effective_decision_source` as current enforcement truth.
+- **Unexpected block with `Review` action**: current runtime enforces `Review` as a blocked response with review-specific message text. Confirm policy intent in draft/version history before publish.
+- **Sites stay on holding page (`ContentPending`)**: verify `classification_requests` row exists for the canonical domain key, and confirm both `classification-jobs` and `page-fetch-jobs` streams receive entries.
 - **403 from mutations**: verify role claims include required permissions.
 - **No CLI logs shown**: ensure admin API has `audit` access and data exists.
 - **Ops provider list empty**: set `VITE_LLM_PROVIDERS_URL` to worker providers endpoint.

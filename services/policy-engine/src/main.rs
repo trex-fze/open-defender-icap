@@ -22,7 +22,7 @@ use axum::{
 use evaluator::PolicyEvaluator;
 use models::{
     DecisionRequest, ErrorResponse, PolicyCreateRequest, PolicyListResponse, PolicyUpdateRequest,
-    SimulationResponse,
+    SimulatePolicyRequest, SimulationMode, SimulationResponse,
 };
 use policy_dsl::PolicyDocument;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
@@ -534,6 +534,12 @@ async fn handle_decision(
 
     state.hydrate_request_hints(&mut payload).await;
     let mut simulation = state.evaluator.simulate(&payload);
+    simulation.decision.decision_source = Some(decision_source_for_simulation(&state, &simulation));
+    let decision = simulation.decision;
+    Ok(Json(decision))
+}
+
+fn decision_source_for_simulation(state: &AppState, simulation: &store::SimulationResult) -> String {
     let taxonomy_disabled = simulation
         .decision
         .verdict
@@ -541,18 +547,16 @@ async fn handle_decision(
         .map(|verdict| {
             !state
                 .evaluator
-                .is_category_enabled(&verdict.primary_category)
+                .is_verdict_enabled(&verdict.primary_category, &verdict.subcategory)
         })
         .unwrap_or(false);
-    simulation.decision.decision_source = Some(if taxonomy_disabled {
+    if taxonomy_disabled {
         "taxonomy_disabled".to_string()
     } else if simulation.matched_rule_id.is_some() {
         "policy_rule".to_string()
     } else {
         "default".to_string()
-    });
-    let decision = simulation.decision;
-    Ok(Json(decision))
+    }
 }
 
 async fn list_policies(
@@ -655,11 +659,11 @@ async fn create_policy(
 async fn simulate_policy(
     Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
-    Json(payload): Json<DecisionRequest>,
+    Json(mut payload): Json<SimulatePolicyRequest>,
 ) -> Result<Json<SimulationResponse>, (StatusCode, Json<ErrorResponse>)> {
     require_roles(&user, ROLE_POLICY_VIEWER_ROLES)
         .map_err(|status| (status, Json(ErrorResponse::forbidden())))?;
-    if payload.normalized_key.is_empty() {
+    if payload.request.normalized_key.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -669,11 +673,26 @@ async fn simulate_policy(
         ));
     }
 
-    let result = state.evaluator.simulate(&payload);
+    if payload.mode == SimulationMode::Runtime {
+        if let Some(decision) = state.resolve_override_decision(&payload.request).await {
+            return Ok(Json(SimulationResponse {
+                decision,
+                matched_rule_id: None,
+                policy_version: state.evaluator.version(),
+                mode: payload.mode.as_str().to_string(),
+            }));
+        }
+        state.hydrate_request_hints(&mut payload.request).await;
+    }
+
+    let mut result = state.evaluator.simulate(&payload.request);
+    result.decision.decision_source = Some(decision_source_for_simulation(&state, &result));
+
     Ok(Json(SimulationResponse {
         decision: result.decision,
         matched_rule_id: result.matched_rule_id,
         policy_version: state.evaluator.version(),
+        mode: payload.mode.as_str().to_string(),
     }))
 }
 

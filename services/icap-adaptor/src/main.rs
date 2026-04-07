@@ -194,7 +194,7 @@ async fn handle_connection(
         &decision.action,
         decision.verdict.as_ref(),
     );
-    let requires_pending = classification_required;
+    let requires_pending = classification_required || matches!(decision.action, PolicyAction::ContentPending);
     let fetch_candidates = build_fetch_candidates(&classification_key, &normalized);
     let base_url = fetch_candidates
         .first()
@@ -299,7 +299,10 @@ fn action_requires_follow_up(action: &PolicyAction, missing_verdict: bool) -> bo
     missing_verdict
         || matches!(
             action,
-            PolicyAction::Review | PolicyAction::RequireApproval | PolicyAction::Warn
+            PolicyAction::Review
+                | PolicyAction::RequireApproval
+                | PolicyAction::Warn
+                | PolicyAction::ContentPending
         )
 }
 
@@ -401,6 +404,11 @@ fn icap_response(action: &PolicyAction) -> String {
     use PolicyAction::*;
     match action {
         Allow | Monitor => "ICAP/1.0 204 No Content\r\n\r\n".to_string(),
+        Review => build_http_block_response(
+            "403 Forbidden",
+            "text/plain; charset=utf-8",
+            b"Request queued for security review.",
+        ),
         ContentPending => build_http_block_response(
             "403 Forbidden",
             "text/html; charset=utf-8",
@@ -566,6 +574,15 @@ mod icap_response_tests {
     }
 
     #[test]
+    fn review_response_uses_distinct_body() {
+        let review = icap_response(&PolicyAction::Review);
+        let block = icap_response(&PolicyAction::Block);
+        assert!(review.contains("Request queued for security review."));
+        assert!(!review.contains("Request blocked."));
+        assert!(block.contains("Request blocked."));
+    }
+
+    #[test]
     fn ancestor_key_generated_for_subdomain() {
         let normalized = NormalizedTarget {
             entity_level: EntityLevel::Subdomain,
@@ -645,6 +662,11 @@ mod icap_response_tests {
             &PolicyAction::Allow,
             None
         ));
+    }
+
+    #[test]
+    fn explicit_content_pending_requires_follow_up() {
+        assert!(action_requires_follow_up(&PolicyAction::ContentPending, false));
     }
 
     #[test]

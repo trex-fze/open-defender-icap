@@ -154,6 +154,11 @@ impl PolicyEvaluator {
         self.activation.is_enabled(category_id, None)
     }
 
+    pub fn is_verdict_enabled(&self, category_id: &str, subcategory_id: &str) -> bool {
+        self.activation
+            .is_enabled(category_id, Some(subcategory_id))
+    }
+
     pub fn version(&self) -> String {
         self.store.version()
     }
@@ -164,10 +169,14 @@ impl PolicyEvaluator {
 
     fn apply_activation(&self, decision: &mut PolicyDecision) {
         if let Some(verdict) = decision.verdict.as_ref() {
-            if !self.activation.is_enabled(&verdict.primary_category, None) {
+            if !self
+                .activation
+                .is_enabled(&verdict.primary_category, Some(&verdict.subcategory))
+            {
                 warn!(
                     target = "svc-policy",
                     category = %verdict.primary_category,
+                    subcategory = %verdict.subcategory,
                     "taxonomy activation blocked policy decision"
                 );
                 decision.action = PolicyAction::Block;

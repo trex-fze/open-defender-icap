@@ -17,16 +17,18 @@ This reference lists every HTTP endpoint exposed by the services in this reposit
 
 | Method | Path | Description | Auth / Headers | Request Schema | Response |
 | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/decision` | Evaluate a normalized key + context and return a policy decision. | None (hot path). | `DecisionRequest`: `{ normalized_key, entity_level, source_ip, user_id?, group_ids?, category_hint?, risk_hint?, confidence_hint? }`. | `PolicyDecision` JSON with `action`, `category`, `risk`, `reason`. |
+| `POST` | `/api/v1/decision` | Evaluate a normalized key + context and return a policy decision. | None (hot path). | `DecisionRequest`: `{ normalized_key, entity_level, source_ip, user_id?, group_ids?, category_hint?, subcategory_hint?, risk_hint?, confidence_hint? }`. | `PolicyDecision` JSON with `action`, optional `verdict`, and `decision_source` (`override`, `policy_rule`, `default`, `taxonomy_disabled`). |
 | `GET` | `/api/v1/policies` | List the current in-memory policy (rules + version). | `X-Admin-Token` with `policy-viewer` role (or OIDC JWT). | — | `PolicyListResponse` containing `policy_id`, `version`, array of rule summaries. |
 | `POST` | `/api/v1/policies/reload` | Reload policy from file/DB (DB mode). | `policy-editor` role. | — | `PolicyListResponse`. |
 | `POST` | `/api/v1/policies` | Create a new policy document (DB mode). | `policy-editor` role. | `PolicyCreateRequest`: `{ name, version, created_by?, rules: [PolicyRule] }`. Rules follow the DSL defined in `crates/policy-dsl`. | `PolicyListResponse` with the newly active policy. |
 | `PUT` | `/api/v1/policies/:id` | Update metadata or rules for `:id` (`current` allowed). | `policy-editor` role. | `PolicyUpdateRequest`: `{ version?, status?, notes?, rules? }`. | `PolicyListResponse`. |
-| `POST` | `/api/v1/policies/simulate` | Simulate a policy decision without persisting it. | `policy-viewer` role. | Same as `DecisionRequest`. | `SimulationResponse` (`decision`, `matched_rule_id`, `policy_version`). |
+| `POST` | `/api/v1/policies/simulate` | Simulate a policy decision without persisting it. | `policy-viewer` role. | `SimulatePolicyRequest`: `DecisionRequest` fields + optional `mode` (`runtime` default, `policy_only`). | `SimulationResponse` (`decision`, `matched_rule_id`, `policy_version`, `mode`). |
 | `GET` | `/health/ready` | Liveness/readiness probe. | None. | — | `{"status":"OK"}`. |
 
 Policy-engine admin routes do not allow implicit system fallback; requests without `Authorization`/`X-Admin-Token` are rejected with `401`.
 Policy-engine policy admin routes are compatibility endpoints and emit deprecation headers (`Deprecation`, `Warning`, `Sunset`) to steer operators toward Admin API policy routes.
+
+Policy action outcome note: ICAP enforcement currently treats `Allow` and `Monitor` as pass-through (`204`), `Block`/`Warn`/`RequireApproval` as blocked (`403`), `Review` as blocked with review-specific messaging, and `ContentPending` as the holding page (`403` HTML) with pending/queue follow-up.
 
 ---
 
@@ -64,6 +66,8 @@ Override precedence note: policy-engine evaluates active domain overrides before
 | `POST` | `/api/v1/policies/validate` | Validate a DSL payload without persisting. | `policy-editor`. |
 
 Runtime propagation note: Admin API policy create/update/publish persists first, invalidates policy cache, then triggers policy-engine reload. If reload fails, the API returns `502 POLICY_RELOAD_FAILED` and the persisted policy can be applied with a manual `POST /api/v1/policies/reload`.
+
+Validation hardening note: policy condition payloads now reject unknown keys; valid keys are `domains`, `categories`, `users`, `groups`, `source_ips`, and `risk_levels`.
 
 Status transition note: `PUT /api/v1/policies/:id` accepts `status=draft|archived`; promoting to `active` is restricted to `POST /api/v1/policies/:id/publish`.
 

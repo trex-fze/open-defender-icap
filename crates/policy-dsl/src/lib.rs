@@ -20,6 +20,7 @@ pub struct PolicyRule {
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Conditions {
     pub domains: Option<Vec<String>>,
     pub categories: Option<Vec<String>>,
@@ -60,5 +61,24 @@ mod tests {
         let doc: PolicyDocument = serde_json::from_value(data).unwrap();
         assert_eq!(doc.rules.len(), 1);
         assert_eq!(doc.rules[0].action, PolicyAction::Block);
+    }
+
+    #[test]
+    fn rejects_unknown_condition_keys() {
+        let data = json!({
+            "version": "v1",
+            "rules": [
+                {
+                    "id": "bad-rule",
+                    "priority": 10,
+                    "action": "Block",
+                    "conditions": {
+                        "user_ids": ["alice"]
+                    }
+                }
+            ]
+        });
+        let parsed: Result<PolicyDocument, _> = serde_json::from_value(data);
+        assert!(parsed.is_err());
     }
 }

@@ -94,6 +94,7 @@ flowchart LR
 - **AI-assisted reporting** – the Elasticsearch/Kibana layer surfaces trending threats with context derived from LLM annotations and metadata enrichment.
 - **Hybrid AI routing** – configure offline engines (Ollama/LM Studio/vLLM) or online SaaS (OpenAI/Claude) with automatic failover per policy.
 - **Content-first blocking** – `ContentPending` serves a holding page until Crawl4AI captures homepage HTML context and the LLM worker produces a canonical-taxonomy verdict. The fetch path is strict Crawl4AI-only (no HTTP fallback), and non-canonical LLM outputs are retried before persistence.
+- **Policy action outcomes** – ICAP currently enforces `Allow`/`Monitor` as pass-through, `Block`/`Warn`/`RequireApproval` as blocked, `Review` as blocked with review-specific messaging, and `ContentPending` as holding-page flow with queue follow-up.
 
 ## Quick Start (Docker Compose)
 

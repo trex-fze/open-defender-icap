@@ -170,12 +170,12 @@ check_cli_pending() {
   for ((i = 1; i <= tries; i++)); do
     output=$(exec_runner "odctl classification pending --limit 100 --json")
     if [[ "$expect_present" == "yes" ]]; then
-      if echo "$output" | jq -e ".[] | select(.normalized_key == \"${NORMALIZED_KEY}\")" >/dev/null; then
+      if echo "$output" | jq -e "(.data // .)[] | select(.normalized_key == \"${NORMALIZED_KEY}\")" >/dev/null; then
         printf '%s\n' "$output" >"$ARTIFACT_DIR/cli-pending-${phase}.json"
         return 0
       fi
     else
-      if ! echo "$output" | jq -e ".[] | select(.normalized_key == \"${NORMALIZED_KEY}\")" >/dev/null; then
+      if ! echo "$output" | jq -e "(.data // .)[] | select(.normalized_key == \"${NORMALIZED_KEY}\")" >/dev/null; then
         printf '%s\n' "$output" >"$ARTIFACT_DIR/cli-pending-${phase}.json"
         return 0
       fi

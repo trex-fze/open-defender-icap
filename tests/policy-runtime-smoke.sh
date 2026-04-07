@@ -86,7 +86,7 @@ main() {
   wait_for_http "http://localhost:19010/health/ready" 'Policy Engine'
 
   log 'Creating policy draft via Admin API'
-  admin_post "/api/v1/policies" "$(jq -n --arg name "$draft_name" --arg version "draft-${ts}" '{name:$name, version:$version, notes:"smoke test policy", rules:[{id:"smoke-block-user", priority:1, action:"Block", description:"Block smoke user", conditions:{user_ids:["policy-smoke-user"]}}]}')" >"$ARTIFACT_DIR/create-policy.json"
+  admin_post "/api/v1/policies" "$(jq -n --arg name "$draft_name" --arg version "draft-${ts}" '{name:$name, version:$version, notes:"smoke test policy", rules:[{id:"smoke-block-user", priority:1, action:"Block", description:"Block smoke user", conditions:{users:["policy-smoke-user"]}}]}')" >"$ARTIFACT_DIR/create-policy.json"
   policy_id=$(jq -r '.id' "$ARTIFACT_DIR/create-policy.json")
   [[ -n "$policy_id" && "$policy_id" != "null" ]] || die 'failed to parse policy id from create response'
 
