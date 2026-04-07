@@ -146,6 +146,8 @@ struct RoutingConfig {
     pub pending_reconcile_stale_minutes: Option<u64>,
     #[serde(default)]
     pub pending_reconcile_batch: Option<usize>,
+    #[serde(default)]
+    pub requeue_max_attempts: Option<usize>,
 }
 
 impl WorkerConfig {
@@ -1170,6 +1172,7 @@ impl PendingReconciler {
                 content_hash: None,
                 content_version: None,
                 content_language: None,
+                requeue_attempt: 0,
             };
             let fetch_job = PageFetchJob {
                 normalized_key: pending.normalized_key.clone(),
@@ -1243,7 +1246,10 @@ struct JobConsumer {
     online_context: OnlineContextRuntime,
     stale_divert_budget: Mutex<WindowBudgetState>,
     provider_health: Mutex<HashMap<String, ProviderHealthState>>,
+    max_requeue_attempts: usize,
 }
+
+const DEFAULT_JOB_REQUEUE_MAX_ATTEMPTS: usize = 6;
 
 impl JobConsumer {
     async fn new(
@@ -1275,6 +1281,10 @@ impl JobConsumer {
             online_context,
             stale_divert_budget: Mutex::new(WindowBudgetState::new()),
             provider_health: Mutex::new(HashMap::new()),
+            max_requeue_attempts: env_usize("OD_LLM_JOB_REQUEUE_MAX")
+                .or(cfg.routing.requeue_max_attempts)
+                .unwrap_or(DEFAULT_JOB_REQUEUE_MAX_ATTEMPTS)
+                .max(1),
         })
     }
 
@@ -1326,6 +1336,29 @@ impl JobConsumer {
                 let should_requeue = err.downcast_ref::<ContentNotReady>().is_some()
                     || err.downcast_ref::<RetryableJobError>().is_some();
                 if should_requeue {
+                    let mut terminalized = false;
+                    if let Some(job) = job_hint.as_ref() {
+                        if job.requeue_attempt >= self.max_requeue_attempts {
+                            terminalized = true;
+                            let message = format!(
+                                "retry exhausted after {} queue requeues: {}",
+                                self.max_requeue_attempts, err
+                            );
+                            let _ = self.mark_pending(job, "failed", Some(&message)).await;
+                            metrics::record_job_terminalized("requeue_exhausted");
+                            metrics::record_job_failed();
+                            warn!(
+                                target = "svc-llm-worker",
+                                normalized_key = %job.normalized_key,
+                                max_requeues = self.max_requeue_attempts,
+                                err = %err,
+                                "classification job terminalized after retry exhaustion"
+                            );
+                        }
+                    }
+                    if terminalized {
+                        return result;
+                    }
                     warn!(
                         target = "svc-llm-worker",
                         requires_content,
@@ -1336,18 +1369,32 @@ impl JobConsumer {
                         err = %err,
                         "classification job will be requeued"
                     );
-                    if let Err(requeue_err) = self.requeue(payload).await {
+                    if let Err(requeue_err) = self.requeue(payload, job_hint.as_ref()).await {
                         error!(
                             target = "svc-llm-worker",
                             %requeue_err,
                             "failed to requeue pending job"
                         );
+                        if let Some(job) = job_hint.as_ref() {
+                            let _ = self
+                                .mark_pending(
+                                    job,
+                                    "failed",
+                                    Some(&format!("requeue publish failed: {requeue_err}")),
+                                )
+                                .await;
+                            metrics::record_job_terminalized("requeue_publish_failed");
+                            metrics::record_job_failed();
+                        }
+                    } else {
+                        metrics::record_job_requeued();
                     }
                 } else {
                     if let Some(job) = job_hint.as_ref() {
                         let _ = self
                             .mark_pending(job, "failed", Some(&err.to_string()))
                             .await;
+                        metrics::record_job_terminalized("non_retryable_failure");
                     }
                     warn!(
                         target = "svc-llm-worker",
@@ -1365,29 +1412,40 @@ impl JobConsumer {
         result
     }
 
-    async fn requeue(&self, payload: &str) -> Result<(), redis::RedisError> {
+    async fn requeue(
+        &self,
+        payload: &str,
+        hint: Option<&ClassificationJobPayload>,
+    ) -> Result<(), redis::RedisError> {
         let client = redis::Client::open(self.redis_url.clone())?;
         let mut conn = client.get_async_connection().await?;
+        let outbound = if let Some(job) = hint {
+            let mut next_job = job.clone();
+            next_job.requeue_attempt = next_job.requeue_attempt.saturating_add(1);
+            serde_json::to_string(&next_job).unwrap_or_else(|_| payload.to_string())
+        } else {
+            payload.to_string()
+        };
         redis::cmd("XADD")
             .arg(&self.stream)
             .arg("*")
             .arg("payload")
-            .arg(payload)
+            .arg(&outbound)
             .query_async::<_, ()>(&mut conn)
             .await?;
 
-        if let Ok(job) = serde_json::from_str::<ClassificationJobPayload>(payload) {
+        if let Some(job) = hint {
             if job.requires_content {
                 let fetch_job = PageFetchJob {
-                    normalized_key: job.normalized_key,
-                    url: job.full_url,
-                    hostname: job.hostname,
+                    normalized_key: job.normalized_key.clone(),
+                    url: job.full_url.clone(),
+                    hostname: job.hostname.clone(),
                     candidate_urls: job
                         .base_url
                         .as_ref()
                         .map(|value| vec![value.clone()])
                         .unwrap_or_default(),
-                    trace_id: Some(job.trace_id),
+                    trace_id: Some(job.trace_id.clone()),
                     ttl_seconds: None,
                 };
                 if let Ok(fetch_payload) = serde_json::to_string(&fetch_job) {
@@ -1625,10 +1683,15 @@ impl JobConsumer {
         .bind(error)
         .execute(&self.pool)
         .await?;
+        metrics::record_pending_status(status);
         Ok(())
     }
 
     async fn clear_pending(&self, normalized_key: &str) -> Result<()> {
+        if let Some(seconds) = self.pending_age_seconds(normalized_key).await? {
+            metrics::observe_pending_age_seconds(seconds, "terminalized");
+            metrics::observe_terminalization_latency_seconds(seconds);
+        }
         sqlx::query("DELETE FROM classification_requests WHERE normalized_key = $1")
             .bind(normalized_key)
             .execute(&self.pool)
@@ -1708,10 +1771,30 @@ impl JobConsumer {
             return Ok(None);
         };
         let age_minutes: i64 = row.try_get("age_minutes")?;
+        metrics::observe_pending_age_seconds((age_minutes.max(0) as f64) * 60.0, "stale_check");
         if age_minutes < threshold_minutes as i64 {
             return Ok(None);
         }
         Ok(Some(age_minutes.max(0) as u64))
+    }
+
+    async fn pending_age_seconds(&self, normalized_key: &str) -> Result<Option<f64>> {
+        let row = sqlx::query(
+            r#"
+            SELECT EXTRACT(EPOCH FROM (NOW() - requested_at))::DOUBLE PRECISION AS age_seconds
+            FROM classification_requests
+            WHERE normalized_key = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(normalized_key)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let seconds: f64 = row.try_get("age_seconds")?;
+        Ok(Some(seconds.max(0.0)))
     }
 
     async fn provider_health_ok(&self, provider: &ResolvedProvider, ttl_secs: u64) -> bool {
@@ -2409,6 +2492,8 @@ struct ClassificationJobPayload {
     content_version: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     content_language: Option<String>,
+    #[serde(default)]
+    requeue_attempt: usize,
 }
 
 #[derive(Debug)]
@@ -2676,6 +2761,7 @@ async fn invoke_provider_healthcheck(provider: &ResolvedProvider) -> Result<()> 
         content_hash: None,
         content_version: None,
         content_language: None,
+        requeue_attempt: 0,
     };
 
     match provider.kind {
@@ -3251,6 +3337,7 @@ mod tests {
             content_hash: Some("abc123".into()),
             content_version: Some(2),
             content_language: Some("en".into()),
+            requeue_attempt: 0,
         };
         let prompt = build_prompt(&job, &taxonomy_prompt, None, PromptContextMode::WithExcerpt);
         assert!(prompt.contains("Allowed Taxonomy IDs"));
@@ -3277,6 +3364,7 @@ mod tests {
             content_hash: None,
             content_version: None,
             content_language: None,
+            requeue_attempt: 0,
         };
         let prompt = build_prompt(&job, &taxonomy_prompt, None, PromptContextMode::WithExcerpt);
         assert!(prompt.contains("Homepage Content Excerpt: unavailable"));
@@ -3362,6 +3450,7 @@ mod tests {
                 pending_reconcile_interval_secs: None,
                 pending_reconcile_stale_minutes: None,
                 pending_reconcile_batch: None,
+                requeue_max_attempts: None,
             },
             metrics_host: "127.0.0.1".into(),
             metrics_port: 0,
@@ -3523,6 +3612,7 @@ mod tests {
             content_hash: None,
             content_version: None,
             content_language: None,
+            requeue_attempt: 0,
         };
 
         sleep(Duration::from_millis(500)).await;
@@ -3619,6 +3709,7 @@ mod tests {
             content_hash: None,
             content_version: None,
             content_language: None,
+            requeue_attempt: 0,
         };
 
         sleep(Duration::from_millis(500)).await;
@@ -3710,6 +3801,7 @@ mod tests {
             content_hash: None,
             content_version: None,
             content_language: None,
+            requeue_attempt: 0,
         };
 
         tokio::time::sleep(Duration::from_millis(500)).await;

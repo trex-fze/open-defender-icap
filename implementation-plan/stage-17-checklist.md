@@ -10,9 +10,9 @@
 - [x] Evidence files are linked for each timeout run.
 
 ## Runtime Hardening
-- [ ] Add/verify bounded retry semantics for classifier paths.
-- [ ] Ensure terminal fallback outcomes are persisted when retries exhaust.
-- [ ] Add/verify pending-age metric and classification latency metric.
+- [x] Add/verify bounded retry semantics for classifier paths.
+- [x] Ensure terminal fallback outcomes are persisted when retries exhaust.
+- [x] Add/verify pending-age metric and classification latency metric.
 
 ## Smoke/CI Stability
 - [x] Make wait budgets configurable (`WAIT_PAGE_TRIES`, `WAIT_CLASSIFICATION_TRIES`).
@@ -20,10 +20,10 @@
 - [x] Add a multi-run helper script or documented command set for reliability sweeps.
 
 ## Documentation
-- [ ] Update operator runbook with delayed-terminalization triage steps.
+- [x] Update operator runbook with delayed-terminalization triage steps.
 - [x] Add Stage 17 verification log with reliability statistics.
 
 ## Completion Gate
 - [x] 10-run reliability baseline collected and reviewed.
 - [x] >= 90% pass rate achieved (or all failures root-caused with diagnostics).
-- [ ] Stage 17 marked complete in `implementation-plan/stage-plan.md`.
+- [x] Stage 17 marked complete in `implementation-plan/stage-plan.md`.

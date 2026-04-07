@@ -120,6 +120,7 @@ Store screenshots under `docs/evidence/stage10-web-admin/` using this naming con
 - **Recorded action differs from effective action in Classifications**: this is expected when overrides, policy updates, or taxonomy activation changed after persistence. Use `effective_action` and `effective_decision_source` as current enforcement truth.
 - **Unexpected block with `Review` action**: current runtime enforces `Review` as a blocked response with review-specific message text. Confirm policy intent in draft/version history before publish.
 - **Sites stay on holding page (`ContentPending`)**: verify `classification_requests` row exists for the canonical domain key, and confirm both `classification-jobs` and `page-fetch-jobs` streams receive entries.
+- **Delayed terminalization from `ContentPending`**: run `tests/content-pending-smoke.sh` and inspect generated diagnostics under `tests/artifacts/content-pending/diag-*`; validate `classification_requests.status` progression (`waiting_content` -> cleared/failed), confirm latest `page_contents.fetch_status` for the same normalized key, then check key-filtered worker logs (`diag-llm-worker-*-<host>.log`, `diag-page-fetcher-*-<host>.log`) for retry exhaustion or fetch failures before escalating.
 - **403 from mutations**: verify role claims include required permissions.
 - **No CLI logs shown**: ensure admin API has `audit` access and data exists.
 - **Ops provider list empty**: set `VITE_LLM_PROVIDERS_URL` to worker providers endpoint.

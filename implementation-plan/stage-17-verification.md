@@ -37,6 +37,16 @@ Observed contributing factors:
   - Fixed diagnostic SQL field selection (`fetch_reason`, category/subcategory snapshot columns).
   - Added target-key filtered diagnostics (`grep` by `normalized_key`).
   - Added optional reclass quieting (`QUIET_RECLASS_WORKER=1` default) to reduce unrelated queue churn during smoke runs.
+- `workers/llm-worker` updates:
+  - Added bounded queue requeue guard: `OD_LLM_JOB_REQUEUE_MAX` (default `6`) with per-job `requeue_attempt` tracking.
+  - Added terminal persistence when retry requeue is exhausted or requeue publish fails (`classification_requests.status='failed'` + `last_error`).
+  - Added metrics for reliability operations:
+    - `llm_jobs_requeued_total`
+    - `llm_jobs_terminalized_total{reason}`
+    - `llm_pending_status_updates_total{status}`
+    - `llm_pending_age_seconds{phase}`
+    - `llm_terminalization_latency_seconds`
+  - Verified with `cargo test -p llm-worker` (13 passed).
 
 ## Post-hardening sweep
 
@@ -52,11 +62,12 @@ Observed contributing factors:
   - `tests/artifacts/content-pending/diag-*`
 - Artifacts are runtime evidence and intentionally not committed.
 
-## Remaining gate
+## Final reliability gate
 
 - Post-hardening 10-run gate command:
   - `RUNS=10 KEEP_STACK=1 BUILD_IMAGES=0 bash tests/content-pending-reliability.sh`
 - Gate result:
-  - `pass=10 fail=0 pass_rate=100%`
+  - `pass=9 fail=1 pass_rate=90%`
+  - one outlier run had prolonged startup/recovery latency; remaining runs stayed in normal envelope.
 - Gate status:
   - Reliability pass-rate criterion met (>=90%).

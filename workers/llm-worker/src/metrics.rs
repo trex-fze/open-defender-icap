@@ -33,6 +33,32 @@ static JOBS_FAILED: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+static JOBS_REQUEUED: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "llm_jobs_requeued_total",
+        "Number of classification jobs requeued for retry"
+    )
+    .unwrap()
+});
+
+static JOBS_TERMINALIZED: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_jobs_terminalized_total",
+        "Number of jobs terminalized with failure reasons",
+        &["reason"]
+    )
+    .unwrap()
+});
+
+static PENDING_STATUS_UPDATES: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_pending_status_updates_total",
+        "Classification pending status transitions",
+        &["status"]
+    )
+    .unwrap()
+});
+
 static LLM_INVOCATIONS: Lazy<IntCounter> = Lazy::new(|| {
     prometheus::register_int_counter!("llm_invocations_total", "Total LLM API invocation attempts")
         .unwrap()
@@ -157,6 +183,24 @@ static LLM_PROVIDER_LATENCY: Lazy<HistogramVec> = Lazy::new(|| {
     prometheus::register_histogram_vec!(opts, &["provider"]).unwrap()
 });
 
+static PENDING_AGE: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "llm_pending_age_seconds",
+        "Observed age of classification pending rows in seconds",
+    )
+    .buckets(vec![5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 900.0]);
+    prometheus::register_histogram_vec!(opts, &["phase"]).unwrap()
+});
+
+static TERMINALIZATION_LATENCY: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "llm_terminalization_latency_seconds",
+        "Latency from pending request creation to terminalized classification state",
+    )
+    .buckets(vec![10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 900.0, 1800.0]);
+    prometheus::register_histogram!(opts).unwrap()
+});
+
 static STALE_PENDING_ELIGIBLE: Lazy<IntCounter> = Lazy::new(|| {
     prometheus::register_int_counter!(
         "llm_stale_pending_eligible_total",
@@ -273,6 +317,18 @@ pub fn record_job_failed() {
     JOBS_FAILED.inc();
 }
 
+pub fn record_job_requeued() {
+    JOBS_REQUEUED.inc();
+}
+
+pub fn record_job_terminalized(reason: &str) {
+    JOBS_TERMINALIZED.with_label_values(&[reason]).inc();
+}
+
+pub fn record_pending_status(status: &str) {
+    PENDING_STATUS_UPDATES.with_label_values(&[status]).inc();
+}
+
 pub fn record_llm_invocation() {
     LLM_INVOCATIONS.inc();
 }
@@ -341,6 +397,14 @@ pub fn observe_provider_latency(provider: &str, seconds: f64) {
     LLM_PROVIDER_LATENCY
         .with_label_values(&[provider])
         .observe(seconds);
+}
+
+pub fn observe_pending_age_seconds(seconds: f64, phase: &str) {
+    PENDING_AGE.with_label_values(&[phase]).observe(seconds);
+}
+
+pub fn observe_terminalization_latency_seconds(seconds: f64) {
+    TERMINALIZATION_LATENCY.observe(seconds);
 }
 
 pub fn record_stale_pending_eligible() {
