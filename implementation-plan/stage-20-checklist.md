@@ -12,8 +12,8 @@
 - [ ] Add escalation criteria with thresholds.
 
 ## Validation
-- [ ] Run collector on a known key and verify artifact completeness.
-- [ ] Record sample output in verification log.
+- [x] Run collector on a known key and verify artifact completeness.
+- [x] Record sample output in verification log.
 
 ## Completion
 - [ ] Mark Stage 20 complete in `implementation-plan/stage-plan.md`.
