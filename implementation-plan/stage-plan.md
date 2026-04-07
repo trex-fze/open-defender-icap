@@ -22,8 +22,8 @@ This roadmap mirrors the RFC tracker and captures actionable work items, owners,
 | 18. Facebook E2E Reliability Hardening (✅) | Multi-run reliability gate + deterministic failure diagnostics for facebook end-to-end smoke | SWG + Classification + SRE + QA | Stages 9, 17 | Stage 18 plan/checklist + `tests/security/facebook-e2e-reliability.sh` harness + verification log |
 | 19. Taxonomy Enforcement Parity (✅) | Cross-service canonicalization/activation/persistence parity matrix and tests | Classification + Policy + Backend + QA | Stages 12, 16, 17 | Stage 19 plan/checklist + `tests/taxonomy-parity.sh` matrix + verification log |
 | 20. Ops Diagnostics and Runbook Automation (✅) | One-command pending diagnostics collector + runbook triage automation | SRE + SWG + Docs | Stages 17, 18 | Stage 20 plan/checklist + `tests/ops/content-pending-diagnostics.sh` + verification log |
-| 21. Stream Consumer-Group Migration (Planned) | Restart-safe Redis stream processing (`XREADGROUP`, ACK/claim, poison handling) | Backend + Classification + SRE | Stages 4, 14, 17 | Stage 21 plan/checklist + verification log |
-| 22. Cursor Parity for Policy/Reporting APIs (Planned) | Convert remaining policy/reporting page-offset list APIs to cursor/keyset parity | Backend + Frontend + DevTools + QA | Stages 15, 16 | Stage 22 plan/checklist + verification log |
+| 21. Stream Consumer-Group Migration (In Progress) | Restart-safe Redis stream processing (`XREADGROUP`, ACK/claim, poison handling) | Backend + Classification + SRE | Stages 4, 14, 17 | Stage 21 plan/checklist + stream audit artifacts + verification log |
+| 22. Cursor Parity for Policy/Reporting APIs (In Progress) | Convert remaining policy/reporting page-offset list APIs to cursor/keyset parity | Backend + Frontend + DevTools + QA | Stages 15, 16 | Stage 22 plan/checklist + cursor audit artifacts + verification log |
 
 ## Current Focus
 

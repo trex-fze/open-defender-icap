@@ -1,8 +1,8 @@
 # Stage 22 Checklist - Cursor Parity for Policy and Reporting APIs
 
 ## Inventory
-- [ ] List all remaining page/offset policy/reporting endpoints.
-- [ ] Prioritize by data volume and UI/CLI usage.
+- [x] List all remaining page/offset policy/reporting endpoints.
+- [x] Prioritize by data volume and UI/CLI usage.
 
 ## Backend Migration
 - [ ] Convert selected endpoints to cursor contract.

@@ -1,8 +1,8 @@
 # Stage 21 Checklist - Stream Consumer-Group Migration
 
 ## Discovery
-- [ ] List all stream consumers and message schemas.
-- [ ] Define group naming and consumer identity strategy.
+- [x] List all stream consumers and message schemas.
+- [x] Define group naming and consumer identity strategy.
 
 ## Migration
 - [ ] Add idempotent group creation at startup.
