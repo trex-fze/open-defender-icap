@@ -21,6 +21,14 @@ const downloadCsv = (filename: string, rows: Array<Array<string | number>>) => {
   URL.revokeObjectURL(url);
 };
 
+const formatCompact = (input: number) => {
+  if (!Number.isFinite(input)) return '0';
+  return new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(input);
+};
+
 export const ReportsPage = () => {
   const [range, setRange] = useState('24h');
   const [topN, setTopN] = useState(10);
@@ -107,19 +115,19 @@ export const ReportsPage = () => {
           <div className="layout-grid">
             <div className="kpi-card">
               <p className="section-title">Total docs</p>
-              <h3 style={{ margin: 0 }}>{reportingStatus.data.total_docs.toLocaleString()}</h3>
+              <h3 style={{ margin: 0 }}>{formatCompact(reportingStatus.data.total_docs)}</h3>
             </div>
             <div className="kpi-card">
               <p className="section-title">Action coverage</p>
-              <h3 style={{ margin: 0 }}>{reportingStatus.data.action_docs.toLocaleString()}</h3>
+              <h3 style={{ margin: 0 }}>{formatCompact(reportingStatus.data.action_docs)}</h3>
             </div>
             <div className="kpi-card">
               <p className="section-title">Category coverage</p>
-              <h3 style={{ margin: 0 }}>{reportingStatus.data.category_docs.toLocaleString()}</h3>
+              <h3 style={{ margin: 0 }}>{formatCompact(reportingStatus.data.category_docs)}</h3>
             </div>
             <div className="kpi-card">
               <p className="section-title">Domain coverage</p>
-              <h3 style={{ margin: 0 }}>{reportingStatus.data.domain_docs.toLocaleString()}</h3>
+              <h3 style={{ margin: 0 }}>{formatCompact(reportingStatus.data.domain_docs)}</h3>
             </div>
           </div>
         </div>
@@ -153,7 +161,7 @@ export const ReportsPage = () => {
               {trendRows.map((row) => (
                 <div key={row.action} className="kpi-card">
                   <p className="section-title">{row.action}</p>
-                  <h3 style={{ margin: '0 0 0.35rem' }}>{row.total.toLocaleString()}</h3>
+                  <h3 style={{ margin: '0 0 0.35rem' }}>{formatCompact(row.total)}</h3>
                   <span className="chip chip--amber">{row.buckets} buckets</span>
                 </div>
               ))}
@@ -174,7 +182,7 @@ export const ReportsPage = () => {
                       {traffic.data.top_blocked_domains.map((row) => (
                         <tr key={row.key}>
                           <td>{row.key}</td>
-                          <td>{row.doc_count.toLocaleString()}</td>
+                          <td>{formatCompact(row.doc_count)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -195,7 +203,7 @@ export const ReportsPage = () => {
                       {traffic.data.top_categories.map((row) => (
                         <tr key={row.key}>
                           <td>{row.key}</td>
-                          <td>{row.doc_count.toLocaleString()}</td>
+                          <td>{formatCompact(row.doc_count)}</td>
                         </tr>
                       ))}
                     </tbody>

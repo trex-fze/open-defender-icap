@@ -29,6 +29,14 @@ const formatBytes = (input: number) => {
   return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[idx]}`;
 };
 
+const formatCompact = (input: number) => {
+  if (!Number.isFinite(input)) return '0';
+  return new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(input);
+};
+
 const pct = (num: number, den: number) => {
   if (!den) return '0.0%';
   return `${((num / den) * 100).toFixed(1)}%`;
@@ -112,7 +120,7 @@ export const DashboardPage = () => {
         <div className="kpi-card">
           <p className="section-title" style={{ color: 'rgba(255,255,255,0.7)' }}>Unique Clients</p>
           <h3 style={{ margin: '0 0 0.4rem', fontSize: '2rem' }}>
-            {overview ? overview.unique_clients.toLocaleString() : '—'}
+            {overview ? formatCompact(overview.unique_clients) : '—'}
           </h3>
           <span className="chip chip--green">by client.ip ({range})</span>
         </div>
@@ -126,16 +134,16 @@ export const DashboardPage = () => {
         <div className="kpi-card">
           <p className="section-title" style={{ color: 'rgba(255,255,255,0.7)' }}>Blocked Requests</p>
           <h3 style={{ margin: '0 0 0.4rem', fontSize: '2rem' }}>
-            {overview ? overview.blocked_requests.toLocaleString() : '—'}
+            {overview ? formatCompact(overview.blocked_requests) : '—'}
           </h3>
           <span className="chip chip--red">{overview ? pct(overview.blocked_requests, overview.total_requests) : '0.0%'}</span>
         </div>
         <div className="kpi-card">
           <p className="section-title" style={{ color: 'rgba(255,255,255,0.7)' }}>Total Requests</p>
           <h3 style={{ margin: '0 0 0.4rem', fontSize: '2rem' }}>
-            {overview ? overview.total_requests.toLocaleString() : '—'}
+            {overview ? formatCompact(overview.total_requests) : '—'}
           </h3>
-          <span className="chip chip--green">allow {overview ? overview.allow_requests.toLocaleString() : '0'}</span>
+          <span className="chip chip--green">allow {overview ? formatCompact(overview.allow_requests) : '0'}</span>
         </div>
       </div>
 
@@ -169,7 +177,7 @@ export const DashboardPage = () => {
           ) : (
             <>
               <p style={{ fontSize: '1.1rem', margin: '0 0 0.6rem' }}>
-                Pending classifications: {ops.pendingCount.toLocaleString()}
+                Pending classifications: {formatCompact(ops.pendingCount)}
               </p>
               <p style={{ margin: 0, color: 'var(--muted)' }}>
                 Providers: {ops.llmProviderNames.length > 0 ? ops.llmProviderNames.join(', ') : 'not available in this environment'}
@@ -209,7 +217,7 @@ export const DashboardPage = () => {
                 {(dashboard.data?.top_domains ?? []).map((row) => (
                   <tr key={row.key}>
                     <td>{row.key}</td>
-                    <td>{row.doc_count.toLocaleString()}</td>
+                    <td>{formatCompact(row.doc_count)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -242,7 +250,7 @@ export const DashboardPage = () => {
                 {(dashboard.data?.top_blocked_domains ?? []).map((row) => (
                   <tr key={row.key}>
                     <td>{row.key}</td>
-                    <td>{row.doc_count.toLocaleString()}</td>
+                    <td>{formatCompact(row.doc_count)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -266,7 +274,7 @@ export const DashboardPage = () => {
                 {(dashboard.data?.top_blocked_requesters ?? []).map((row) => (
                   <tr key={row.key}>
                     <td>{row.key}</td>
-                    <td>{row.doc_count.toLocaleString()}</td>
+                    <td>{formatCompact(row.doc_count)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -289,7 +297,7 @@ export const DashboardPage = () => {
                 {(dashboard.data?.top_clients_by_bandwidth ?? []).map((row) => (
                   <tr key={row.key}>
                     <td>{row.key}</td>
-                    <td>{row.doc_count.toLocaleString()}</td>
+                    <td>{formatCompact(row.doc_count)}</td>
                     <td>{formatBytes(row.bandwidth_bytes)}</td>
                   </tr>
                 ))}
@@ -306,7 +314,7 @@ export const DashboardPage = () => {
             <span className="chip chip--green">Client IP coverage: {pct(coverage.client_ip_docs, coverage.total_docs)}</span>
             <span className="chip chip--amber">Domain coverage: {pct(coverage.domain_docs, coverage.total_docs)}</span>
             <span className="chip chip--amber">Bandwidth coverage: {pct(coverage.network_bytes_docs, coverage.total_docs)}</span>
-            <span className="chip chip--amber">Total docs: {coverage.total_docs.toLocaleString()}</span>
+            <span className="chip chip--amber">Total docs: {formatCompact(coverage.total_docs)}</span>
           </div>
         ) : (
           <p style={{ margin: 0, color: 'var(--muted)' }}>
