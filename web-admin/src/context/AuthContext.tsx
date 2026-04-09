@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 export type Role =
   | 'policy-admin'
@@ -27,6 +27,7 @@ type AuthContextValue = {
   login: (profile?: Partial<UserProfile>, options?: { tokens?: AuthTokens }) => void;
   logout: () => void;
   clearAuthNotice: () => void;
+  expireSession: (notice?: string) => void;
   hasRole: (role: Role) => boolean;
   hasAnyRole: (roles?: Role[]) => boolean;
   setTokens: (tokens: AuthTokens | null) => void;
@@ -138,24 +139,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [tokens, setTokens] = useState<AuthTokens | null>(() => readStoredTokens());
   const [authNotice, setAuthNotice] = useState<string | undefined>();
 
+  const expireSession = useCallback((notice = 'Session expired. Please sign in again.') => {
+    setUser(null);
+    setTokens(null);
+    setAuthNotice(notice);
+  }, []);
+
   useEffect(() => {
     if (!tokens?.accessToken || !tokens.expiresAt) return;
     if (isExpired(tokens)) {
-      setUser(null);
-      setTokens(null);
-      setAuthNotice('Session expired. Please sign in again.');
+      expireSession();
       return;
     }
 
     const timeoutMs = tokens.expiresAt - Date.now();
     const timer = window.setTimeout(() => {
-      setUser(null);
-      setTokens(null);
-      setAuthNotice('Session expired. Please sign in again.');
+      expireSession();
     }, timeoutMs);
 
     return () => window.clearTimeout(timer);
-  }, [tokens]);
+  }, [expireSession, tokens]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -197,9 +200,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         if (!response.ok) {
           if (response.status === 401 || response.status === 403) {
-            setUser(null);
-            setTokens(null);
-            setAuthNotice('Session expired. Please sign in again.');
+            expireSession();
           }
           return;
         }
@@ -225,7 +226,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     refreshWhoAmI();
     return () => controller.abort();
-  }, [tokens?.accessToken]);
+  }, [expireSession, tokens?.accessToken]);
 
   const value = useMemo<AuthContextValue>(() => {
     const hasRole = (role: Role) => Boolean(user?.roles.includes(role));
@@ -261,9 +262,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setAuthNotice(undefined);
       },
       clearAuthNotice: () => setAuthNotice(undefined),
+      expireSession,
       setTokens,
     };
-  }, [tokens, user, authNotice]);
+  }, [tokens, user, authNotice, expireSession]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

@@ -88,4 +88,20 @@ describe('useDashboardReportData', () => {
     expect(result.current.isMock).toBe(true);
     expect(result.current.error).toMatch(/dashboard api down/i);
   });
+
+  it('maps 401 to session-expired message', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: async () => ({ message: 'unauthorized' }),
+      text: async () => JSON.stringify({ message: 'unauthorized' }),
+    });
+
+    const { result } = renderHook(() => useDashboardReportData('24h', 10), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.isMock).toBe(true);
+    expect(result.current.error).toBe('Session expired. Please sign in again.');
+  });
 });

@@ -28,7 +28,7 @@ const resolveBaseUrl = () => {
 };
 
 export const useAdminApi = () => {
-  const { tokens } = useAuth();
+  const { tokens, expireSession } = useAuth();
   const baseUrl = resolveBaseUrl();
   const accessToken = tokens?.accessToken?.trim();
   const canCallApi = Boolean(baseUrl && accessToken);
@@ -55,7 +55,8 @@ export const useAdminApi = () => {
       accessToken,
       canCallApi,
       headers,
+      onUnauthorized: () => expireSession('Session expired. Please sign in again.'),
     }),
-    [baseUrl, accessToken, canCallApi, headers],
+    [baseUrl, accessToken, canCallApi, headers, expireSession],
   );
 };

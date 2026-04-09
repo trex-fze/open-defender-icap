@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { adminGetJson, type AdminApiContext } from '../api/adminClient';
+import { AdminApiError, adminGetJson, type AdminApiContext } from '../api/adminClient';
 import { queryKeys } from './queryKeys';
 import { useAdminApi } from './useAdminApi';
 
@@ -84,10 +84,16 @@ export const useDashboardReportData = (
     return { data: undefined, loading: false, isMock: true, refresh: query.refetch };
   }
   if (query.isError) {
+    const message =
+      query.error instanceof AdminApiError && (query.error.status === 401 || query.error.status === 403)
+        ? 'Session expired. Please sign in again.'
+        : query.error instanceof Error
+          ? query.error.message
+          : 'Failed to fetch dashboard report';
     return {
       data: undefined,
       loading: false,
-      error: query.error instanceof Error ? query.error.message : 'Failed to fetch dashboard report',
+      error: message,
       isMock: true,
       refresh: query.refetch,
     };

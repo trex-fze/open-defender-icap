@@ -2,6 +2,7 @@ export type AdminApiContext = {
   baseUrl: string;
   canCallApi: boolean;
   headers: HeadersInit;
+  onUnauthorized?: (status: number) => void;
 };
 
 type QueryParams = Record<string, string | number | boolean | undefined | null>;
@@ -68,6 +69,16 @@ const mapNetworkError = (err: unknown): AdminApiError => {
   return new AdminApiError(0, 'Network error: unable to reach Admin API (check URL/CORS/service health)');
 };
 
+const notifyUnauthorized = (ctx: AdminApiContext, status: number) => {
+  if (status === 401 || status === 403) {
+    try {
+      ctx.onUnauthorized?.(status);
+    } catch {
+      // avoid masking original API failure path
+    }
+  }
+};
+
 export const adminGetJson = async <T>(
   ctx: AdminApiContext,
   path: string,
@@ -86,6 +97,7 @@ export const adminGetJson = async <T>(
     throw mapNetworkError(err);
   }
   if (!resp.ok) {
+    notifyUnauthorized(ctx, resp.status);
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
   return (await resp.json()) as T;
@@ -114,6 +126,7 @@ export const adminPostJson = async <TResponse, TBody = unknown>(
     throw mapNetworkError(err);
   }
   if (!resp.ok) {
+    notifyUnauthorized(ctx, resp.status);
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
   if (resp.status === 204 || resp.status === 205) {
@@ -153,6 +166,7 @@ export const adminPutJson = async <TResponse, TBody = unknown>(
     throw mapNetworkError(err);
   }
   if (!resp.ok) {
+    notifyUnauthorized(ctx, resp.status);
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
   return (await resp.json()) as TResponse;
@@ -175,6 +189,7 @@ export const adminDelete = async (
     throw mapNetworkError(err);
   }
   if (!resp.ok) {
+    notifyUnauthorized(ctx, resp.status);
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
 };
@@ -196,6 +211,7 @@ export const adminDeleteJson = async <TResponse>(
     throw mapNetworkError(err);
   }
   if (!resp.ok) {
+    notifyUnauthorized(ctx, resp.status);
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
   if (resp.status === 204 || resp.status === 205) {
@@ -235,6 +251,7 @@ export const adminPatchJson = async <TResponse, TBody = unknown>(
     throw mapNetworkError(err);
   }
   if (!resp.ok) {
+    notifyUnauthorized(ctx, resp.status);
     throw new AdminApiError(resp.status, await parseErrorBody(resp));
   }
   return (await resp.json()) as TResponse;

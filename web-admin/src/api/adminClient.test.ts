@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { adminPostJson, adminPutJson, type AdminApiContext } from './adminClient';
+import { adminGetJson, adminPostJson, adminPutJson, type AdminApiContext } from './adminClient';
 
 const baseCtx: AdminApiContext = {
   baseUrl: 'http://admin-api.local',
@@ -76,5 +76,23 @@ describe('adminClient JSON helpers', () => {
     const headers = new Headers(init?.headers);
     expect(headers.get('Content-Type')).toBe('application/json');
     expect(init?.body).toBe(JSON.stringify({ foo: 'bar' }));
+  });
+
+  it('calls onUnauthorized callback for 401 responses', async () => {
+    const onUnauthorized = vi.fn();
+    const ctx: AdminApiContext = {
+      ...baseCtx,
+      onUnauthorized,
+    };
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: async () => ({ message: 'unauthorized' }),
+    } as Response);
+
+    await expect(adminGetJson(ctx, '/api/test')).rejects.toThrow(/unauthorized/i);
+    expect(onUnauthorized).toHaveBeenCalledWith(401);
   });
 });
