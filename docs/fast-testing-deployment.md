@@ -126,6 +126,7 @@ Core variables used most often:
 - `OD_CACHE_CHANNEL`: Redis invalidation channel (default `od:cache:invalidate`)
 - `OPENAI_API_KEY`: credential used by `openai` fallback provider
 - `OD_LOG_DIR`: local worker log root (default compose value `/app/logs`, mounted from host `logs/`)
+- `OD_POLICY_ENGINE_URL`: Admin API target for policy runtime sync/reload calls
 - `OD_HAPROXY_BIND_HOST` / `OD_HAPROXY_BIND_PORT`: public proxy endpoint exposed by HAProxy (default `0.0.0.0:3128`)
 - `OD_SQUID_ALLOWED_CLIENT_CIDRS`: source CIDRs HAProxy will allow to use the forward proxy
 - `OD_TRUST_PROXY_HEADERS`: enable/disable forwarded header trust in event-ingester (default `false`)
@@ -156,17 +157,23 @@ LLM failover safety controls (env overrides for `config/llm-worker.json` routing
 - `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES`: terminal fetch statuses treated as no-content targets (default `failed,unsupported,blocked`)
 - `OD_LLM_METADATA_ONLY_FORCE_ACTION`: force action when online call runs metadata-only (default `Monitor`)
 - `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`: cap confidence for metadata-only outputs (default `0.4`)
-- `OD_LLM_METADATA_ONLY_REQUEUE_FOR_CONTENT`: keep pending row and wait for excerpt after metadata-only persistence (default `true`)
+- `OD_LLM_METADATA_ONLY_REQUEUE_FOR_CONTENT`: keep pending row and wait for excerpt after metadata-only persistence (compose profile default `false`)
 - `OD_PENDING_RECONCILE_ENABLED`: enable background stale pending reconciliation (default `true`)
 - `OD_PENDING_RECONCILE_INTERVAL_SECS`: reconcile loop interval in seconds (default `60`)
 - `OD_PENDING_RECONCILE_STALE_MINUTES`: age threshold for reconciling stale pending rows (default `10`)
 - `OD_PENDING_RECONCILE_BATCH`: max pending rows reconciled per cycle (default `100`)
+- `OD_LLM_STREAM_GROUP`, `OD_LLM_STREAM_CONSUMER`, `OD_LLM_STREAM_DEAD_LETTER`: LLM worker stream-group names and DLQ stream
+- `OD_LLM_STREAM_CLAIM_IDLE_MS`, `OD_LLM_STREAM_CLAIM_BATCH`, `OD_LLM_JOB_REQUEUE_MAX`: LLM pending-claim and requeue tuning
+- `OD_PAGE_FETCH_STREAM_GROUP`, `OD_PAGE_FETCH_STREAM_CONSUMER`, `OD_PAGE_FETCH_STREAM_DEAD_LETTER`: page-fetcher stream-group names and DLQ stream
+- `OD_PAGE_FETCH_STREAM_CLAIM_IDLE_MS`, `OD_PAGE_FETCH_STREAM_CLAIM_BATCH`: page-fetch pending-claim tuning
 - `config/page-fetcher.json.terminal_retry_cooldown_seconds`: cooldown for retrying recently failed keys (default `1200`)
 - `config/page-fetcher.json.blocked_retry_cooldown_seconds`: cooldown for retrying recently blocked keys (default `14400`)
 - `config/page-fetcher.json.unsupported_retry_cooldown_seconds`: cooldown for retrying `unsupported` keys such as asset endpoints (default `21600`)
 - `config/page-fetcher.json.unsupported_host_allowlist`: host/domain allowlist to bypass asset-host prefilter
 - `CRAWL4AI_WAIT_UNTIL`: Playwright wait mode used by crawl4ai (`load` recommended for anti-bot challenge pages)
 - `CRAWL4AI_DELAY_BEFORE_RETURN_HTML`: post-load delay seconds before HTML extraction (default `0.2`)
+
+For the full variable list (including advanced ingest/template and test-only controls), see `docs/env-vars-reference.md`.
 
 Recommended local-first profile (current compose defaults):
 
@@ -209,7 +216,7 @@ make compose-up
 Equivalent direct compose command:
 
 ```bash
-docker compose -f deploy/docker/docker-compose.yml up --build -d
+docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build -d
 ```
 
 Readiness checks:
@@ -246,13 +253,13 @@ make compose-down
 Equivalent:
 
 ```bash
-docker compose -f deploy/docker/docker-compose.yml down
+docker compose --env-file .env -f deploy/docker/docker-compose.yml down
 ```
 
 Full reset (destructive; wipes local Postgres/Redis/Elasticsearch data):
 
 ```bash
-docker compose -f deploy/docker/docker-compose.yml down -v
+docker compose --env-file .env -f deploy/docker/docker-compose.yml down -v
 ```
 
 Use `down -v` only when you explicitly need a clean local data state.

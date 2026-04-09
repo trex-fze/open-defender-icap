@@ -5,6 +5,7 @@ This directory contains the compose stacks used for local development, CI-style 
 Canonical env policy:
 - Use only `/.env` (repo root) for compose/service runtime values.
 - Do not rely on `deploy/docker/.env`; compose commands should pass `--env-file ../../.env` explicitly.
+- For the complete variable catalog (runtime + frontend + test controls), see `docs/env-vars-reference.md`.
 
 ## Compose files
 - `docker-compose.yml`: full developer stack (Redis, Postgres, ICAP adaptor, Policy Engine, Admin API, Squid, Kibana, Elasticsearch, Prometheus, workers, web-admin, odctl runner, **Filebeat + event-ingester** for Stage 6 telemetry). Prometheus loads custom Stage 6 alert rules from `prometheus-rules.yml` (cache hit ratio, ICAP latency, ingestion failures, review SLA breaches).

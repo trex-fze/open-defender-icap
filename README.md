@@ -143,47 +143,46 @@ flowchart LR
 | Variable | Description |
 | --- | --- |
 | `OD_ADMIN_TOKEN` | Shared secret for Admin API/CLI auth (used by `odctl` and tests). Required for AI-assisted dashboards/CLI. |
-| `OD_ADMIN_DATABASE_URL` / `DATABASE_URL` | Postgres connection string for Admin API. |
+| `OD_ADMIN_DATABASE_URL` / `DATABASE_URL` | Postgres connection string for Admin API (`OD_ADMIN_DATABASE_URL` preferred for compose stacks). |
 | `OD_POLICY_DATABASE_URL` | Postgres URL for Policy Engine (compose defaults this to the shared `defender_admin` DB; override only when intentionally separating runtime storage). |
 | `OD_ADMIN_CORS_ALLOW_ORIGIN` | Allowed browser origin for Admin API CORS responses (default `http://localhost:19001` for local web-admin). |
 | `OD_CACHE_REDIS_URL` | Redis address for cache invalidation. |
 | `OD_CACHE_CHANNEL` | Redis pub/sub channel for cache busting. |
 | `OD_OIDC_ISSUER` / `OD_OIDC_AUDIENCE` / `OD_OIDC_HS256_SECRET` | Enables HS256 or OIDC device flow auth so AI tooling honors RBAC. |
 | `OD_REVIEW_SLA_SECONDS` | SLA threshold for review metrics (default 14,400s). |
-| `OD_ELASTIC_URL` | Elasticsearch base URL for audit export & reporting. |
-| `OD_ELASTIC_INDEX_PREFIX` | Prefix for ingested indices (`traffic-events`). |
+| `OD_ELASTIC_URL` / `OD_ELASTIC_INDEX_PREFIX` | Event-ingester destination and index prefix (default prefix `traffic-events`). |
+| `OD_ELASTIC_USERNAME` / `OD_ELASTIC_PASSWORD` / `OD_ELASTIC_API_KEY` | Event-ingester auth to Elasticsearch. |
 | `OD_FILEBEAT_SECRET` | Shared secret between Filebeat and event-ingester. |
+| `OD_REPORTING_ELASTIC_URL` / `OD_REPORTING_INDEX_PATTERN` | Reporting backend used by `/api/v1/reporting/*`. |
+| `OD_REPORTING_ELASTIC_USERNAME` / `OD_REPORTING_ELASTIC_PASSWORD` / `OD_REPORTING_ELASTIC_API_KEY` | Reporting query auth (password defaults to `ELASTIC_PASSWORD` in compose). |
+| `OD_POLICY_ENGINE_URL` | Admin API -> Policy Engine URL override (default `http://policy-engine:19010`). |
 | `OD_HAPROXY_BIND_HOST` / `OD_HAPROXY_BIND_PORT` | External proxy listener published by HAProxy (default `0.0.0.0:3128`); clients connect to this endpoint. |
 | `OD_SQUID_ALLOWED_CLIENT_CIDRS` | Comma-separated client CIDRs allowed at the HAProxy edge before forwarding to Squid. On Docker Desktop/macOS, container-visible peer IP can be rewritten; in that dev profile use `0.0.0.0/0` with LAN firewall restrictions on port `3128`. |
 | `OD_TRUST_PROXY_HEADERS` | Enables forwarded header trust in event-ingester (`true`/`false`, default `false`). Keep `false` unless ingress headers are overwritten and trusted by CIDR. |
 | `OD_TRUSTED_PROXY_CIDRS` | Comma-separated trusted ingress CIDRs used by Squid `follow_x_forwarded_for` and event-ingester header trust gating. |
+| `OD_LOG_DIR` | Local directory for worker JSON logs (default `logs`; llm-worker writes `logs/llm-worker/llm-worker.log`). |
+| `OD_LLM_FAILOVER_POLICY` | Provider failover policy override: `safe`, `aggressive`, or `disabled` (default runtime fallback is `aggressive`; config can set `safe`). |
+| `OD_LLM_PRIMARY_RETRY_MAX` / `OD_LLM_PRIMARY_RETRY_BACKOFF_MS` / `OD_LLM_PRIMARY_RETRY_MAX_BACKOFF_MS` | Primary-provider retry budget and backoff controls. |
+| `OD_LLM_RETRYABLE_STATUS_CODES` / `OD_LLM_FALLBACK_COOLDOWN_SECS` / `OD_LLM_FALLBACK_MAX_PER_MIN` | Retry classification + fallback cooldown/rate limiting. |
+| `OPENAI_API_KEY` | API key for OpenAI-compatible providers (used when `type=openai/openai_compatible`). |
+| `LLM_API_KEY` | Legacy fallback for single-endpoint deployments. |
+| `VITE_ADMIN_API_URL` / `VITE_ADMIN_API_FALLBACK` / `VITE_ADMIN_TOKEN_MODE` | Standalone frontend API target + auth header mode from `web-admin/.env`. |
+| `VITE_LLM_PROVIDERS_URL` | Optional explicit dashboard provider-status endpoint. |
+| `INGEST_URL`, `ELASTIC_URL`, `ADMIN_URL` | Overrides used by Stage 6/7 smoke scripts. |
 
 ### Proxy ACL deployment profiles
 
 - **Docker Desktop/macOS (development)**: source IP can be NAT-rewritten before HAProxy/Squid ACL evaluation; use `OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0` and restrict `3128` to LAN via host/router firewall.
 - **Linux-hosted proxy (production-like)**: preserve strict source ACLs such as `OD_SQUID_ALLOWED_CLIENT_CIDRS=192.168.1.0/24` (or tighter `/32`) and validate with `tests/proxy-production-linux-e2e.sh`.
-| `OD_REPORTING_ELASTIC_URL` | Reporting endpoint used by `/api/v1/reporting/traffic` (feeds AI-driven analytics). |
-| `OPENAI_API_KEY` | API key for OpenAI-compatible providers (used when `type=openai/openai_compatible`). |
-| `OD_LOG_DIR` | Local directory for worker JSON logs (default `logs`; llm-worker writes `logs/llm-worker/llm-worker.log`). |
-| `OD_LLM_FAILOVER_POLICY` | Provider failover policy override: `safe`, `aggressive`, or `disabled` (default runtime fallback is `aggressive`; config can set `safe`). |
-| `OD_LLM_PRIMARY_RETRY_MAX` | Number of primary-provider retries before considering fallback in `safe` mode (default `3`). |
-| `OD_LLM_PRIMARY_RETRY_BACKOFF_MS` | Base backoff for primary retries in milliseconds (default `500`). |
-| `OD_LLM_PRIMARY_RETRY_MAX_BACKOFF_MS` | Maximum retry backoff in milliseconds (default `5000`). |
-| `OD_LLM_RETRYABLE_STATUS_CODES` | Comma-separated HTTP statuses treated as retryable (default `408,429,500,502,503,504`). |
-| `OD_LLM_FALLBACK_COOLDOWN_SECS` | Cooldown window after fallback failure before new fallback attempts are allowed (default `30`). |
-| `OD_LLM_FALLBACK_MAX_PER_MIN` | Max fallback attempts per minute before fallback is temporarily blocked (default `30`). |
-| `ANTHROPIC_API_KEY` | API key for Anthropic Claude providers. |
-| `LLM_API_KEY` | Legacy fallback for single-endpoint deployments. |
-| `VITE_ADMIN_API_URL` | UI base URL for API calls (set in `web-admin/.env`, copy from `web-admin/.env.example` when running standalone Vite dev). |
-| `INGEST_URL`, `ELASTIC_URL`, `ADMIN_URL` | Overrides for Stage 6/7 smoke scripts. |
 
-> See `config/admin-api.json`, `services/event-ingester/src/config.rs`, and `.env.example` for the full stack variable list. Use `web-admin/.env.example` for standalone frontend-only variables.
+> See `docs/env-vars-reference.md` for the complete runtime/frontend/test variable catalog and `web-admin/.env.example` for standalone frontend defaults.
 
 ## Reference Docs
 
 - [API Catalog](docs/api-catalog.md) – complete list of REST endpoints, auth requirements, and payload formats for every service.
 - [Fast Testing Deployment Guide](docs/fast-testing-deployment.md) - quick setup for end-to-end local testing, including client proxy config, env vars, startup/shutdown, and FAQ.
 - [Environment File Organization Plan](docs/env-file-organization-plan.md) - canonical `.env` strategy and migration checklist to avoid compose precedence drift.
+- [Environment Variables Reference](docs/env-vars-reference.md) - complete runtime/frontend/test variable map with grouping and intent.
 - [Proxy 403 RCA (Docker Desktop)](docs/evidence/proxy-403-docker-desktop-rca-2026-04-09.md) - root cause analysis, remediation, and validation evidence for LAN client `403` on macOS Docker Desktop.
 - [Frontend Management Parity RFC](rfc/stage-10-frontend-management-parity.md) - proposed UI scope to cover all current management features exposed by Admin API/CLI.
 - [Frontend Management Parity Plan](implementation-plan/stage-10-frontend-management-parity.md) - phased implementation plan with task breakdown, quality gates, and rollout steps.
@@ -288,7 +287,7 @@ INTEGRATION_BUILD=1 INTEGRATION_BUILD_RETRIES=3 tests/integration.sh
 ## FAQ
 
 **Q: How do I log in to the Admin UI?**  
-Set `VITE_ADMIN_TOKEN` (for mock mode) or configure OIDC. When not provided, the UI now falls back to `VITE_DEFAULT_ADMIN_TOKEN` (defaults to `changeme-admin`) and targets `VITE_ADMIN_API_URL` or `http://localhost:19000`. Enter any email on `/login`; it seeds `localStorage` with the bootstrap token so you can explore AI insights immediately. Override or clear the fallback by setting `VITE_DEFAULT_ADMIN_TOKEN=""`.
+Run the stack and sign in on `/login` with local credentials (default username `admin`, password from `OD_DEFAULT_ADMIN_PASSWORD` in `/.env`). For standalone frontend dev, point `VITE_ADMIN_API_URL` to Admin API and keep `VITE_ADMIN_TOKEN_MODE=auto` unless you need explicit bearer/header behavior.
 
 **Q: Why does `odctl` say "No stored session"?**  
 Run `odctl auth login --client-id ...` to trigger the device code flow, or pass `--token $OD_ADMIN_TOKEN` explicitly.
