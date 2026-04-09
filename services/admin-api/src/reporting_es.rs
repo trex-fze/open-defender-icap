@@ -63,6 +63,8 @@ fn default_range() -> String {
     "24h".into()
 }
 
+const EFFECTIVE_DOMAIN_SCRIPT: &str = "String host = null; if (doc.containsKey('destination.domain.keyword') && !doc['destination.domain.keyword'].empty) { host = doc['destination.domain.keyword'].value; } else if (doc.containsKey('destination.domain') && !doc['destination.domain'].empty) { host = doc['destination.domain'].value; } if (host == null || host.length() == 0) { String u = null; if (doc.containsKey('url.full.keyword') && !doc['url.full.keyword'].empty) { u = doc['url.full.keyword'].value; } else if (doc.containsKey('url.full') && !doc['url.full'].empty) { u = doc['url.full'].value; } if (u != null && u.length() > 0) { int start = u.indexOf('://'); int from = start >= 0 ? start + 3 : 0; int end = u.indexOf('/', from); host = end > from ? u.substring(from, end) : u.substring(from); int colon = host.indexOf(':'); if (colon > 0) { host = host.substring(0, colon); } } } if (host != null && host.length() > 0) { emit(host); }";
+
 #[derive(Clone)]
 pub struct ElasticReportingClient {
     client: Client,
@@ -132,7 +134,7 @@ impl ElasticReportingClient {
                 "effective_domain": {
                     "type": "keyword",
                     "script": {
-                        "source": "if (doc.containsKey('destination.domain.keyword') && !doc['destination.domain.keyword'].empty) { emit(doc['destination.domain.keyword'].value); } else if (doc.containsKey('url.full.keyword') && !doc['url.full.keyword'].empty) { String u = doc['url.full.keyword'].value; int start = u.indexOf('://'); int from = start >= 0 ? start + 3 : 0; int end = u.indexOf('/', from); String host = end > from ? u.substring(from, end) : u.substring(from); int colon = host.indexOf(':'); if (colon > 0) { host = host.substring(0, colon); } if (host.length() > 0) emit(host); }"
+                        "source": EFFECTIVE_DOMAIN_SCRIPT
                     }
                 },
                 "effective_category": {
@@ -224,7 +226,7 @@ impl ElasticReportingClient {
                 "effective_domain": {
                     "type": "keyword",
                     "script": {
-                        "source": "if (doc.containsKey('destination.domain.keyword') && !doc['destination.domain.keyword'].empty) { emit(doc['destination.domain.keyword'].value); } else if (doc.containsKey('url.full.keyword') && !doc['url.full.keyword'].empty) { String u = doc['url.full.keyword'].value; int start = u.indexOf('://'); int from = start >= 0 ? start + 3 : 0; int end = u.indexOf('/', from); String host = end > from ? u.substring(from, end) : u.substring(from); int colon = host.indexOf(':'); if (colon > 0) { host = host.substring(0, colon); } if (host.length() > 0) emit(host); }"
+                        "source": EFFECTIVE_DOMAIN_SCRIPT
                     }
                 }
             },
@@ -761,5 +763,34 @@ mod tests {
         assert_eq!(top[0].key, "192.168.1.253");
         assert_eq!(top[0].doc_count, 8);
         assert_eq!(top[0].bandwidth_bytes, 4096);
+    }
+
+    #[test]
+    fn parses_top_domain_entries() {
+        let aggs = json!({
+            "top_domains": {
+                "buckets": [
+                    { "key": "example.com", "doc_count": 42 },
+                    { "key": "cdn.example.com", "doc_count": 21 }
+                ]
+            },
+            "top_blocked": {
+                "domains": {
+                    "buckets": [
+                        { "key": "malware.test", "doc_count": 8 }
+                    ]
+                }
+            }
+        });
+
+        let top_domains = parse_top_entries(&aggs, &["top_domains"]);
+        assert_eq!(top_domains.len(), 2);
+        assert_eq!(top_domains[0].key, "example.com");
+        assert_eq!(top_domains[0].doc_count, 42);
+
+        let top_blocked = parse_top_entries(&aggs, &["top_blocked", "domains"]);
+        assert_eq!(top_blocked.len(), 1);
+        assert_eq!(top_blocked[0].key, "malware.test");
+        assert_eq!(top_blocked[0].doc_count, 8);
     }
 }
