@@ -37,8 +37,10 @@ npx start-server-and-test "npm run dev" http://127.0.0.1:19001 "npx cypress run 
 2. **Pending classifications**
    - Go to `/classifications/pending`
    - Open manual decision panel
-   - Apply decision with action/risk/reason
+   - Apply manual classification with category/subcategory/reason
    - Confirm update message and queue refresh
+   - Test row-level **Delete** for one pending record
+   - Test guarded **Delete All Pending** by typing exact phrase `DELETE ALL`
 3. **Allow / Deny list CRUD**
    - Go to `/overrides`
    - Create domain allow/block entry, edit it, then delete it

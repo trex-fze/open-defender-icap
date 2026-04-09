@@ -582,7 +582,8 @@ async fn main() -> Result<()> {
         .route("/api/v1/cli-logs", get(cli_logs::list_cli_logs))
         .route(
             "/api/v1/classifications/pending",
-            get(classification_requests::list_pending),
+            get(classification_requests::list_pending)
+                .delete(classification_requests::clear_all_pending),
         )
         .route("/api/v1/classifications", get(classifications::list))
         .route(

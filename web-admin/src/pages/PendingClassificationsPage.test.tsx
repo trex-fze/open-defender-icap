@@ -40,6 +40,8 @@ const taxonomyState: TaxonomyActivationState = {
 describe('PendingClassificationsPage', () => {
   const refresh = vi.fn().mockResolvedValue(undefined);
   const manualClassify = vi.fn().mockResolvedValue(undefined);
+  const clearPending = vi.fn().mockResolvedValue(undefined);
+  const clearAllPending = vi.fn().mockResolvedValue(1);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -63,7 +65,10 @@ describe('PendingClassificationsPage', () => {
     });
     mockedUsePendingActions.mockReturnValue({
       manualClassify,
+      clearPending,
+      clearAllPending,
       busyKey: undefined,
+      busyAll: false,
       error: undefined,
       canCallApi: true,
     });
@@ -141,5 +146,50 @@ describe('PendingClassificationsPage', () => {
 
     expect(screen.getByRole('button', { name: 'Save Classification' })).toBeDisabled();
     expect(screen.getByText(/Taxonomy is unavailable for manual classification/i)).toBeInTheDocument();
+  });
+
+  it('deletes a single pending site record', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<PendingClassificationsPage />);
+
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+    });
+
+    expect(clearPending).toHaveBeenCalledWith('domain:test.example');
+    expect(refresh).toHaveBeenCalled();
+    expect(screen.getByText(/Deleted pending site domain:test.example/i)).toBeInTheDocument();
+  });
+
+  it('requires exact guard phrase for delete all', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'prompt').mockReturnValue('delete all');
+
+    render(<PendingClassificationsPage />);
+
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: 'Delete All Pending' }));
+    });
+
+    expect(clearAllPending).not.toHaveBeenCalled();
+    expect(screen.getByText(/confirmation phrase mismatch/i)).toBeInTheDocument();
+  });
+
+  it('deletes all pending records when guard phrase matches', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'prompt').mockReturnValue('DELETE ALL');
+    clearAllPending.mockResolvedValueOnce(7);
+
+    render(<PendingClassificationsPage />);
+
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: 'Delete All Pending' }));
+    });
+
+    expect(clearAllPending).toHaveBeenCalled();
+    expect(refresh).toHaveBeenCalled();
+    expect(screen.getByText(/Deleted 7 pending sites/i)).toBeInTheDocument();
   });
 });

@@ -258,6 +258,14 @@ a {
   margin-bottom: 1.5rem;
 }
 
+.page-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -368,6 +376,17 @@ a {
 }
 
 @media (max-width: 640px) {
+  .page-header {
+    align-items: flex-start;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .page-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .exchange-action-button {
     width: 100%;
     min-width: 0;

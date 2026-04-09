@@ -75,6 +75,11 @@ pub struct UpsertPendingRequest {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ClearAllPendingResponse {
+    pub deleted: usize,
+}
+
+#[derive(Debug, Serialize)]
 struct PolicyDecisionRequestPayload {
     normalized_key: String,
     entity_level: String,
@@ -449,6 +454,33 @@ pub async fn clear_pending(
         .map_err(db_error)?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn clear_all_pending(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+) -> Result<Json<ClearAllPendingResponse>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_POLICY_EDIT)
+        .map_err(|status| (status, Json(ApiError::forbidden())))?;
+
+    let deleted = sqlx::query("DELETE FROM classification_requests")
+        .execute(state.pool())
+        .await
+        .map_err(db_error)?
+        .rows_affected() as usize;
+
+    state
+        .log_policy_event(
+            "pending.clear_all",
+            Some(user.actor),
+            None,
+            json!({
+                "deleted": deleted,
+            }),
+        )
+        .await;
+
+    Ok(Json(ClearAllPendingResponse { deleted }))
 }
 
 async fn persist_manual_classification(

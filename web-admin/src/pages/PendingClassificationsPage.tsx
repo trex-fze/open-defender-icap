@@ -17,7 +17,7 @@ export const PendingClassificationsPage = () => {
     isMock: isTaxonomyMock,
     canCallApi: canCallTaxonomyApi,
   } = useTaxonomyData();
-  const { manualClassify, busyKey, error: actionError } = usePendingActions();
+  const { manualClassify, clearPending, clearAllPending, busyKey, busyAll, error: actionError } = usePendingActions();
   const [selectedKey, setSelectedKey] = useState<string | undefined>();
   const [reason, setReason] = useState('Manual analyst classification');
   const [categoryId, setCategoryId] = useState('');
@@ -96,6 +96,38 @@ export const PendingClassificationsPage = () => {
     }
   };
 
+  const deletePendingRow = async (row: PendingClassification) => {
+    if (!window.confirm(`Delete pending site ${row.normalizedKey}?`)) return;
+    setMessage(undefined);
+    try {
+      await clearPending(row.normalizedKey);
+      if (selectedKey === row.normalizedKey) {
+        setSelectedKey(undefined);
+      }
+      setMessage(`Deleted pending site ${row.normalizedKey}`);
+      await refresh();
+    } catch {
+      setMessage(undefined);
+    }
+  };
+
+  const deleteAllPending = async () => {
+    const phrase = window.prompt('Type DELETE ALL to remove every pending site record.');
+    if (phrase !== 'DELETE ALL') {
+      setMessage('Delete all canceled: confirmation phrase mismatch.');
+      return;
+    }
+    setMessage(undefined);
+    try {
+      const deleted = await clearAllPending();
+      setSelectedKey(undefined);
+      setMessage(`Deleted ${deleted} pending sites.`);
+      await refresh();
+    } catch {
+      setMessage(undefined);
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -103,9 +135,19 @@ export const PendingClassificationsPage = () => {
           <p className="section-title">Pending Sites</p>
           <h2 style={{ margin: 0 }}>Content-first classification queue</h2>
         </div>
-        <button className="cta-button" onClick={refresh} disabled={loading}>
-          Refresh
-        </button>
+        <div className="page-header-actions">
+          <button className="cta-button" onClick={refresh} disabled={loading}>
+            Refresh
+          </button>
+          <button
+            className="cta-button"
+            style={{ background: 'linear-gradient(120deg,#f89b9b,#f26969)', color: '#060b17' }}
+            onClick={deleteAllPending}
+            disabled={loading || busyAll || isMock || !canCallApi || data.length === 0}
+          >
+            {busyAll ? 'Deleting...' : 'Delete All Pending'}
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -116,7 +158,7 @@ export const PendingClassificationsPage = () => {
 
       {actionError ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Manual decision failed: {actionError}</p>
+          <p style={{ margin: 0, color: '#ff9b9b' }}>Pending action failed: {actionError}</p>
         </div>
       ) : null}
 
@@ -235,7 +277,7 @@ export const PendingClassificationsPage = () => {
                   <th>Status</th>
                   <th>Base URL</th>
                   <th>Updated</th>
-                  <th></th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -253,9 +295,28 @@ export const PendingClassificationsPage = () => {
                       <td>{item.baseUrl ?? '—'}</td>
                       <td>{item.updatedAt}</td>
                       <td style={{ textAlign: 'right' }}>
-                        <button className="cta-button" style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem' }} onClick={() => setSelectedKey(item.normalizedKey)}>
-                          Manual Classify
-                        </button>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.45rem', flexWrap: 'wrap' }}>
+                          <button
+                            className="cta-button"
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem' }}
+                            onClick={() => setSelectedKey(item.normalizedKey)}
+                          >
+                            Manual Classify
+                          </button>
+                          <button
+                            className="cta-button"
+                            style={{
+                              padding: '0.4rem 0.8rem',
+                              fontSize: '0.75rem',
+                              background: 'linear-gradient(120deg,#f8d5d5,#cd7c7c)',
+                              color: '#25090c',
+                            }}
+                            disabled={busyKey === item.normalizedKey || isMock || !canCallApi || busyAll}
+                            onClick={() => deletePendingRow(item)}
+                          >
+                            {busyKey === item.normalizedKey ? 'Deleting...' : 'Delete'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))

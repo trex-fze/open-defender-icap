@@ -67,4 +67,44 @@ describe('usePendingActions', () => {
 
     expect(result.current.busyKey).toBeUndefined();
   });
+
+  it('deletes a single pending row', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: async () => ({}),
+      text: async () => '',
+    });
+
+    const { result } = renderHook(() => usePendingActions());
+
+    await act(async () => {
+      await result.current.clearPending('domain:test.example');
+    });
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch.mock.calls[0]?.[0]).toContain('/api/v1/classifications/domain%3Atest.example/pending');
+  });
+
+  it('deletes all pending rows and returns count', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: async () => ({ deleted: 5 }),
+      text: async () => JSON.stringify({ deleted: 5 }),
+    });
+
+    const { result } = renderHook(() => usePendingActions());
+
+    let deleted = 0;
+    await act(async () => {
+      deleted = await result.current.clearAllPending();
+    });
+
+    expect(deleted).toBe(5);
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch.mock.calls[0]?.[0]).toContain('/api/v1/classifications/pending');
+  });
 });

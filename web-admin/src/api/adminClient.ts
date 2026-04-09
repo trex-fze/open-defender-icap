@@ -179,6 +179,39 @@ export const adminDelete = async (
   }
 };
 
+export const adminDeleteJson = async <TResponse>(
+  ctx: AdminApiContext,
+  path: string,
+  init?: RequestInit,
+): Promise<TResponse> => {
+  ensureCallable(ctx);
+  let resp: Response;
+  try {
+    resp = await fetch(buildUrl(ctx.baseUrl, path), {
+      ...init,
+      method: 'DELETE',
+      headers: withHeaders(ctx.headers, init),
+    });
+  } catch (err) {
+    throw mapNetworkError(err);
+  }
+  if (!resp.ok) {
+    throw new AdminApiError(resp.status, await parseErrorBody(resp));
+  }
+  if (resp.status === 204 || resp.status === 205) {
+    return undefined as TResponse;
+  }
+  const contentType = resp.headers.get('Content-Type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    return undefined as TResponse;
+  }
+  const text = await resp.text();
+  if (!text.trim()) {
+    return undefined as TResponse;
+  }
+  return JSON.parse(text) as TResponse;
+};
+
 export const adminPatchJson = async <TResponse, TBody = unknown>(
   ctx: AdminApiContext,
   path: string,
