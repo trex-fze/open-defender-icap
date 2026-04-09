@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR=$(cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+
 : "${REDIS_URL:=redis://127.0.0.1:6379}"
 : "${DATABASE_URL:=postgres://defender:defender@127.0.0.1:5432/defender_admin}"
 : "${COMPOSE_FILE:=deploy/docker/docker-compose.yml}"
+: "${COMPOSE_ENV_FILE:=${ROOT_DIR}/.env}"
 : "${LLM_METRICS_URL:=http://localhost:19015/metrics}"
 : "${LLM_PROVIDERS_URL:=http://localhost:19015/providers}"
 : "${LOCAL_LLM_MODELS_URL:=http://192.168.1.170:1234/v1/models}"
@@ -23,7 +26,7 @@ require_cmd jq
 
 compose_exec() {
   command -v docker >/dev/null 2>&1 || return 1
-  if docker compose -f "$COMPOSE_FILE" exec -T "$@"; then
+  if docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" exec -T "$@"; then
     return 0
   fi
   return 1

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 COMPOSE_FILE=${COMPOSE_FILE:-"$ROOT_DIR/deploy/docker/docker-compose.yml"}
+COMPOSE_ENV_FILE=${COMPOSE_ENV_FILE:-"$ROOT_DIR/.env"}
 ARTIFACT_DIR=${ARTIFACT_DIR:-"$ROOT_DIR/tests/artifacts/content-pending"}
 TARGET_HOST=${TARGET_HOST:-smoke-origin}
 TARGET_URL=${TARGET_URL:-"http://${TARGET_HOST}/"}
@@ -68,7 +69,7 @@ capture_timeout_diagnostics() {
 }
 
 compose() {
-  docker compose -f "$COMPOSE_FILE" "$@"
+  docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
 start_stack() {

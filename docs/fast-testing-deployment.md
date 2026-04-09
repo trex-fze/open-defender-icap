@@ -98,6 +98,7 @@ Before first startup:
    ```bash
    cp .env.example .env
    ```
+   - Treat root `/.env` as canonical; avoid `deploy/docker/.env` to prevent precedence drift.
 2. Generate Squid certs:
    ```bash
    make gen-certs

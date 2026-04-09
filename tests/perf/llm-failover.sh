@@ -5,6 +5,7 @@ set -euo pipefail
 # a classification job, and ensuring it still completes (fallback provider takes over).
 
 STACK_DIR=${STACK_DIR:-"$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)/deploy/docker"}
+COMPOSE_ENV_FILE=${COMPOSE_ENV_FILE:-"$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)/.env"}
 REDIS_URL=${REDIS_URL:-"redis://127.0.0.1:6379"}
 DATABASE_URL=${DATABASE_URL:-"postgres://defender:defender@127.0.0.1:5432/defender_admin"}
 WAIT_SECONDS=${WAIT_SECONDS:-30}
@@ -15,17 +16,17 @@ command -v docker >/dev/null || { echo "docker required" >&2; exit 1; }
 
 compose_stop() {
   local svc="$1"
-  (cd "$STACK_DIR" && docker compose stop "$svc")
+  (cd "$STACK_DIR" && docker compose --env-file "$COMPOSE_ENV_FILE" stop "$svc")
 }
 
 compose_start() {
   local svc="$1"
-  (cd "$STACK_DIR" && docker compose start "$svc")
+  (cd "$STACK_DIR" && docker compose --env-file "$COMPOSE_ENV_FILE" start "$svc")
 }
 
 compose_ps() {
   local svc="$1"
-  (cd "$STACK_DIR" && docker compose ps --services --filter "status=running" | grep -Fx "$svc" >/dev/null)
+  (cd "$STACK_DIR" && docker compose --env-file "$COMPOSE_ENV_FILE" ps --services --filter "status=running" | grep -Fx "$svc" >/dev/null)
 }
 
 PRIMARY_SERVICE=${PRIMARY_SERVICE:-""}

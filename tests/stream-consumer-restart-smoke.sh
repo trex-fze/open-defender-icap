@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 COMPOSE_FILE=${COMPOSE_FILE:-"$ROOT_DIR/deploy/docker/docker-compose.yml"}
+COMPOSE_ENV_FILE=${COMPOSE_ENV_FILE:-"$ROOT_DIR/.env"}
 ARTIFACT_DIR=${ARTIFACT_DIR:-"$ROOT_DIR/tests/artifacts/stream-restart-smoke"}
 RUN_ID=${RUN_ID:-"stream-restart-$(date +%Y%m%d%H%M%S)"}
 OUT_DIR="$ARTIFACT_DIR/$RUN_ID"
@@ -10,7 +11,7 @@ BUILD_IMAGES=${BUILD_IMAGES:-1}
 mkdir -p "$OUT_DIR"
 
 compose() {
-  docker compose -f "$COMPOSE_FILE" "$@"
+  docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
 log() {

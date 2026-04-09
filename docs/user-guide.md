@@ -101,7 +101,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - Frontend expansion roadmap: see `rfc/stage-10-frontend-management-parity.md` and `implementation-plan/stage-10-frontend-management-parity.md` for full management-feature parity scope.
 
 ## 8. Docker & Compose Workflows
-- **Prep**: Copy `.env.example` → `.env`, edit tokens/passwords, then run `make gen-certs` (generates Squid CA/server certs under `deploy/docker/squid/certs/`; import `ca.pem` into any client trust store that should trust the proxy).
+- **Prep**: Copy `.env.example` → `.env`, edit tokens/passwords, then run `make gen-certs` (generates Squid CA/server certs under `deploy/docker/squid/certs/`; import `ca.pem` into any client trust store that should trust the proxy). Use root `/.env` as the only compose runtime env file.
 - **Local dev**: `make compose-up` (or `docker compose up --build` inside `deploy/docker/`) starts Redis, Postgres, ICAP adaptor, Policy engine, Admin API, Squid, workers, Kibana, Prometheus, React UI, and the `odctl` runner. Use `make compose-logs SERVICE=icap-adaptor` to tail logs quickly.
 - **Smoke stack**: `docker compose -f docker-compose.smoke.yml up --build --abort-on-container-exit` spins up only Redis/Postgres/core services plus a smoke-tests container that runs `odctl smoke`.
 - **CI/integration**: `docker compose -f docker-compose.yml -f docker-compose.test.yml up --abort-on-container-exit` runs the same smoke harness but can skip heavy services via profiles.

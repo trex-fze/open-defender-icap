@@ -109,6 +109,7 @@ flowchart LR
    cp .env.example .env            # set secrets: OD_ADMIN_TOKEN, ELASTIC_PASSWORD, etc.
    make gen-certs                  # one-time Squid cert generation
    ```
+   - Canonical stack env lives at repo root (`.env`); avoid using `deploy/docker/.env`.
 3. **Start stack (policy + AI workers)**:
    ```bash
    make compose-up                 # equivalent to docker compose up --build
@@ -173,15 +174,16 @@ flowchart LR
 | `OD_LLM_FALLBACK_MAX_PER_MIN` | Max fallback attempts per minute before fallback is temporarily blocked (default `30`). |
 | `ANTHROPIC_API_KEY` | API key for Anthropic Claude providers. |
 | `LLM_API_KEY` | Legacy fallback for single-endpoint deployments. |
-| `VITE_ADMIN_API_URL` | UI base URL for API calls (set in `web-admin/.env`). |
+| `VITE_ADMIN_API_URL` | UI base URL for API calls (set in `web-admin/.env`, copy from `web-admin/.env.example` when running standalone Vite dev). |
 | `INGEST_URL`, `ELASTIC_URL`, `ADMIN_URL` | Overrides for Stage 6/7 smoke scripts. |
 
-> See `config/admin-api.json`, `services/event-ingester/src/config.rs`, and `deploy/docker/.env.example` for the full list.
+> See `config/admin-api.json`, `services/event-ingester/src/config.rs`, and `.env.example` for the full stack variable list. Use `web-admin/.env.example` for standalone frontend-only variables.
 
 ## Reference Docs
 
 - [API Catalog](docs/api-catalog.md) – complete list of REST endpoints, auth requirements, and payload formats for every service.
 - [Fast Testing Deployment Guide](docs/fast-testing-deployment.md) - quick setup for end-to-end local testing, including client proxy config, env vars, startup/shutdown, and FAQ.
+- [Environment File Organization Plan](docs/env-file-organization-plan.md) - canonical `.env` strategy and migration checklist to avoid compose precedence drift.
 - [Proxy 403 RCA (Docker Desktop)](docs/evidence/proxy-403-docker-desktop-rca-2026-04-09.md) - root cause analysis, remediation, and validation evidence for LAN client `403` on macOS Docker Desktop.
 - [Frontend Management Parity RFC](rfc/stage-10-frontend-management-parity.md) - proposed UI scope to cover all current management features exposed by Admin API/CLI.
 - [Frontend Management Parity Plan](implementation-plan/stage-10-frontend-management-parity.md) - phased implementation plan with task breakdown, quality gates, and rollout steps.

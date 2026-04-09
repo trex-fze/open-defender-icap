@@ -8,6 +8,8 @@ web-admin/dist/
 docker-data/
 data/
 .env
+deploy/docker/.env
+web-admin/.env
 logs/
 deploy/docker/squid/certs/*
 !deploy/docker/squid/certs/.gitkeep

@@ -2,6 +2,10 @@
 
 This directory contains the compose stacks used for local development, CI-style integration tests, and lightweight smoke validation. Copy `.env.example` to `.env` at the repo root (never commit `.env`) and adjust secrets such as `OD_ADMIN_TOKEN` or `ELASTIC_PASSWORD` before starting the stack.
 
+Canonical env policy:
+- Use only `/.env` (repo root) for compose/service runtime values.
+- Do not rely on `deploy/docker/.env`; compose commands should pass `--env-file ../../.env` explicitly.
+
 ## Compose files
 - `docker-compose.yml`: full developer stack (Redis, Postgres, ICAP adaptor, Policy Engine, Admin API, Squid, Kibana, Elasticsearch, Prometheus, workers, web-admin, odctl runner, **Filebeat + event-ingester** for Stage 6 telemetry). Prometheus loads custom Stage 6 alert rules from `prometheus-rules.yml` (cache hit ratio, ICAP latency, ingestion failures, review SLA breaches).
 - `docker-compose.test.yml`: extends the base stack and adds a `smoke-tests` service that runs `odctl smoke` plus basic override listing; also marks heavy services with the `dev` profile so they can be skipped in CI.
@@ -13,16 +17,16 @@ This directory contains the compose stacks used for local development, CI-style 
 ```bash
 # Start the full developer topology (requires .env)
 cd deploy/docker
-docker compose up --build
+docker compose --env-file ../../.env up --build
 
 # Tail logs for the ICAP adaptor
-docker compose logs -f icap-adaptor
+docker compose --env-file ../../.env logs -f icap-adaptor
 
 # Run the minimal smoke stack
-docker compose -f docker-compose.smoke.yml up --build --abort-on-container-exit
+docker compose --env-file ../../.env -f docker-compose.smoke.yml up --build --abort-on-container-exit
 
 # Execute odctl commands inside the runner container
-docker compose run --rm odctl-runner odctl override list
+docker compose --env-file ../../.env run --rm odctl-runner odctl override list
 ```
 
 ### Helper targets
@@ -43,11 +47,11 @@ Run `make gen-certs` once before the first `compose-up`; import `deploy/docker/s
 1. Ensure Docker Desktop/Engine is running and ports 1344, 19000, 19001, 19005, 19010, 3128, 5432, 6379, 9200, 5601, 9090 are free.
 2. Copy `.env.example` → `.env` (edit tokens/passwords as needed).
 3. Run `make gen-certs` once to generate Squid certificates (stores them under `deploy/docker/squid/certs/`).
-4. `docker compose up -d postgres redis` and wait for healthchecks, or just run `docker compose up --build` / `make compose-up` to start everything.
+4. `docker compose --env-file ../../.env up -d postgres redis` and wait for healthchecks, or just run `docker compose --env-file ../../.env up --build` / `make compose-up` to start everything.
 5. Run migrations/seeds as needed:
-   - `docker compose run --rm odctl-runner odctl migrate run all`
-   - `docker compose run --rm odctl-runner odctl seed policies config/policies.json default compose`
-6. Once services are healthy, run `docker compose run --rm odctl-runner odctl smoke icap-adaptor:1344` (already performed automatically in the test/smoke stacks).
+   - `docker compose --env-file ../../.env run --rm odctl-runner odctl migrate run all`
+   - `docker compose --env-file ../../.env run --rm odctl-runner odctl seed policies config/policies.json default compose`
+6. Once services are healthy, run `docker compose --env-file ../../.env run --rm odctl-runner odctl smoke icap-adaptor:1344` (already performed automatically in the test/smoke stacks).
 7. Access:
     - Admin API: http://localhost:19000/health/ready
     - Policy Engine: http://localhost:19010/health/ready

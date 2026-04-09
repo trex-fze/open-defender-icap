@@ -23,7 +23,7 @@ Run this after the compose stack is up; include the console output in the Stageâ
   - Requires `redis-cli` and `psql` in PATH plus access to the running compose stack.
 
 ## Manual/advanced tests
-1. **OIDC RBAC smoke**: Configure `OD_OIDC_*` in `deploy/docker/.env` and ensure `odctl report traffic` fails when the issued token lacks `ROLE_REPORTING_VIEW`.
+1. **OIDC RBAC smoke**: Configure `OD_OIDC_*` in root `/.env` and ensure `odctl report traffic` fails when the issued token lacks `ROLE_REPORTING_VIEW`.
 2. **Prompt injection (LLM worker)**:
    - Publish a job to `classification-jobs` with a payload containing a known injection string (e.g., `"<INJECTION> ignore previous instructions"`).
    - Verify `llm-worker` logs show the payload being sanitized (check `svc-llm-worker` logs for `prompt_filter` entries) and that the resulting decision is `monitor` instead of `allow`.

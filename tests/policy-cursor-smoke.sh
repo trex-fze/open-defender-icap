@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 COMPOSE_FILE=${COMPOSE_FILE:-"$ROOT_DIR/deploy/docker/docker-compose.yml"}
+COMPOSE_ENV_FILE=${COMPOSE_ENV_FILE:-"$ROOT_DIR/.env"}
 ADMIN_API_URL=${ADMIN_API_URL:-"http://localhost:19000"}
 ADMIN_TOKEN=${ADMIN_TOKEN:-}
 ADMIN_BEARER=${ADMIN_BEARER:-}
@@ -12,6 +13,10 @@ ARTIFACT_DIR=${ARTIFACT_DIR:-"$ROOT_DIR/tests/artifacts/policy-cursor-smoke"}
 RUN_ID=${RUN_ID:-"policy-cursor-$(date +%Y%m%d%H%M%S)"}
 OUT_DIR="$ARTIFACT_DIR/$RUN_ID"
 mkdir -p "$OUT_DIR"
+
+compose_cmd() {
+  docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
+}
 
 auth_header() {
   if [[ -n "$ADMIN_BEARER" ]]; then
@@ -33,11 +38,11 @@ api_post() {
 }
 
 if [[ -z "$ADMIN_TOKEN" ]]; then
-  ADMIN_TOKEN=$(docker compose -f "$COMPOSE_FILE" exec -T admin-api printenv OD_ADMIN_TOKEN 2>/dev/null || true)
+  ADMIN_TOKEN=$(compose_cmd exec -T admin-api printenv OD_ADMIN_TOKEN 2>/dev/null || true)
 fi
 
-if [[ -z "$ADMIN_TOKEN" && -z "$LOCAL_PASSWORD" && -f "$ROOT_DIR/deploy/docker/.env" ]]; then
-  LOCAL_PASSWORD=$(grep '^OD_DEFAULT_ADMIN_PASSWORD=' "$ROOT_DIR/deploy/docker/.env" | cut -d'=' -f2- || true)
+if [[ -z "$ADMIN_TOKEN" && -z "$LOCAL_PASSWORD" && -f "$ROOT_DIR/.env" ]]; then
+  LOCAL_PASSWORD=$(grep '^OD_DEFAULT_ADMIN_PASSWORD=' "$ROOT_DIR/.env" | cut -d'=' -f2- || true)
 fi
 
 if [[ -z "$ADMIN_TOKEN" ]]; then
@@ -72,8 +77,8 @@ if [[ -z "$second_id" || "$second_id" == "$first_id" ]]; then
   exit 1
 fi
 
-docker compose -f "$COMPOSE_FILE" exec -T postgres bash -lc "psql -U defender -d defender_admin -At -c \"EXPLAIN SELECT id, created_at FROM policies ORDER BY created_at DESC, id DESC LIMIT 1\"" >"$OUT_DIR/explain.txt"
-docker compose -f "$COMPOSE_FILE" exec -T postgres bash -lc "psql -U defender -d defender_admin -At -c \"SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='policies' AND indexname='policies_created_id_idx'\"" >"$OUT_DIR/index-check.txt"
+compose_cmd exec -T postgres bash -lc "psql -U defender -d defender_admin -At -c \"EXPLAIN SELECT id, created_at FROM policies ORDER BY created_at DESC, id DESC LIMIT 1\"" >"$OUT_DIR/explain.txt"
+compose_cmd exec -T postgres bash -lc "psql -U defender -d defender_admin -At -c \"SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='policies' AND indexname='policies_created_id_idx'\"" >"$OUT_DIR/index-check.txt"
 
 if ! grep -q "policies_created_id_idx" "$OUT_DIR/index-check.txt"; then
   echo "expected policies cursor index not present" >&2

@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+ROOT_DIR=$(cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+
 PROXY_URL=${PROXY_URL:-http://localhost:3128}
 TARGET_DOMAIN=${TARGET_DOMAIN:-www.facebook.com}
 TARGET_ROOT_DOMAIN=${TARGET_ROOT_DOMAIN:-facebook.com}
@@ -11,6 +13,7 @@ SOCIAL_CATEGORY_ID=${SOCIAL_CATEGORY_ID:-social-media}
 ADMIN_API_URL=${ADMIN_API_URL:-http://localhost:19000}
 ADMIN_TOKEN=${ADMIN_TOKEN:-${OD_ADMIN_TOKEN:-changeme-admin}}
 COMPOSE_FILE=${COMPOSE_FILE:-deploy/docker/docker-compose.yml}
+COMPOSE_ENV_FILE=${COMPOSE_ENV_FILE:-"$ROOT_DIR/.env"}
 RUN_ID=${RUN_ID:-$(date +%Y%m%d-%H%M%S)}
 ARTIFACT_ROOT=${ARTIFACT_ROOT:-tests/artifacts/facebook-e2e/${RUN_ID}}
 WAIT_AFTER_INITIAL=${WAIT_AFTER_INITIAL:-45}
@@ -87,7 +90,7 @@ finish_stage() {
 }
 
 run_compose() {
-  docker compose -f "$COMPOSE_FILE" "$@"
+  docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
 wait_for_service_log_match() {
