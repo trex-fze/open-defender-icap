@@ -145,12 +145,34 @@ export const DashboardPage = () => {
           </h3>
           <span className="chip chip--green">allow {overview ? formatCompact(overview.allow_requests) : '0'}</span>
         </div>
+        <div className="kpi-card">
+          <p className="section-title" style={{ color: 'rgba(255,255,255,0.7)' }}>LLM Worker Status</p>
+          <h3 style={{ margin: '0 0 0.4rem', fontSize: '2rem' }}>
+            {opsLoading ? '…' : formatCompact(ops.pendingCount)}
+          </h3>
+          <span className="chip chip--amber">
+            providers {opsLoading ? '…' : formatCompact(ops.llmProviderNames.length)}
+          </span>
+          <p style={{ margin: '0.55rem 0 0', color: 'var(--muted)', fontSize: '0.82rem' }}>
+            {opsLoading
+              ? 'Loading worker snapshot…'
+              : ops.llmProviderNames.length > 0
+                ? ops.llmProviderNames.join(', ')
+                : 'No provider metadata'}
+          </p>
+          {opsError ? <p style={{ color: '#ff9b9b', margin: '0.45rem 0 0', fontSize: '0.8rem' }}>{opsError}</p> : null}
+          {!opsLoading ? (
+            <p style={{ margin: '0.45rem 0 0' }}>
+              <span className={`chip chip--${ops.source === 'live' ? 'green' : 'amber'}`}>ops source: {ops.source}</span>
+            </p>
+          ) : null}
+        </div>
       </div>
 
       <div className="layout-grid" style={{ marginTop: '2rem' }}>
-        <div className="glass-panel">
+        <div className="glass-panel panel--full">
           <p className="section-title">Hourly Usage (Requests + Bandwidth)</p>
-          <div style={{ width: '100%', height: 280 }}>
+          <div style={{ width: '100%', height: 320 }}>
             <ResponsiveContainer>
               <LineChart data={hourlyChart}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
@@ -165,29 +187,6 @@ export const DashboardPage = () => {
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </div>
-
-        <div className="glass-panel">
-          <p className="section-title">LLM Worker Status</p>
-          {opsLoading ? (
-            <>
-              <div className="skeleton" style={{ marginBottom: '0.75rem' }}></div>
-              <div className="skeleton" style={{ width: '70%' }}></div>
-            </>
-          ) : (
-            <>
-              <p style={{ fontSize: '1.1rem', margin: '0 0 0.6rem' }}>
-                Pending classifications: {formatCompact(ops.pendingCount)}
-              </p>
-              <p style={{ margin: 0, color: 'var(--muted)' }}>
-                Providers: {ops.llmProviderNames.length > 0 ? ops.llmProviderNames.join(', ') : 'not available in this environment'}
-              </p>
-              <p style={{ marginTop: '0.6rem' }}>
-                <span className={`chip chip--${ops.source === 'live' ? 'green' : 'amber'}`}>ops source: {ops.source}</span>
-              </p>
-            </>
-          )}
-          {opsError ? <p style={{ color: '#ff9b9b', marginBottom: 0 }}>Ops status warning: {opsError}</p> : null}
         </div>
       </div>
 

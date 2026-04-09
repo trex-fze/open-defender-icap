@@ -587,6 +587,10 @@ tr:hover td {
   gap: 1.5rem;
 }
 
+.panel--full {
+  grid-column: 1 / -1;
+}
+
 .pagination-controls {
   display: flex;
   align-items: end;
