@@ -90,6 +90,7 @@ Policy history note: `GET /api/v1/policies/:id/versions` is served from immutabl
 | --- | --- | --- | --- |
 | `GET` | `/api/v1/reporting/traffic` | Elastic-powered traffic summary with inferred-action/domain/category fallbacks when structured fields are sparse. | `range`, `top_n`, `bucket`. |
 | `GET` | `/api/v1/reporting/status` | Reporting data-quality coverage counters for the selected time range. | `range`; response includes `total_docs`, `action_docs`, `category_docs`, `domain_docs`. |
+| `GET` | `/api/v1/reporting/dashboard` | Rich dashboard analytics with client count, bandwidth, hourly usage, top domains, blocked domains, blocked requesters (`client.ip`), and coverage metrics. | `range`, `top_n`, `bucket`; returns `overview`, `hourly_usage`, `top_domains`, `top_blocked_domains`, `top_blocked_requesters`, `top_clients_by_bandwidth`, and `coverage`. |
 
 ### Cache & Diagnostics
 

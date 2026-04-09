@@ -197,6 +197,169 @@ impl ElasticReportingClient {
         })
     }
 
+    pub async fn dashboard_report(
+        &self,
+        range: Option<&str>,
+        top_n: u32,
+        bucket: Option<&str>,
+    ) -> Result<DashboardReportResponse> {
+        let range = range
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&self.default_range);
+        let bucket_interval = bucket
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| select_interval(range));
+        let size = top_n.clamp(1, 50);
+        let body = json!({
+            "size": 0,
+            "track_total_hits": true,
+            "runtime_mappings": {
+                "effective_action": {
+                    "type": "keyword",
+                    "script": {
+                        "source": "if (doc.containsKey('recommended_action.keyword') && !doc['recommended_action.keyword'].empty) { emit(doc['recommended_action.keyword'].value); } else if (doc.containsKey('recommended_action_inferred.keyword') && !doc['recommended_action_inferred.keyword'].empty) { emit(doc['recommended_action_inferred.keyword'].value); } else if (doc.containsKey('http.response.status_code') && !doc['http.response.status_code'].empty && doc['http.response.status_code'].value >= 400) { emit('block'); } else { emit('allow'); }"
+                    }
+                },
+                "effective_domain": {
+                    "type": "keyword",
+                    "script": {
+                        "source": "if (doc.containsKey('destination.domain.keyword') && !doc['destination.domain.keyword'].empty) { emit(doc['destination.domain.keyword'].value); } else if (doc.containsKey('url.full.keyword') && !doc['url.full.keyword'].empty) { String u = doc['url.full.keyword'].value; int start = u.indexOf('://'); int from = start >= 0 ? start + 3 : 0; int end = u.indexOf('/', from); String host = end > from ? u.substring(from, end) : u.substring(from); int colon = host.indexOf(':'); if (colon > 0) { host = host.substring(0, colon); } if (host.length() > 0) emit(host); }"
+                    }
+                }
+            },
+            "query": {
+                "range": {
+                    "@timestamp": {
+                        "gte": format!("now-{}", range),
+                        "lte": "now"
+                    }
+                }
+            },
+            "aggs": {
+                "blocked_docs": {
+                    "filter": { "term": { "effective_action": "block" } }
+                },
+                "allow_docs": {
+                    "filter": { "term": { "effective_action": "allow" } }
+                },
+                "unique_clients": {
+                    "cardinality": { "field": "client.ip" }
+                },
+                "total_bandwidth": {
+                    "sum": { "field": "network.bytes" }
+                },
+                "hourly_usage": {
+                    "date_histogram": {
+                        "field": "@timestamp",
+                        "fixed_interval": bucket_interval.as_str(),
+                        "min_doc_count": 0
+                    },
+                    "aggs": {
+                        "blocked": {
+                            "filter": { "term": { "effective_action": "block" } }
+                        },
+                        "bandwidth": {
+                            "sum": { "field": "network.bytes" }
+                        }
+                    }
+                },
+                "top_domains": {
+                    "terms": { "field": "effective_domain", "size": size }
+                },
+                "top_blocked": {
+                    "filter": { "term": { "effective_action": "block" } },
+                    "aggs": {
+                        "domains": { "terms": { "field": "effective_domain", "size": size } },
+                        "requesters": { "terms": { "field": "client.ip", "size": size } }
+                    }
+                },
+                "top_clients_by_bandwidth": {
+                    "terms": {
+                        "field": "client.ip",
+                        "size": size,
+                        "order": { "bandwidth": "desc" }
+                    },
+                    "aggs": {
+                        "bandwidth": {
+                            "sum": { "field": "network.bytes" }
+                        }
+                    }
+                },
+                "has_client_ip": { "filter": { "exists": { "field": "client.ip" } } },
+                "has_domain": {
+                    "filter": {
+                        "bool": {
+                            "should": [
+                                { "exists": { "field": "destination.domain" } },
+                                { "exists": { "field": "url.full" } }
+                            ],
+                            "minimum_should_match": 1
+                        }
+                    }
+                },
+                "has_network_bytes": { "filter": { "exists": { "field": "network.bytes" } } }
+            }
+        });
+
+        let url = format!("{}/{}/_search", self.base_url, self.index_pattern);
+        let mut req = self.client.post(&url).json(&body);
+        req = self.attach_auth(req);
+        let response = req.send().await?.error_for_status()?;
+        let payload: Value = response.json().await?;
+        let aggregations = payload
+            .get("aggregations")
+            .ok_or_else(|| anyhow!("missing aggregations"))?;
+
+        let total_requests = payload
+            .pointer("/hits/total/value")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let blocked_requests = agg_doc_count(aggregations, "blocked_docs");
+        let allow_requests = agg_doc_count(aggregations, "allow_docs");
+        let unique_clients = agg_metric_value(aggregations, "unique_clients");
+        let total_bandwidth_bytes = agg_metric_value(aggregations, "total_bandwidth");
+        let block_rate = if total_requests > 0 {
+            blocked_requests as f64 / total_requests as f64
+        } else {
+            0.0
+        };
+
+        let hourly_usage = parse_hourly_usage(aggregations);
+        let top_domains = parse_top_entries(aggregations, &["top_domains"]);
+        let top_blocked_domains = parse_top_entries(aggregations, &["top_blocked", "domains"]);
+        let top_blocked_requesters =
+            parse_top_entries(aggregations, &["top_blocked", "requesters"]);
+        let top_clients_by_bandwidth =
+            parse_bandwidth_entries(aggregations, &["top_clients_by_bandwidth"]);
+
+        let coverage = FieldCoverage {
+            total_docs: total_requests,
+            client_ip_docs: agg_doc_count(aggregations, "has_client_ip"),
+            domain_docs: agg_doc_count(aggregations, "has_domain"),
+            network_bytes_docs: agg_doc_count(aggregations, "has_network_bytes"),
+        };
+
+        Ok(DashboardReportResponse {
+            range: range.to_string(),
+            bucket_interval,
+            overview: DashboardOverview {
+                total_requests,
+                allow_requests,
+                blocked_requests,
+                block_rate,
+                unique_clients,
+                total_bandwidth_bytes,
+            },
+            hourly_usage,
+            top_domains,
+            top_blocked_domains,
+            top_blocked_requesters,
+            top_clients_by_bandwidth,
+            coverage,
+        })
+    }
+
     pub async fn coverage_status(&self, range: Option<&str>) -> Result<ReportingCoverageStatus> {
         let range = range
             .filter(|s| !s.is_empty())
@@ -279,6 +442,55 @@ impl ElasticReportingClient {
             ElasticAuth::Basic { username, password } => req.basic_auth(username, Some(password)),
         }
     }
+}
+
+fn agg_doc_count(aggregations: &Value, key: &str) -> i64 {
+    aggregations
+        .get(key)
+        .and_then(|v| v.get("doc_count"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+}
+
+fn agg_metric_value(aggregations: &Value, key: &str) -> i64 {
+    aggregations
+        .get(key)
+        .and_then(|v| v.get("value"))
+        .and_then(Value::as_f64)
+        .map(|v| v.round() as i64)
+        .unwrap_or(0)
+}
+
+fn parse_hourly_usage(aggregations: &Value) -> Vec<HourlyUsageBucket> {
+    aggregations
+        .get("hourly_usage")
+        .and_then(|a| a.get("buckets"))
+        .and_then(Value::as_array)
+        .map(|buckets| {
+            buckets
+                .iter()
+                .map(|bucket| HourlyUsageBucket {
+                    timestamp: bucket
+                        .get("key_as_string")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    total_requests: bucket.get("doc_count").and_then(Value::as_i64).unwrap_or(0),
+                    blocked_requests: bucket
+                        .get("blocked")
+                        .and_then(|v| v.get("doc_count"))
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0),
+                    bandwidth_bytes: bucket
+                        .get("bandwidth")
+                        .and_then(|v| v.get("value"))
+                        .and_then(Value::as_f64)
+                        .map(|v| v.round() as i64)
+                        .unwrap_or(0),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn select_interval(range: &str) -> String {
@@ -384,6 +596,40 @@ fn parse_top_entries(aggregations: &Value, path: &[&str]) -> Vec<TopEntry> {
         .unwrap_or_default()
 }
 
+fn parse_bandwidth_entries(aggregations: &Value, path: &[&str]) -> Vec<TopBandwidthEntry> {
+    let mut current = aggregations;
+    for segment in path {
+        if let Some(next) = current.get(segment) {
+            current = next;
+        } else {
+            return Vec::new();
+        }
+    }
+    current
+        .get("buckets")
+        .and_then(Value::as_array)
+        .map(|buckets| {
+            buckets
+                .iter()
+                .map(|bucket| TopBandwidthEntry {
+                    key: bucket
+                        .get("key")
+                        .and_then(Value::as_str)
+                        .unwrap_or("-unknown-")
+                        .to_string(),
+                    doc_count: bucket.get("doc_count").and_then(Value::as_i64).unwrap_or(0),
+                    bandwidth_bytes: bucket
+                        .get("bandwidth")
+                        .and_then(|v| v.get("value"))
+                        .and_then(Value::as_f64)
+                        .map(|v| v.round() as i64)
+                        .unwrap_or(0),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Serialize)]
 pub struct TrafficReportResponse {
     pub range: String,
@@ -400,6 +646,52 @@ pub struct ReportingCoverageStatus {
     pub action_docs: i64,
     pub category_docs: i64,
     pub domain_docs: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardReportResponse {
+    pub range: String,
+    pub bucket_interval: String,
+    pub overview: DashboardOverview,
+    pub hourly_usage: Vec<HourlyUsageBucket>,
+    pub top_domains: Vec<TopEntry>,
+    pub top_blocked_domains: Vec<TopEntry>,
+    pub top_blocked_requesters: Vec<TopEntry>,
+    pub top_clients_by_bandwidth: Vec<TopBandwidthEntry>,
+    pub coverage: FieldCoverage,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardOverview {
+    pub total_requests: i64,
+    pub allow_requests: i64,
+    pub blocked_requests: i64,
+    pub block_rate: f64,
+    pub unique_clients: i64,
+    pub total_bandwidth_bytes: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HourlyUsageBucket {
+    pub timestamp: String,
+    pub total_requests: i64,
+    pub blocked_requests: i64,
+    pub bandwidth_bytes: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TopBandwidthEntry {
+    pub key: String,
+    pub doc_count: i64,
+    pub bandwidth_bytes: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FieldCoverage {
+    pub total_docs: i64,
+    pub client_ip_docs: i64,
+    pub domain_docs: i64,
+    pub network_bytes_docs: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -423,6 +715,7 @@ pub struct TopEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn interval_selection() {
@@ -431,5 +724,42 @@ mod tests {
         assert_eq!(select_interval("48h"), "3h");
         assert_eq!(select_interval("10d"), "12h");
         assert_eq!(select_interval("90d"), "1d");
+    }
+
+    #[test]
+    fn parses_hourly_usage_and_bandwidth_aggs() {
+        let aggs = json!({
+            "hourly_usage": {
+                "buckets": [
+                    {
+                        "key_as_string": "2026-04-10T00:00:00.000Z",
+                        "doc_count": 10,
+                        "blocked": { "doc_count": 3 },
+                        "bandwidth": { "value": 2048.0 }
+                    }
+                ]
+            },
+            "top_clients_by_bandwidth": {
+                "buckets": [
+                    {
+                        "key": "192.168.1.253",
+                        "doc_count": 8,
+                        "bandwidth": { "value": 4096.0 }
+                    }
+                ]
+            }
+        });
+
+        let hourly = parse_hourly_usage(&aggs);
+        assert_eq!(hourly.len(), 1);
+        assert_eq!(hourly[0].total_requests, 10);
+        assert_eq!(hourly[0].blocked_requests, 3);
+        assert_eq!(hourly[0].bandwidth_bytes, 2048);
+
+        let top = parse_bandwidth_entries(&aggs, &["top_clients_by_bandwidth"]);
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].key, "192.168.1.253");
+        assert_eq!(top[0].doc_count, 8);
+        assert_eq!(top[0].bandwidth_bytes, 4096);
     }
 }

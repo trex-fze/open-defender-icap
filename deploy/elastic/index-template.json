@@ -38,6 +38,11 @@
             "domain": { "type": "keyword" }
           }
         },
+        "network": {
+          "properties": {
+            "bytes": { "type": "long" }
+          }
+        },
         "http": {
           "properties": {
             "request": {

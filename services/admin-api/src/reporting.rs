@@ -8,7 +8,7 @@ use tracing::error;
 
 use crate::{
     auth::{require_roles, UserContext, ROLE_REPORTING_VIEW},
-    reporting_es::{ReportingCoverageStatus, TrafficReportResponse},
+    reporting_es::{DashboardReportResponse, ReportingCoverageStatus, TrafficReportResponse},
     AppState,
 };
 
@@ -58,4 +58,26 @@ pub async fn reporting_status(
         StatusCode::BAD_GATEWAY
     })?;
     Ok(Json(status))
+}
+
+pub async fn dashboard_summary(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Query(query): Query<TrafficReportQuery>,
+) -> Result<Json<DashboardReportResponse>, StatusCode> {
+    require_roles(&user, ROLE_REPORTING_VIEW)?;
+    let client = state
+        .reporting_client()
+        .ok_or(StatusCode::NOT_IMPLEMENTED)?;
+    let range = query.range.as_deref();
+    let bucket = query.bucket.as_deref();
+    let top_n = query.top_n.unwrap_or(DEFAULT_TOP_N).max(1);
+    let report = client
+        .dashboard_report(range, top_n, bucket)
+        .await
+        .map_err(|err| {
+            error!(target = "svc-admin", %err, "failed to fetch dashboard report from elastic");
+            StatusCode::BAD_GATEWAY
+        })?;
+    Ok(Json(report))
 }

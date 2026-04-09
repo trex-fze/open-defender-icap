@@ -24,6 +24,7 @@ This roadmap mirrors the RFC tracker and captures actionable work items, owners,
 | 20. Ops Diagnostics and Runbook Automation (✅) | One-command pending diagnostics collector + runbook triage automation | SRE + SWG + Docs | Stages 17, 18 | Stage 20 plan/checklist + `tests/ops/content-pending-diagnostics.sh` + verification log |
 | 21. Stream Consumer-Group Migration (✅) | Restart-safe Redis stream processing (`XREADGROUP`, ACK/claim, poison handling) | Backend + Classification + SRE | Stages 4, 14, 17 | Stage 21 plan/checklist + stream audit/restart smoke artifacts + verification log |
 | 22. Cursor Parity for Policy/Reporting APIs (✅) | Convert remaining policy/reporting page-offset list APIs to cursor/keyset parity | Backend + Frontend + DevTools + QA | Stages 15, 16 | Stage 22 plan/checklist + cursor audit + `tests/policy-cursor-smoke.sh` evidence |
+| 23. Dashboard Traffic Intelligence (✅) | Deliver rich dashboard graphs and client-IP traffic intelligence with backend reporting endpoint and ingest field enrichment | Backend + Frontend + SRE + QA | Stages 6, 10, 22 | Stage 23 RFC/plan/checklist + dashboard analytics verification artifacts |
 
 ## Current Focus
 

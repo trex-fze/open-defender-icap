@@ -209,7 +209,10 @@ fn enrich_squid_event(
     let _duration_ms = parts.next();
     let source_ip = parts.next().map(str::to_string);
     let status_token = parts.next().map(str::to_string);
-    let _bytes = parts.next();
+    let transfer_bytes = parts
+        .next()
+        .and_then(|raw| raw.parse::<i64>().ok())
+        .filter(|value| *value >= 0);
     let method = parts.next().map(str::to_string);
     let target = parts.next().map(str::to_string);
 
@@ -278,6 +281,10 @@ fn enrich_squid_event(
                 );
             }
         }
+    }
+
+    if let Some(bytes) = transfer_bytes {
+        ensure_path_number(map, &["network", "bytes"], bytes);
     }
 
     if let Some(http_method) = method.as_deref() {
@@ -543,6 +550,10 @@ mod tests {
                 .and_then(Value::as_i64),
             Some(403)
         );
+        assert_eq!(
+            value.pointer("/network/bytes").and_then(Value::as_i64),
+            Some(1058)
+        );
     }
 
     #[test]
@@ -583,7 +594,9 @@ mod tests {
             Some("203.0.113.9")
         );
         assert_eq!(
-            value.pointer("/od/client_ip_source").and_then(Value::as_str),
+            value
+                .pointer("/od/client_ip_source")
+                .and_then(Value::as_str),
             Some("forwarded")
         );
     }
@@ -601,7 +614,9 @@ mod tests {
             Some("10.10.10.10")
         );
         assert_eq!(
-            value.pointer("/od/client_ip_source").and_then(Value::as_str),
+            value
+                .pointer("/od/client_ip_source")
+                .and_then(Value::as_str),
             Some("peer")
         );
     }
@@ -619,7 +634,9 @@ mod tests {
             Some("192.168.1.44")
         );
         assert_eq!(
-            value.pointer("/od/client_ip_source").and_then(Value::as_str),
+            value
+                .pointer("/od/client_ip_source")
+                .and_then(Value::as_str),
             Some("peer")
         );
     }
