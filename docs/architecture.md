@@ -6,20 +6,21 @@ This document expands on `docs/engine-adaptor-spec.md` with implementation-ready
 
 | Layer | Components | Responsibilities |
 | --- | --- | --- |
-| **Proxy** | Squid + SSL bump | Client authentication, ICAP invocation, metadata forwarding, base ACLs |
+| **Proxy** | HAProxy edge + Squid + SSL bump | Client ingress, source ACL gating, ICAP invocation, metadata forwarding, base ACLs |
 | **Decision Plane** | ICAP adaptor (`svc-icap`), Policy Engine (`svc-policy`) | Normalize requests, evaluate policies, coordinate caches, emit ICAP verdicts |
 | **Classification Plane** | LLM Worker, Reclass Worker, Redis Streams | Async classification, reclassification, verdict persistence |
 | **Management Plane** | Admin API, React UI, CLI (`odctl`) | Policy admin, domain allow/deny overrides, reporting, health |
 | **Data Plane** | Postgres, Redis, Elasticsearch/Kibana | Durable data, distributed cache, analytics/observability |
 
 ### 1.1 Component Interactions
-1. **Client → Squid**: HTTP(S) traffic. Squid authenticates users, performs SSL bump, and invokes ICAP REQMOD.
-2. **Squid → ICAP adaptor**: ICAP message includes metadata headers (`X-Client-IP`, `X-User`, etc.).
-3. **Adaptor**: Parses ICAP, normalizes requests, checks multi-tier cache, queries policy engine when needed, returns ICAP verdict.
-4. **Policy Engine**: Evaluates policies (user/IP/category/time/location) and returns `PolicyDecision` with action + metadata.
-5. **Async Pipeline**: On cache miss without classification, adaptor derives a canonical classification scope key (`domain:<registered_domain>`) and enqueues both `classification-jobs` and `page-fetch-jobs` on that key so verdicting is content-aware and deduplicated across subdomains. LLM/page-fetch/reclass workers persist state in Postgres, update Redis, and schedule follow-up refreshes.
-6. **Management Layer**: Admin API exposes overrides, pending classification actions, taxonomy controls, and reporting. UI/CLI consume these APIs. CLI also drives migrations, smoke tests, cache inspection.
-7. **Observability**: Structured logs/events shipped to Elasticsearch; metrics exported via Prometheus; Kibana dashboards provide SOC/ops visibility.
+1. **Client → HAProxy**: HTTP(S) proxy traffic arrives at the edge listener.
+2. **HAProxy → Squid**: HAProxy enforces source ACLs and forwards proxy requests to Squid.
+3. **Squid → ICAP adaptor**: Squid performs SSL bump as configured and invokes ICAP REQMOD with metadata headers (`X-Client-IP`, `X-User`, etc.).
+4. **Adaptor**: Parses ICAP, normalizes requests, checks multi-tier cache, queries policy engine when needed, returns ICAP verdict.
+5. **Policy Engine**: Evaluates policies (user/IP/category/time/location) and returns `PolicyDecision` with action + metadata.
+6. **Async Pipeline**: On cache miss without classification, adaptor derives a canonical classification scope key (`domain:<registered_domain>`) and enqueues both `classification-jobs` and `page-fetch-jobs` on that key so verdicting is content-aware and deduplicated across subdomains. LLM/page-fetch/reclass workers persist state in Postgres, update Redis, and schedule follow-up refreshes.
+7. **Management Layer**: Admin API exposes overrides, pending classification actions, taxonomy controls, and reporting. UI/CLI consume these APIs. CLI also drives migrations, smoke tests, cache inspection.
+8. **Observability**: Structured logs/events shipped to Elasticsearch; metrics exported via Prometheus; Kibana dashboards provide SOC/ops visibility.
 
 ```mermaid
 flowchart LR
@@ -28,6 +29,7 @@ flowchart LR
     end
 
     subgraph Proxy Layer
+        HA[HAProxy Edge Proxy]
         B[Squid Proxy]
         C[ICAP Adaptor]
     end
@@ -69,7 +71,7 @@ flowchart LR
         M[Prometheus]
     end
 
-    A --> B -->|ICAP REQMOD| C -->|PolicyDecisionRequest| D
+    A -->|HTTP/HTTPS proxy| HA -->|HTTP forward proxy| B -->|ICAP REQMOD| C -->|PolicyDecisionRequest| D
     D -->|PolicyDecision| C
     C -->|Cache lookup| E
     D -->|Persist verdict| F
@@ -122,6 +124,11 @@ flowchart LR
     PF -->|Metrics| M
 ```
 
+### 1.2 Docker Desktop/macOS note
+- Docker Desktop can NAT-rewrite the client source before HAProxy/Squid containers evaluate `src` ACLs.
+- In development on macOS, if LAN clients hit repeated HAProxy frontend `403` (`<NOSRV>`), use a dev ACL profile (`OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0`) and restrict port `3128` to LAN at host/router firewall.
+- For production-like identity validation, run the proxy edge on Linux and keep strict CIDRs (`192.168.1.0/24` or tighter).
+
 ## 2. Detailed Component Views
 
 ### 2.1 ICAP Adaptor (`svc-icap`)
@@ -167,14 +174,15 @@ flowchart LR
 ## 3. Request/Response Flows
 
 ### 3.1 Hot Path Decision Flow
-1. Squid sends ICAP REQMOD to adaptor.
-2. Adaptor parses ICAP, normalizes request, builds `PolicyDecisionRequest`.
-3. Cache lookup:
+1. Client sends proxy traffic to HAProxy (`:3128`), HAProxy applies source ACL policy and forwards to Squid.
+2. Squid sends ICAP REQMOD to adaptor.
+3. Adaptor parses ICAP, normalizes request, builds `PolicyDecisionRequest`.
+4. Cache lookup:
    - Hit → return cached `PolicyDecision`.
    - Miss → call Policy Engine.
-4. Policy Engine returns decision (allow/block/warn/etc.).
-5. Adaptor caches verdict, returns ICAP response to Squid.
-6. Squid enforces action (allow, block redirect page, warn, etc.).
+5. Policy Engine returns decision (allow/block/warn/etc.).
+6. Adaptor caches verdict, returns ICAP response to Squid.
+7. Squid enforces action (allow, block redirect page, warn, etc.).
 
 ### 3.2 Content-First Classification Flow
 The workflow for an unclassified site emphasizes “content-first” verification before allowing traffic (this is the path highlighted in the diagram above):

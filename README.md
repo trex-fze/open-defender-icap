@@ -6,7 +6,10 @@ Open Defender is an **AI-enhanced, open-source ICAP stack** that blends determin
 
 ```mermaid
 flowchart LR
+    U[User/Device]
+
     subgraph Ingress
+        HA[HAProxy Edge Proxy]
         SQ[Squid Proxy]
         ICAP[ICAP Adaptor]
     end
@@ -44,7 +47,9 @@ flowchart LR
         PR[Prometheus]
     end
 
-    SQ -->|HTTP traffic| ICAP
+    U -->|HTTP/HTTPS proxy| HA
+    HA -->|HTTP forward proxy| SQ
+    SQ -->|ICAP REQMOD| ICAP
     ICAP -->|Policy request| PE
     ICAP -->|Cache lookup| Cache
     PE -->|Verdict| ICAP
@@ -148,9 +153,14 @@ flowchart LR
 | `OD_ELASTIC_INDEX_PREFIX` | Prefix for ingested indices (`traffic-events`). |
 | `OD_FILEBEAT_SECRET` | Shared secret between Filebeat and event-ingester. |
 | `OD_HAPROXY_BIND_HOST` / `OD_HAPROXY_BIND_PORT` | External proxy listener published by HAProxy (default `0.0.0.0:3128`); clients connect to this endpoint. |
-| `OD_SQUID_ALLOWED_CLIENT_CIDRS` | Comma-separated client CIDRs allowed at the HAProxy edge before forwarding to Squid. |
+| `OD_SQUID_ALLOWED_CLIENT_CIDRS` | Comma-separated client CIDRs allowed at the HAProxy edge before forwarding to Squid. On Docker Desktop/macOS, container-visible peer IP can be rewritten; in that dev profile use `0.0.0.0/0` with LAN firewall restrictions on port `3128`. |
 | `OD_TRUST_PROXY_HEADERS` | Enables forwarded header trust in event-ingester (`true`/`false`, default `false`). Keep `false` unless ingress headers are overwritten and trusted by CIDR. |
 | `OD_TRUSTED_PROXY_CIDRS` | Comma-separated trusted ingress CIDRs used by Squid `follow_x_forwarded_for` and event-ingester header trust gating. |
+
+### Proxy ACL deployment profiles
+
+- **Docker Desktop/macOS (development)**: source IP can be NAT-rewritten before HAProxy/Squid ACL evaluation; use `OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0` and restrict `3128` to LAN via host/router firewall.
+- **Linux-hosted proxy (production-like)**: preserve strict source ACLs such as `OD_SQUID_ALLOWED_CLIENT_CIDRS=192.168.1.0/24` (or tighter `/32`) and validate with `tests/proxy-production-linux-e2e.sh`.
 | `OD_REPORTING_ELASTIC_URL` | Reporting endpoint used by `/api/v1/reporting/traffic` (feeds AI-driven analytics). |
 | `OPENAI_API_KEY` | API key for OpenAI-compatible providers (used when `type=openai/openai_compatible`). |
 | `OD_LOG_DIR` | Local directory for worker JSON logs (default `logs`; llm-worker writes `logs/llm-worker/llm-worker.log`). |
@@ -172,6 +182,7 @@ flowchart LR
 
 - [API Catalog](docs/api-catalog.md) – complete list of REST endpoints, auth requirements, and payload formats for every service.
 - [Fast Testing Deployment Guide](docs/fast-testing-deployment.md) - quick setup for end-to-end local testing, including client proxy config, env vars, startup/shutdown, and FAQ.
+- [Proxy 403 RCA (Docker Desktop)](docs/evidence/proxy-403-docker-desktop-rca-2026-04-09.md) - root cause analysis, remediation, and validation evidence for LAN client `403` on macOS Docker Desktop.
 - [Frontend Management Parity RFC](rfc/stage-10-frontend-management-parity.md) - proposed UI scope to cover all current management features exposed by Admin API/CLI.
 - [Frontend Management Parity Plan](implementation-plan/stage-10-frontend-management-parity.md) - phased implementation plan with task breakdown, quality gates, and rollout steps.
 - [Stage 10 Web Admin Runbook](docs/runbooks/stage10-web-admin-operator-runbook.md) - operator workflow validation steps and screenshot evidence checklist.

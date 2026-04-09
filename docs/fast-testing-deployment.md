@@ -14,7 +14,7 @@ This guide helps operators stand up Open Defender quickly for realistic local te
   - Memory: 8 GB minimum (12+ GB preferred)
   - Free disk: 20+ GB
 - Default local ports:
-  - `3128` (Squid proxy)
+  - `3128` (HAProxy edge listener for client proxy traffic)
   - `1344` (ICAP adaptor)
   - `19000` (Admin API)
   - `19001` (Web Admin)
@@ -30,8 +30,9 @@ If you want browser/device traffic to pass through the stack:
 1. Configure client proxy settings:
    - HTTP proxy: `<docker-host-lan-ip>:<OD_HAPROXY_BIND_PORT>` (example `192.168.1.103:3128`)
    - HTTPS proxy: `<docker-host-lan-ip>:<OD_HAPROXY_BIND_PORT>`
-2. Ensure Squid allows your client source IP:
-   - Configure `OD_SQUID_ALLOWED_CLIENT_CIDRS` in `.env` for the client networks that should use the proxy (default `192.168.1.0/24`).
+2. Ensure HAProxy/Squid ACLs allow your client source path:
+   - Configure `OD_SQUID_ALLOWED_CLIENT_CIDRS` in `.env` for client networks that should use the proxy (default `192.168.1.0/24`).
+   - Docker Desktop/macOS note: container-visible peer IP can be NAT-rewritten. If LAN clients still hit HAProxy frontend `403` (`<NOSRV>`) with correct LAN CIDRs, use dev profile `OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0` and restrict host port `3128` to LAN via firewall/router policy.
    - Keep `OD_TRUST_PROXY_HEADERS=true` only when HAProxy overwrites forwarding headers and `OD_TRUSTED_PROXY_CIDRS` includes only trusted HAProxy/Squid ingress peers.
    - If Squid does not contain explicit `http_access allow` rules, traffic will fail with `TCP_DENIED/403`.
    - Current local ACL policy in `deploy/docker/squid/squid.conf`:
@@ -76,6 +77,18 @@ flowchart LR
 
     ICAP -->|Allow/Block/ContentPending response| SQ --> U
 ```
+
+In local Docker Desktop deployments, source-IP ACL checks can observe a rewritten peer IP inside the HAProxy/Squid containers. This is expected on macOS and should be handled with the dev ACL profile described above.
+
+### 3.1 Proxy ACL profiles
+
+- **Docker Desktop/macOS (development)**:
+  - `OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0`
+  - Restrict inbound `3128/tcp` to trusted LAN ranges at host/router firewall.
+  - Validate success by confirming HAProxy logs show backend routing (`squid_backend/squid`) instead of frontend deny (`<NOSRV> ... 403`).
+- **Linux-hosted proxy (production-like)**:
+  - Keep `OD_SQUID_ALLOWED_CLIENT_CIDRS` narrow (`192.168.1.0/24` or tighter `/32`).
+  - Validate real client identity with `EXPECTED_CLIENT_IP=<client-ip> tests/proxy-production-linux-e2e.sh`.
 
 ## 4) Server-side configuration checklist
 
@@ -271,6 +284,11 @@ Use `down -v` only when you explicitly need a clean local data state.
   - Confirm `OD_TRUSTED_PROXY_CIDRS` includes the HAProxy/Squid ingress network; otherwise Squid will ignore forwarded headers and fall back to peer IP.
   - Check logs with `docker compose -f deploy/docker/docker-compose.yml logs --tail=100 squid`.
   - If you changed `squid.conf`, restart the stack so ACL changes apply.
+- I can reach `192.168.1.103:3128` but still get `403 Forbidden`. What is the root cause?
+  - This is usually ACL denial, not TCP reachability failure: HAProxy can deny at frontend before Squid backend forwarding.
+  - Check HAProxy logs for `forward_proxy/<NOSRV> ... 403`; that signature means edge ACL deny.
+  - On Docker Desktop/macOS, container-visible source can be rewritten (not the original LAN IP). In that case, use dev profile `OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0` plus LAN-only firewall restrictions.
+  - On Linux-hosted proxy edges, keep strict CIDRs and verify with `tests/proxy-production-linux-e2e.sh`.
 - How do I run fast repeat tests?
   - Use `INTEGRATION_BUILD=0 tests/integration.sh`.
 - How do I force a full clean validation?

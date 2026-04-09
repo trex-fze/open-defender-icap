@@ -60,4 +60,5 @@ Run `make gen-certs` once before the first `compose-up`; import `deploy/docker/s
 - **Build failures**: ensure `cargo build --release` succeeds locally; the multi-service image relies on the workspace compiling cleanly.
 - **Healthcheck retries**: Postgres/Elasticsearch may take >30s on first boot. Check `docker compose logs <service>` and confirm the expected passwords match `.env`.
 - **Port conflicts**: adjust published ports by overriding the compose file (e.g., `docker compose -f docker-compose.yml -f overrides.yml up`).
+- **Proxy `403` despite reachable `:3128` on Docker Desktop/macOS**: this is often source ACL mismatch caused by Desktop NAT rewrite before HAProxy/Squid evaluate `src`. For dev, set `OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0`, recreate `haproxy` + `squid`, and enforce LAN-only access to `3128` at host/router firewall.
 - **odctl errors**: confirm `OD_ADMIN_TOKEN` inside `.env` matches the token configured in `config/admin-api.json` or environment variables.
