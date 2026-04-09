@@ -19,7 +19,10 @@ describe('adminClient JSON helpers', () => {
   it('adminPostJson sets application/json content type by default', async () => {
     const mockResponse = {
       ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
       json: async () => ({ ok: true }),
+      text: async () => JSON.stringify({ ok: true }),
     } as Response;
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValueOnce(mockResponse);
@@ -36,7 +39,10 @@ describe('adminClient JSON helpers', () => {
   it('adminPutJson respects custom content type when provided', async () => {
     const mockResponse = {
       ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
       json: async () => ({ ok: true }),
+      text: async () => JSON.stringify({ ok: true }),
     } as Response;
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValueOnce(mockResponse);
@@ -56,7 +62,10 @@ describe('adminClient JSON helpers', () => {
   it('adminPutJson sets application/json when caller omits it', async () => {
     const mockResponse = {
       ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
       json: async () => ({ ok: true }),
+      text: async () => JSON.stringify({ ok: true }),
     } as Response;
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValueOnce(mockResponse);

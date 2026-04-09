@@ -41,6 +41,7 @@ describe('usePoliciesData', () => {
     mockFetch.mockResolvedValue({
       ok: true,
       status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
       json: async () => ({
         data: [
           {
@@ -66,7 +67,8 @@ describe('usePoliciesData', () => {
     mockFetch.mockRejectedValueOnce(new Error('network down'));
     const { result } = renderHook(() => usePoliciesData(), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.isMock).toBe(true);
+    expect(result.current.isMock).toBe(false);
     expect(result.current.error).toMatch(/network down/i);
+    expect(result.current.data).toHaveLength(0);
   });
 });

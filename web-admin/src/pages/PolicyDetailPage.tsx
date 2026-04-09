@@ -4,62 +4,171 @@ import { usePolicyDetail, usePolicyVersions } from '../hooks/usePoliciesData';
 import { usePolicyMutations } from '../hooks/usePolicyMutations';
 import { useAuth } from '../context/AuthContext';
 
+type EditableRule = {
+  id: string;
+  description: string;
+  priority: number;
+  action: string;
+  conditions: Record<string, unknown>;
+};
+
+const toEditableRules = (input: unknown): EditableRule[] => {
+  if (!Array.isArray(input)) return [];
+  return input.map((rule) => {
+    const candidate = rule as Record<string, unknown>;
+    return {
+      id: String(candidate.id ?? '').trim(),
+      description: typeof candidate.description === 'string' ? candidate.description : '',
+      priority: Number(candidate.priority ?? 0),
+      action: String(candidate.action ?? '').trim(),
+      conditions:
+        candidate.conditions && typeof candidate.conditions === 'object' && !Array.isArray(candidate.conditions)
+          ? (candidate.conditions as Record<string, unknown>)
+          : {},
+    };
+  });
+};
+
+const statusTone = (status: string) => {
+  if (status === 'active') return 'green';
+  if (status === 'archived') return 'slate';
+  return 'amber';
+};
+
 export const PolicyDetailPage = () => {
   const { policyId } = useParams<{ policyId: string }>();
   const navigate = useNavigate();
   const { hasRole } = useAuth();
   const { data: policy, loading, error, isMock } = usePolicyDetail(policyId);
   const { data: versions, error: versionsError } = usePolicyVersions(policyId);
-  const { publishPolicy, updatePolicy, busy, error: mutationError, canCallApi } = usePolicyMutations();
-  const [publishMessage, setPublishMessage] = useState<string | undefined>();
-  const [saveMessage, setSaveMessage] = useState<string | undefined>();
+  const {
+    publishPolicy,
+    updatePolicy,
+    validatePolicy,
+    disablePolicy,
+    deletePolicy,
+    busy,
+    error: mutationError,
+    canCallApi,
+  } = usePolicyMutations();
+  const [message, setMessage] = useState<string | undefined>();
   const [rulesJson, setRulesJson] = useState('[]');
   const [draftVersion, setDraftVersion] = useState('');
+  const [publishVersion, setPublishVersion] = useState('');
   const canPublish = hasRole('policy-admin');
   const canEdit = hasRole('policy-editor') || hasRole('policy-admin');
 
   useEffect(() => {
     if (!policy) return;
     setDraftVersion(policy.version);
+    setPublishVersion(policy.version);
     setRulesJson(JSON.stringify(policy.rules, null, 2));
   }, [policy?.id, policy?.version, policy?.rules]);
 
-  const handlePublish = async () => {
-    if (!policyId || !policy) return;
+  const parseRules = (): EditableRule[] => {
+    const parsed = JSON.parse(rulesJson);
+    const normalized = toEditableRules(parsed);
+    if (normalized.length === 0) {
+      throw new Error('At least one policy rule is required.');
+    }
+    return normalized;
+  };
+
+  const handleValidate = async () => {
+    if (!policy || !policyId) return;
+    setMessage(undefined);
     try {
-      await publishPolicy(policyId, `Published via web-admin for ${policy.name}`);
-      setPublishMessage('Policy published successfully. Refresh the list to verify active version.');
-      } catch {
-      setPublishMessage(undefined);
+      const normalized = parseRules();
+      const response = await validatePolicy({
+        name: policy.name,
+        version: draftVersion,
+        notes: `Validated via web-admin for ${policy.name}`,
+        rules: normalized,
+      });
+      if (response.valid) {
+        setMessage('Validation passed. Policy rules are valid.');
+      } else {
+        setMessage(`Validation failed: ${response.errors.join('; ')}`);
+      }
+    } catch (err) {
+      if (err instanceof Error) {
+        setMessage(`Validation failed: ${err.message}`);
+        return;
+      }
+      setMessage('Validation failed due to an unknown error.');
     }
   };
 
   const handleSave = async () => {
     if (!policyId || !policy) return;
+    setMessage(undefined);
     try {
-      const parsed = JSON.parse(rulesJson);
-      if (!Array.isArray(parsed)) {
-        setSaveMessage('Rules JSON must be an array of rule objects.');
-        return;
-      }
-      const normalized = parsed.map((rule) => ({
-        id: String(rule.id ?? '').trim(),
-        description: typeof rule.description === 'string' ? rule.description : '',
-        priority: Number(rule.priority ?? 0),
-        action: String(rule.action ?? '').trim(),
-        conditions:
-          rule.conditions && typeof rule.conditions === 'object' && !Array.isArray(rule.conditions)
-            ? rule.conditions
-            : {},
-      }));
+      const normalized = parseRules();
       await updatePolicy(policyId, {
         version: draftVersion,
         notes: `Updated via web-admin for ${policy.name}`,
         rules: normalized,
       });
-      setSaveMessage('Policy draft saved successfully.');
+      setMessage('Policy draft saved successfully.');
+    } catch (err) {
+      if (err instanceof Error) {
+        setMessage(`Save failed: ${err.message}`);
+        return;
+      }
+      setMessage('Save failed. Check JSON syntax and required rule fields.');
+    }
+  };
+
+  const handleActivate = async () => {
+    if (!policyId || !policy) return;
+    setMessage(undefined);
+    try {
+      await publishPolicy(
+        policyId,
+        `Activated via web-admin for ${policy.name}`,
+        publishVersion.trim() || undefined,
+      );
+      setMessage('Policy activated successfully.');
     } catch {
-      setSaveMessage('Save failed. Check JSON syntax and required rule fields.');
+      setMessage(undefined);
+    }
+  };
+
+  const handleDisable = async () => {
+    if (!policyId || !policy) return;
+    if (policy.status === 'active') {
+      setMessage('Active policy cannot be disabled directly. Activate another policy first.');
+      return;
+    }
+    if (!window.confirm(`Disable policy \"${policy.name}\" by archiving it?`)) return;
+    setMessage(undefined);
+    try {
+      await disablePolicy(policyId, `Disabled via web-admin for ${policy.name}`);
+      setMessage('Policy disabled (archived).');
+    } catch {
+      setMessage(undefined);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!policyId || !policy) return;
+    if (policy.status === 'active') {
+      setMessage('Active policy cannot be hard deleted. Activate another policy first.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `Hard delete policy \"${policy.name}\"? This permanently removes all versions and rules for this policy.`,
+      )
+    ) {
+      return;
+    }
+    setMessage(undefined);
+    try {
+      await deletePolicy(policyId);
+      navigate('/policies');
+    } catch {
+      setMessage(undefined);
     }
   };
 
@@ -92,14 +201,13 @@ export const PolicyDetailPage = () => {
         <div>
           <p className="section-title">Policy Detail</p>
           <h2 style={{ margin: 0 }}>{policy.name}</h2>
-          <p style={{ color: 'var(--muted)' }}>Version {policy.version}</p>
+          <p style={{ color: 'var(--muted)', marginBottom: 0 }}>
+            Current Version {policy.version} ·{' '}
+            <span className={`chip chip--${statusTone(policy.status)}`}>{policy.status}</span>
+          </p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-          {isMock ? (
-            <span className="chip chip--amber">Mock</span>
-          ) : (
-            <span className="chip chip--green">Live</span>
-          )}
+          {isMock ? <span className="chip chip--amber">Mock</span> : <span className="chip chip--green">Live</span>}
           <button className="cta-button" onClick={() => navigate('/policies')}>
             Back
           </button>
@@ -107,10 +215,30 @@ export const PolicyDetailPage = () => {
             <button
               className="cta-button"
               style={{ background: 'linear-gradient(120deg,#ff9b9b,#fdd744)', color: '#060b17' }}
-              onClick={handlePublish}
+              onClick={handleActivate}
               disabled={busy || isMock || !canCallApi}
             >
-              {busy ? 'Publishing...' : 'Publish Draft'}
+              {busy ? 'Activating...' : 'Activate'}
+            </button>
+          ) : null}
+          {canEdit ? (
+            <button
+              className="cta-button"
+              style={{ background: 'linear-gradient(120deg,#d6def6,#8ca0cb)', color: '#060b17' }}
+              onClick={handleDisable}
+              disabled={busy || isMock || !canCallApi || policy.status === 'active'}
+            >
+              Disable
+            </button>
+          ) : null}
+          {canPublish ? (
+            <button
+              className="cta-button"
+              style={{ background: 'linear-gradient(120deg,#f89b9b,#f26969)', color: '#060b17' }}
+              onClick={handleDelete}
+              disabled={busy || isMock || !canCallApi || policy.status === 'active'}
+            >
+              Hard Delete
             </button>
           ) : null}
         </div>
@@ -124,19 +252,28 @@ export const PolicyDetailPage = () => {
 
       {mutationError ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Publish failed: {mutationError}</p>
+          <p style={{ margin: 0, color: '#ff9b9b' }}>Policy action failed: {mutationError}</p>
         </div>
       ) : null}
 
-      {publishMessage ? (
+      {message ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
-          <p style={{ margin: 0, color: '#9ef7eb' }}>{publishMessage}</p>
+          <p style={{ margin: 0, color: '#9ef7eb' }}>{message}</p>
         </div>
       ) : null}
 
-      {saveMessage ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
-          <p style={{ margin: 0, color: '#9ef7eb' }}>{saveMessage}</p>
+      {canPublish ? (
+        <div className="glass-panel">
+          <p className="section-title">Activation version</p>
+          <label style={{ display: 'grid', gap: '0.35rem', maxWidth: 360 }}>
+            <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Version label for activation</span>
+            <input
+              value={publishVersion}
+              onChange={(event) => setPublishVersion(event.target.value)}
+              className="input"
+              placeholder="release-202604091900"
+            />
+          </label>
         </div>
       ) : null}
 
@@ -162,7 +299,10 @@ export const PolicyDetailPage = () => {
                 style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
               />
             </label>
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem', flexWrap: 'wrap' }}>
+              <button className="cta-button" onClick={handleValidate} disabled={busy || isMock || !canCallApi}>
+                {busy ? 'Validating...' : 'Validate'}
+              </button>
               <button className="cta-button" onClick={handleSave} disabled={busy || isMock || !canCallApi}>
                 {busy ? 'Saving...' : 'Save Draft'}
               </button>
@@ -188,9 +328,7 @@ export const PolicyDetailPage = () => {
                 <tr key={rule.id}>
                   <td>{rule.priority}</td>
                   <td>
-                    <span className={`chip chip--${rule.action === 'Block' ? 'red' : 'amber'}`}>
-                      {rule.action}
-                    </span>
+                    <span className={`chip chip--${rule.action === 'Block' ? 'red' : 'amber'}`}>{rule.action}</span>
                   </td>
                   <td>{rule.description ?? '—'}</td>
                   <td>

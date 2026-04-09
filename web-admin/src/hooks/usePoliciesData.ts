@@ -127,18 +127,31 @@ const mockDetail = (policyId: string | undefined): PolicyDetail | undefined => {
   };
 };
 
-export const usePoliciesData = (cursor?: string, limit = 50): PoliciesState => {
+export const usePoliciesData = (
+  cursor?: string,
+  limit = 50,
+  options?: { status?: string; search?: string; includeDrafts?: boolean },
+): PoliciesState => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
   const enabled = Boolean(baseUrl && canCallApi);
+  const status = options?.status?.trim();
+  const search = options?.search?.trim();
+  const includeDrafts = options?.includeDrafts ?? true;
 
   const query = useQuery({
-    queryKey: queryKeys.policies(baseUrl, cursor ?? '', limit),
+    queryKey: queryKeys.policies(baseUrl, cursor ?? '', limit, status ?? 'all', search ?? '', includeDrafts),
     enabled,
     queryFn: async () => {
       const body = await adminGetJson<PolicyListResponse>(
         { baseUrl, canCallApi, headers } as AdminApiContext,
         '/api/v1/policies',
-        { include_drafts: true, limit, cursor },
+        {
+          include_drafts: includeDrafts,
+          limit,
+          cursor,
+          status: status && status !== 'all' ? status : undefined,
+          search: search || undefined,
+        },
       );
       return {
         data: (body.data ?? []).map(mapSummary),

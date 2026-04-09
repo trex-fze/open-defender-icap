@@ -540,7 +540,9 @@ async fn main() -> Result<()> {
         .route("/api/v1/policies/validate", post(policies::validate_policy))
         .route(
             "/api/v1/policies/:id",
-            get(policies::get_policy).put(policies::update_policy),
+            get(policies::get_policy)
+                .put(policies::update_policy)
+                .delete(policies::delete_policy),
         )
         .route(
             "/api/v1/policies/:id/versions",

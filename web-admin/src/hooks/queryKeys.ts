@@ -1,5 +1,12 @@
 export const queryKeys = {
-  policies: (baseUrl: string, cursor: string, limit: number) => ['policies', baseUrl, cursor, limit] as const,
+  policies: (
+    baseUrl: string,
+    cursor: string,
+    limit: number,
+    status: string,
+    search: string,
+    includeDrafts: boolean,
+  ) => ['policies', baseUrl, cursor, limit, status, search, includeDrafts] as const,
   policyDetail: (baseUrl: string, policyId?: string) => ['policy-detail', baseUrl, policyId ?? 'missing'] as const,
   policyVersions: (baseUrl: string, policyId?: string) =>
     ['policy-versions', baseUrl, policyId ?? 'missing'] as const,

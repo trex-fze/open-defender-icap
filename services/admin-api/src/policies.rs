@@ -181,7 +181,11 @@ pub async fn list_policies(
             .push_bind(((legacy_page - 1) * limit) as i64);
     }
 
-    let rows = qb.build().fetch_all(state.pool()).await.map_err(map_db_error)?;
+    let rows = qb
+        .build()
+        .fetch_all(state.pool())
+        .await
+        .map_err(map_db_error)?;
     let has_more = rows.len() > limit as usize;
     let mut data: Vec<PolicySummary> = rows
         .into_iter()
@@ -259,7 +263,9 @@ pub async fn list_policy_versions(
                 version: row
                     .try_get("version")
                     .map_err(map_policy_version_row_error)?,
-                status: row.try_get("status").map_err(map_policy_version_row_error)?,
+                status: row
+                    .try_get("status")
+                    .map_err(map_policy_version_row_error)?,
                 created_by: row
                     .try_get("created_by")
                     .map_err(map_policy_version_row_error)?,
@@ -451,7 +457,8 @@ pub async fn update_policy(
 
     let mut name: String = existing.get("name");
     let mut version: String = existing.get("version");
-    let mut status: String = existing.get("status");
+    let existing_status: String = existing.get("status");
+    let mut status: String = existing_status.clone();
     if let Some(value) = payload.name.as_ref() {
         name = value.trim().to_string();
     }
@@ -465,6 +472,7 @@ pub async fn update_policy(
                 "setting status=active via update is not allowed; use publish endpoint",
             ));
         }
+        ensure_can_disable_status(existing_status.as_str(), status.as_str())?;
     }
 
     sqlx::query("UPDATE policies SET name = $1, version = $2, status = $3 WHERE id = $4")
@@ -605,6 +613,58 @@ pub async fn publish_policy(
         .await?;
 
     Ok(Json(detail))
+}
+
+pub async fn delete_policy(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Path(policy_id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_POLICY_PUBLISH)
+        .map_err(|status| (status, Json(ApiError::forbidden())))?;
+
+    let mut tx = state.pool().begin().await.map_err(map_db_error_tx)?;
+    let row = sqlx::query("SELECT id, name, version, status FROM policies WHERE id = $1")
+        .bind(policy_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_db_error_tx)?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ApiError::new("NOT_FOUND", "policy not found")),
+            )
+        })?;
+
+    let status: String = row.get("status");
+    ensure_can_delete_status(status.as_str())?;
+
+    let name: String = row.get("name");
+    let version: String = row.get("version");
+
+    sqlx::query("DELETE FROM policies WHERE id = $1")
+        .bind(policy_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_error_tx)?;
+    tx.commit().await.map_err(map_db_error_tx)?;
+
+    state
+        .log_policy_event(
+            "policy.delete",
+            Some(user.actor.clone()),
+            Some(policy_id.to_string()),
+            serde_json::json!({
+                "name": name,
+                "version": version,
+                "status": status,
+            }),
+        )
+        .await;
+
+    propagate_policy_runtime_change(&state, Some(user.actor.as_str()), policy_id, "delete").await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn propagate_policy_runtime_change(
@@ -813,6 +873,35 @@ fn normalize_policy_status(value: &str) -> Result<String, (StatusCode, Json<ApiE
     }
 }
 
+fn ensure_can_disable_status(
+    existing_status: &str,
+    next_status: &str,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    if existing_status == POLICY_STATUS_ACTIVE && next_status == POLICY_STATUS_ARCHIVED {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ApiError::new(
+                "ACTIVE_POLICY_GUARD",
+                "active policy cannot be disabled directly; activate another policy first",
+            )),
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_can_delete_status(status: &str) -> Result<(), (StatusCode, Json<ApiError>)> {
+    if status == POLICY_STATUS_ACTIVE {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ApiError::new(
+                "ACTIVE_POLICY_GUARD",
+                "active policy cannot be deleted; activate another policy first",
+            )),
+        ));
+    }
+    Ok(())
+}
+
 fn apply_filters(qb: &mut QueryBuilder<Postgres>, params: &PolicyListParams) {
     qb.push(" WHERE 1=1");
     if let Some(status) = params.status.as_ref() {
@@ -975,5 +1064,23 @@ mod tests {
             conditions: Conditions::default(),
         };
         assert!(normalize_rules(&[payload.clone(), payload]).is_err());
+    }
+
+    #[test]
+    fn disable_guard_blocks_archiving_active_policy() {
+        let result = ensure_can_disable_status(POLICY_STATUS_ACTIVE, POLICY_STATUS_ARCHIVED);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn disable_guard_allows_non_active_transitions() {
+        assert!(ensure_can_disable_status(POLICY_STATUS_DRAFT, POLICY_STATUS_ARCHIVED).is_ok());
+        assert!(ensure_can_disable_status(POLICY_STATUS_ARCHIVED, POLICY_STATUS_DRAFT).is_ok());
+    }
+
+    #[test]
+    fn delete_guard_blocks_active_policy() {
+        let result = ensure_can_delete_status(POLICY_STATUS_ACTIVE);
+        assert!(result.is_err());
     }
 }

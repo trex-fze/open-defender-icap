@@ -60,7 +60,7 @@ Override precedence note: policy-engine evaluates active domain overrides before
 | --- | --- | --- | --- |
 | `GET`/`POST` | `/api/v1/policies` | List or create policies via Admin API. | `policy-viewer` / `policy-editor`. |
 | `GET` | `/api/v1/policies/runtime-sync` | Compare active control-plane policy vs policy-engine runtime (`in_sync`, snapshots, drift reason). | `policy-viewer`. |
-| `GET`/`PUT` | `/api/v1/policies/:id` | Fetch or update a policy by ID. | `policy-viewer` / `policy-editor`. |
+| `GET`/`PUT`/`DELETE` | `/api/v1/policies/:id` | Fetch, update/disable (`status=archived`), or hard-delete a policy by ID. | `policy-viewer` / `policy-editor` / `policy-admin`. |
 | `GET` | `/api/v1/policies/:id/versions` | List immutable policy version snapshots for a policy (`version`, `status`, `created_by`, `created_at`, `deployed_at`, `rule_count`, `notes`). | `policy-viewer`. |
 | `POST` | `/api/v1/policies/:id/publish` | Mark a policy version as active (publishes notes). | `policy-admin`. |
 | `POST` | `/api/v1/policies/validate` | Validate a DSL payload without persisting. | `policy-editor`. |
@@ -70,6 +70,8 @@ Runtime propagation note: Admin API policy create/update/publish persists first,
 Validation hardening note: policy condition payloads now reject unknown keys; valid keys are `domains`, `categories`, `users`, `groups`, `source_ips`, and `risk_levels`.
 
 Status transition note: `PUT /api/v1/policies/:id` accepts `status=draft|archived`; promoting to `active` is restricted to `POST /api/v1/policies/:id/publish`.
+
+Active-policy continuity note: disabling (`status=archived`) or deleting the currently active policy is blocked with `409 ACTIVE_POLICY_GUARD`; operators must activate (publish) another policy first.
 
 Policy history note: `GET /api/v1/policies/:id/versions` is served from immutable `policy_versions` snapshots; `rule_count` is computed from the stored `rules` array for each snapshot and returned as an integer.
 

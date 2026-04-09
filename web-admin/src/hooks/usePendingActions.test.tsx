@@ -24,7 +24,9 @@ describe('usePendingActions', () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
       json: async () => ({}),
+      text: async () => '{}',
     });
 
     const { result } = renderHook(() => usePendingActions());
@@ -46,7 +48,9 @@ describe('usePendingActions', () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 500,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
       json: async () => ({ message: 'db unavailable' }),
+      text: async () => JSON.stringify({ message: 'db unavailable' }),
     });
 
     const { result } = renderHook(() => usePendingActions());
