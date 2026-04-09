@@ -134,5 +134,6 @@ Store screenshots under `docs/evidence/stage10-web-admin/` using this naming con
 - **Reliability gate command**: `RUNS=10 bash tests/security/facebook-e2e-reliability.sh` (auto-collects failure diagnostics into `tests/artifacts/ops-triage/`).
 - **403 from mutations**: verify role claims include required permissions.
 - **Dashboard analytics panels empty/misaligned**: verify `/api/v1/reporting/dashboard` returns non-empty `overview`/`hourly_usage` payload for the selected range, then confirm ingest writes `network.bytes` and `client.ip` in fresh traffic events; old indices may show lower bandwidth coverage until new events arrive.
+- **Recurring `domain:prompt-injection.*` pending rows**: historical synthetic smoke keys can be re-enqueued by pending reconciliation. Run `tests/ops/cleanup-synthetic-pending.sh` first in dry run mode (`DRY_RUN=1` default), then execute cleanup with `DRY_RUN=0 tests/ops/cleanup-synthetic-pending.sh`. Use `PURGE_ALL_PENDING=1` only when a full queue reset is intended.
 - **No CLI logs shown**: ensure admin API has `audit` access and data exists.
 - **Ops provider list empty**: set `VITE_LLM_PROVIDERS_URL` to worker providers endpoint.

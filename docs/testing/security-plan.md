@@ -29,4 +29,8 @@ Run this after the compose stack is up; include the console output in the Stageâ
    - Verify `llm-worker` logs show the payload being sanitized (check `svc-llm-worker` logs for `prompt_filter` entries) and that the resulting decision is `monitor` instead of `allow`.
 3. **Overrides/user input sanitization**: Attempt to submit an override reason containing `<script>alert(1)</script>` and confirm the Admin UI encodes it correctly (inspect the React UI or API response and ensure it is serialized as text).
 
+### Synthetic key cleanup (post-smoke hygiene)
+- Use `tests/ops/cleanup-synthetic-pending.sh` to remove stale synthetic keys such as `domain:prompt-injection.*` from classifications and pending rows.
+- Defaults to `DRY_RUN=1`; execute with `DRY_RUN=0` once reviewed.
+
 Document outcomes (date, tester, result) in the security evidence checklist for Stageâ€¯7.
