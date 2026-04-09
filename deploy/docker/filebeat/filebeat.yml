@@ -4,10 +4,7 @@ filebeat.inputs:
     enabled: true
     paths:
       - /var/log/squid/access.log*
-    parsers:
-      - ndjson:
-          overwrite_keys: true
-          message_key: message
+    ignore_older: 2h
     fields:
       od:
         source: squid

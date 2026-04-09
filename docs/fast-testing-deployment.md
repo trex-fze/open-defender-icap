@@ -28,16 +28,17 @@ This guide helps operators stand up Open Defender quickly for realistic local te
 If you want browser/device traffic to pass through the stack:
 
 1. Configure client proxy settings:
-   - HTTP proxy: `localhost:3128`
-   - HTTPS proxy: `localhost:3128`
+   - HTTP proxy: `<docker-host-lan-ip>:<OD_HAPROXY_BIND_PORT>` (example `192.168.1.103:3128`)
+   - HTTPS proxy: `<docker-host-lan-ip>:<OD_HAPROXY_BIND_PORT>`
 2. Ensure Squid allows your client source IP:
-   - The compose testing profile currently allows all client source IPs to avoid Docker Desktop source-IP translation issues during local tests.
+   - Configure `OD_SQUID_ALLOWED_CLIENT_CIDRS` in `.env` for the client networks that should use the proxy (default `192.168.1.0/24`).
+   - Keep `OD_TRUST_PROXY_HEADERS=true` only when HAProxy overwrites forwarding headers and `OD_TRUSTED_PROXY_CIDRS` includes only trusted HAProxy/Squid ingress peers.
    - If Squid does not contain explicit `http_access allow` rules, traffic will fail with `TCP_DENIED/403`.
    - Current local ACL policy in `deploy/docker/squid/squid.conf`:
-     - allows all source clients in local test mode
+     - allows source clients from `OD_SQUID_ALLOWED_CLIENT_CIDRS`
      - allows `CONNECT` only to SSL port `443`
      - denies unsafe ports and then applies final deny rule
-   - Security note: keep this profile for local/dev testing only. For shared networks or production, restrict source ACLs to your trusted subnets.
+   - Security note: for production, keep `OD_SQUID_ALLOWED_CLIENT_CIDRS` and `OD_TRUSTED_PROXY_CIDRS` as narrow as possible.
 3. Generate and trust the Squid CA certificate:
    - Run `make gen-certs`
    - Import `deploy/docker/squid/certs/ca.pem` into the OS/browser trust store
@@ -50,7 +51,8 @@ For API/script-based validation only (no browser), client proxy setup is optiona
 
 ```mermaid
 flowchart LR
-    U[Client Browser/curl] -->|HTTP/HTTPS via proxy| SQ[Squid :3128]
+    U[Client Browser/curl] -->|HTTP/HTTPS via proxy| HA[HAProxy :3128]
+    HA -->|HTTP forward proxy| SQ[Squid :3128]
     SQ -->|ICAP REQMOD| ICAP[ICAP Adaptor :1344]
     ICAP -->|Policy decision request| PE[Policy Engine :19010]
     PE -->|Action| ICAP
@@ -110,6 +112,10 @@ Core variables used most often:
 - `OD_CACHE_CHANNEL`: Redis invalidation channel (default `od:cache:invalidate`)
 - `OPENAI_API_KEY`: credential used by `openai` fallback provider
 - `OD_LOG_DIR`: local worker log root (default compose value `/app/logs`, mounted from host `logs/`)
+- `OD_HAPROXY_BIND_HOST` / `OD_HAPROXY_BIND_PORT`: public proxy endpoint exposed by HAProxy (default `0.0.0.0:3128`)
+- `OD_SQUID_ALLOWED_CLIENT_CIDRS`: source CIDRs HAProxy will allow to use the forward proxy
+- `OD_TRUST_PROXY_HEADERS`: enable/disable forwarded header trust in event-ingester (default `false`)
+- `OD_TRUSTED_PROXY_CIDRS`: CIDRs trusted by Squid and event-ingester for forwarded header promotion (set to ingress peers only)
 - `CRAWL4AI_LOG_SUBDIR`: crawl service log subdirectory under `OD_LOG_DIR` (default `crawl4ai`)
 - `CRAWL4AI_AUDIT_LOG_FILE`: structured crawl audit file name (default `crawl-audit.jsonl`)
 - `CRAWL4AI_APP_LOG_FILE`: crawl service application log file name (default `crawl4ai-service.log`)
@@ -207,6 +213,14 @@ tests/unit.sh
 INTEGRATION_BUILD=0 tests/integration.sh
 ```
 
+Production-Linux proxy identity validation (run on the proxy host):
+
+```bash
+EXPECTED_CLIENT_IP=192.168.1.253 tests/proxy-production-linux-e2e.sh
+```
+
+The script waits for a client-side probe request, validates that Squid records `%>a` as the expected client IP, verifies the event in Elasticsearch, and confirms trusted XFF promotion behavior.
+
 ## 7) Stop the project safely
 
 Normal shutdown (preserves persistent volumes):
@@ -252,7 +266,9 @@ Use `down -v` only when you explicitly need a clean local data state.
 - Why do HTTPS sites show certificate warnings in browser tests?
   - The Squid CA cert is not trusted on the client yet.
 - I set macOS proxy to `localhost:3128` but I cannot browse internet. Why?
-  - Check Squid ACLs first. Missing `http_access allow` rules cause blanket `TCP_DENIED/403` responses.
+  - For remote clients, use the Docker host LAN IP (for example `192.168.1.103:3128`), not `localhost:3128`.
+  - Check Squid ACLs first. `OD_SQUID_ALLOWED_CLIENT_CIDRS` must include your client source IP/CIDR or Squid will return `TCP_DENIED/403`.
+  - Confirm `OD_TRUSTED_PROXY_CIDRS` includes the HAProxy/Squid ingress network; otherwise Squid will ignore forwarded headers and fall back to peer IP.
   - Check logs with `docker compose -f deploy/docker/docker-compose.yml logs --tail=100 squid`.
   - If you changed `squid.conf`, restart the stack so ACL changes apply.
 - How do I run fast repeat tests?

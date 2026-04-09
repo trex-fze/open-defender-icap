@@ -18,6 +18,8 @@ pub struct IngestConfig {
     pub page_fetch_redis_url: Option<String>,
     pub page_fetch_stream: String,
     pub page_fetch_ttl_seconds: i32,
+    pub trust_proxy_headers: bool,
+    pub trusted_proxy_cidrs: Vec<String>,
 }
 
 impl IngestConfig {
@@ -53,8 +55,43 @@ impl IngestConfig {
             page_fetch_ttl_seconds: env_or("OD_PAGE_FETCH_TTL_SECONDS", "21600")
                 .parse()
                 .unwrap_or(21_600),
+            trust_proxy_headers: env_or("OD_TRUST_PROXY_HEADERS", "false")
+                .parse()
+                .unwrap_or(false),
+            trusted_proxy_cidrs: parse_cidr_csv(&env_or("OD_TRUSTED_PROXY_CIDRS", ""))?,
         })
     }
+}
+
+fn parse_cidr_csv(value: &str) -> anyhow::Result<Vec<String>> {
+    let mut cidrs = Vec::new();
+    for token in value.split(',') {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !trimmed.contains('/') {
+            return Err(anyhow::anyhow!("invalid CIDR '{trimmed}'"));
+        }
+        let (ip, prefix) = trimmed
+            .split_once('/')
+            .ok_or_else(|| anyhow::anyhow!("invalid CIDR '{trimmed}'"))?;
+        let ip_addr: std::net::IpAddr = ip
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid CIDR ip '{trimmed}'"))?;
+        let prefix_len: u8 = prefix
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid CIDR prefix '{trimmed}'"))?;
+        let max_bits = match ip_addr {
+            std::net::IpAddr::V4(_) => 32,
+            std::net::IpAddr::V6(_) => 128,
+        };
+        if prefix_len as u16 > max_bits {
+            return Err(anyhow::anyhow!("CIDR prefix out of range '{trimmed}'"));
+        }
+        cidrs.push(trimmed.to_string());
+    }
+    Ok(cidrs)
 }
 
 fn env_or(key: &str, default: &str) -> String {

@@ -35,6 +35,8 @@ async fn main() -> anyhow::Result<()> {
         config.elastic_username.clone(),
         config.elastic_password.clone(),
         config.ingest_retry_attempts,
+        config.trust_proxy_headers,
+        config.trusted_proxy_cidrs.clone(),
     )?;
     if config.apply_templates {
         bootstrap::ensure_assets(&writer, &config).await?;

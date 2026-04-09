@@ -147,6 +147,10 @@ flowchart LR
 | `OD_ELASTIC_URL` | Elasticsearch base URL for audit export & reporting. |
 | `OD_ELASTIC_INDEX_PREFIX` | Prefix for ingested indices (`traffic-events`). |
 | `OD_FILEBEAT_SECRET` | Shared secret between Filebeat and event-ingester. |
+| `OD_HAPROXY_BIND_HOST` / `OD_HAPROXY_BIND_PORT` | External proxy listener published by HAProxy (default `0.0.0.0:3128`); clients connect to this endpoint. |
+| `OD_SQUID_ALLOWED_CLIENT_CIDRS` | Comma-separated client CIDRs allowed at the HAProxy edge before forwarding to Squid. |
+| `OD_TRUST_PROXY_HEADERS` | Enables forwarded header trust in event-ingester (`true`/`false`, default `false`). Keep `false` unless ingress headers are overwritten and trusted by CIDR. |
+| `OD_TRUSTED_PROXY_CIDRS` | Comma-separated trusted ingress CIDRs used by Squid `follow_x_forwarded_for` and event-ingester header trust gating. |
 | `OD_REPORTING_ELASTIC_URL` | Reporting endpoint used by `/api/v1/reporting/traffic` (feeds AI-driven analytics). |
 | `OPENAI_API_KEY` | API key for OpenAI-compatible providers (used when `type=openai/openai_compatible`). |
 | `OD_LOG_DIR` | Local directory for worker JSON logs (default `logs`; llm-worker writes `logs/llm-worker/llm-worker.log`). |
@@ -183,6 +187,7 @@ flowchart LR
 | Compose smoke | `tests/integration.sh` | Builds stack, executes `odctl smoke`, runs Stage 6 ingest smoke, and checks health endpoints. |
 | Content-first blocking smoke | `tests/content-pending-smoke.sh` | Starts the docker stack, issues a Squid→ICAP request for a new host, and verifies Crawl4AI, pending queue, Admin API/CLI, and cache updates end-to-end. |
 | Ingestion smoke (standalone) | `tests/stage06_ingest.sh` | Validates Filebeat → event-ingester → Elasticsearch → reporting API. |
+| Production-Linux proxy E2E | `EXPECTED_CLIENT_IP=192.168.1.253 tests/proxy-production-linux-e2e.sh` | Validates real client source IP in Squid/Elasticsearch and default anti-spoof behavior; set `VERIFY_TRUSTED_XFF_PROMOTION=1` only when trusted XFF CIDRs are intentionally configured. |
 | Performance | `k6 run tests/perf/k6-traffic.js` | Load test for `/api/v1/reporting/traffic` & `/api/v1/policies`. |
 | Security authZ smoke | `tests/security/authz-smoke.sh` | Confirms 401 for unauthenticated requests and payload validation. |
 | Security prompt-injection | `tests/security/llm-prompt-smoke.sh` | Enqueues malicious payload and verifies llm-worker ignores injection instructions. |

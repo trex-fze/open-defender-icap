@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use common_types::normalizer::normalize_target;
 use reqwest::Client;
 use serde_json::{json, Map, Value};
+use std::net::IpAddr;
 use tracing::{debug, warn};
 use url::Url;
 
@@ -13,6 +14,14 @@ pub struct ElasticWriter {
     username: Option<String>,
     password: Option<String>,
     retry_attempts: usize,
+    trust_proxy_headers: bool,
+    trusted_proxy_cidrs: Vec<TrustedCidr>,
+}
+
+#[derive(Clone, Debug)]
+struct TrustedCidr {
+    network: IpAddr,
+    prefix_len: u8,
 }
 
 impl ElasticWriter {
@@ -22,8 +31,14 @@ impl ElasticWriter {
         username: Option<String>,
         password: Option<String>,
         retry_attempts: usize,
+        trust_proxy_headers: bool,
+        trusted_proxy_cidrs: Vec<String>,
     ) -> anyhow::Result<Self> {
         let client = Client::builder().build()?;
+        let trusted_proxy_cidrs = trusted_proxy_cidrs
+            .into_iter()
+            .map(|raw| parse_cidr(&raw))
+            .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -31,6 +46,8 @@ impl ElasticWriter {
             username,
             password,
             retry_attempts: retry_attempts.max(1),
+            trust_proxy_headers,
+            trusted_proxy_cidrs,
         })
     }
 
@@ -41,7 +58,12 @@ impl ElasticWriter {
 
         let mut body = String::new();
         for event in events {
-            let (index, normalized) = normalize_event(index_prefix.clone(), event);
+            let (index, normalized) = normalize_event(
+                index_prefix.clone(),
+                event,
+                self.trust_proxy_headers,
+                &self.trusted_proxy_cidrs,
+            );
             let meta = json!({
                 "index": {
                     "_index": index,
@@ -135,7 +157,12 @@ impl ElasticWriter {
     }
 }
 
-fn normalize_event(index_prefix: String, mut event: Value) -> (String, Value) {
+fn normalize_event(
+    index_prefix: String,
+    mut event: Value,
+    trust_proxy_headers: bool,
+    trusted_proxy_cidrs: &[TrustedCidr],
+) -> (String, Value) {
     let timestamp = event
         .get("@timestamp")
         .and_then(Value::as_str)
@@ -150,7 +177,7 @@ fn normalize_event(index_prefix: String, mut event: Value) -> (String, Value) {
         .map(|s| s.to_string());
 
     if let Value::Object(ref mut map) = event {
-        enrich_squid_event(map);
+        enrich_squid_event(map, trust_proxy_headers, trusted_proxy_cidrs);
         map.entry("ingested_at".to_string())
             .or_insert_with(|| json!(Utc::now()));
         if let Some(trace) = trace_value {
@@ -162,7 +189,11 @@ fn normalize_event(index_prefix: String, mut event: Value) -> (String, Value) {
     (index, event)
 }
 
-fn enrich_squid_event(map: &mut Map<String, Value>) {
+fn enrich_squid_event(
+    map: &mut Map<String, Value>,
+    trust_proxy_headers: bool,
+    trusted_proxy_cidrs: &[TrustedCidr],
+) {
     let message = map
         .get("message")
         .and_then(Value::as_str)
@@ -184,6 +215,42 @@ fn enrich_squid_event(map: &mut Map<String, Value>) {
 
     if let Some(ip) = source_ip.as_deref() {
         ensure_path_str(map, &["source", "ip"], ip);
+        if let Ok(peer_ip) = ip.parse::<IpAddr>() {
+            let mut client_ip = peer_ip;
+            let mut client_ip_source = "peer";
+            let (forwarded_raw, xff_raw) = extract_forwarding_headers_from_log_line(&message);
+
+            if let Some(forwarded) = forwarded_raw {
+                ensure_path_str(map, &["od", "forwarded_raw"], forwarded);
+            }
+            if let Some(xff) = xff_raw {
+                if !xff.is_empty() {
+                    ensure_path_str(map, &["od", "forwarded_for_raw"], xff);
+                }
+            }
+
+            if trust_proxy_headers && is_trusted_proxy(peer_ip, trusted_proxy_cidrs) {
+                if let Some(forwarded) = forwarded_raw {
+                    if let Some(original_ip) = first_valid_forwarded_header_ip(forwarded) {
+                        client_ip = original_ip;
+                        client_ip_source = "forwarded";
+                    }
+                }
+                if client_ip_source == "peer" {
+                    if let Some(xff) = xff_raw {
+                        if let Some(original_ip) = first_valid_x_forwarded_for_ip(xff) {
+                            client_ip = original_ip;
+                            client_ip_source = "x-forwarded-for";
+                        }
+                    }
+                }
+            }
+
+            ensure_path_str(map, &["client", "ip"], &client_ip.to_string());
+            ensure_path_str(map, &["od", "client_ip_source"], client_ip_source);
+        } else {
+            ensure_path_str(map, &["od", "client_ip_source"], "unknown");
+        }
     }
 
     if let Some(token) = status_token.as_deref() {
@@ -231,6 +298,140 @@ fn enrich_squid_event(map: &mut Map<String, Value>) {
                 );
             }
         }
+    }
+}
+
+fn extract_forwarding_headers_from_log_line(message: &str) -> (Option<&str>, Option<&str>) {
+    let quoted = extract_trailing_quoted_fields(message, 2);
+    match quoted.as_slice() {
+        [] => (None, None),
+        [xff] => (None, Some(*xff)),
+        [forwarded, xff] => (Some(*forwarded), Some(*xff)),
+        _ => (None, None),
+    }
+}
+
+fn extract_trailing_quoted_fields<'a>(message: &'a str, max_fields: usize) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    let mut cursor = message.trim_end();
+    for _ in 0..max_fields {
+        let end = match cursor.rfind('"') {
+            Some(idx) if idx == cursor.len() - 1 => idx,
+            _ => break,
+        };
+        let before_end = &cursor[..end];
+        let start = match before_end.rfind('"') {
+            Some(idx) => idx,
+            None => break,
+        };
+        out.push(before_end[start + 1..].trim());
+        cursor = before_end[..start].trim_end();
+    }
+    out.reverse();
+    out
+}
+
+fn first_valid_forwarded_header_ip(forwarded: &str) -> Option<IpAddr> {
+    for element in forwarded.split(',') {
+        for pair in element.split(';') {
+            let Some((key, value)) = pair.split_once('=') else {
+                continue;
+            };
+            if key.trim().eq_ignore_ascii_case("for") {
+                if let Some(ip) = parse_ip_token(value) {
+                    return Some(ip);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn first_valid_x_forwarded_for_ip(xff: &str) -> Option<IpAddr> {
+    xff.split(',').find_map(parse_ip_token)
+}
+
+fn parse_ip_token(raw: &str) -> Option<IpAddr> {
+    let token = raw.trim().trim_matches('"').trim();
+    if token.is_empty() || token.eq_ignore_ascii_case("unknown") || token.starts_with('_') {
+        return None;
+    }
+
+    if let Ok(ip) = token.parse::<IpAddr>() {
+        return Some(ip);
+    }
+
+    if let Some(rest) = token.strip_prefix('[') {
+        let end = rest.find(']')?;
+        let ip_part = &rest[..end];
+        if let Ok(ip) = ip_part.parse::<IpAddr>() {
+            return Some(ip);
+        }
+    }
+
+    if let Some((host, port)) = token.rsplit_once(':') {
+        if port.chars().all(|ch| ch.is_ascii_digit()) {
+            if let Ok(ip) = host.parse::<IpAddr>() {
+                return Some(ip);
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_cidr(raw: &str) -> anyhow::Result<TrustedCidr> {
+    let (ip_raw, prefix_raw) = raw
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("invalid trusted proxy CIDR: {raw}"))?;
+    let network = ip_raw
+        .parse::<IpAddr>()
+        .map_err(|_| anyhow::anyhow!("invalid trusted proxy CIDR ip: {raw}"))?;
+    let prefix_len = prefix_raw
+        .parse::<u8>()
+        .map_err(|_| anyhow::anyhow!("invalid trusted proxy CIDR prefix: {raw}"))?;
+    let max_bits = match network {
+        IpAddr::V4(_) => 32,
+        IpAddr::V6(_) => 128,
+    };
+    if prefix_len as u16 > max_bits {
+        return Err(anyhow::anyhow!("trusted proxy CIDR out of range: {raw}"));
+    }
+    Ok(TrustedCidr {
+        network,
+        prefix_len,
+    })
+}
+
+fn is_trusted_proxy(ip: IpAddr, trusted_proxy_cidrs: &[TrustedCidr]) -> bool {
+    trusted_proxy_cidrs
+        .iter()
+        .any(|cidr| ip_in_cidr(ip, cidr.network, cidr.prefix_len))
+}
+
+fn ip_in_cidr(ip: IpAddr, network: IpAddr, prefix_len: u8) -> bool {
+    match (ip, network) {
+        (IpAddr::V4(ipv4), IpAddr::V4(netv4)) => {
+            let ip_u = u32::from(ipv4);
+            let net_u = u32::from(netv4);
+            let mask = if prefix_len == 0 {
+                0
+            } else {
+                u32::MAX << (32 - prefix_len)
+            };
+            (ip_u & mask) == (net_u & mask)
+        }
+        (IpAddr::V6(ipv6), IpAddr::V6(netv6)) => {
+            let ip_u = u128::from(ipv6);
+            let net_u = u128::from(netv6);
+            let mask = if prefix_len == 0 {
+                0
+            } else {
+                u128::MAX << (128 - prefix_len)
+            };
+            (ip_u & mask) == (net_u & mask)
+        }
+        _ => false,
     }
 }
 
@@ -314,7 +515,7 @@ mod tests {
             "@timestamp": "2026-03-23T12:00:00Z",
             "message": "ok"
         });
-        let (index, value) = normalize_event("traffic-events".into(), event);
+        let (index, value) = normalize_event("traffic-events".into(), event, false, &[]);
         assert_eq!(index, "traffic-events-2026.03.23");
         assert!(value.get("ingested_at").is_some());
     }
@@ -325,7 +526,7 @@ mod tests {
             "@timestamp": "2026-04-04T16:07:22.839Z",
             "message": "1775318877.918      7 172.66.0.227 NONE_NONE/403 1058 CONNECT dice.com:443 - HIER_NONE/- text/html"
         });
-        let (_index, value) = normalize_event("traffic-events".into(), event);
+        let (_index, value) = normalize_event("traffic-events".into(), event, false, &[]);
         assert_eq!(
             value.pointer("/destination/domain").and_then(Value::as_str),
             Some("dice.com")
@@ -352,7 +553,7 @@ mod tests {
             "recommended_action_inferred": "allow",
             "destination": { "domain": "preset.example" }
         });
-        let (_index, value) = normalize_event("traffic-events".into(), event);
+        let (_index, value) = normalize_event("traffic-events".into(), event, false, &[]);
         assert_eq!(
             value.pointer("/destination/domain").and_then(Value::as_str),
             Some("preset.example")
@@ -362,6 +563,64 @@ mod tests {
                 .get("recommended_action_inferred")
                 .and_then(Value::as_str),
             Some("allow")
+        );
+    }
+
+    #[test]
+    fn populates_client_ip_from_trusted_forwarded_header() {
+        let trusted = vec![parse_cidr("192.168.1.0/24").expect("valid cidr")];
+        let event = json!({
+            "@timestamp": "2026-04-04T16:07:22.839Z",
+            "message": "1775318877.918 7 192.168.1.44 TCP_TUNNEL/200 39 CONNECT www.bing.com:443 - HIER_DIRECT/150.171.28.16 - \"for=203.0.113.9;proto=https;host=www.bing.com\" \"198.51.100.4\""
+        });
+        let (_index, value) = normalize_event("traffic-events".into(), event, true, &trusted);
+        assert_eq!(
+            value.pointer("/source/ip").and_then(Value::as_str),
+            Some("192.168.1.44")
+        );
+        assert_eq!(
+            value.pointer("/client/ip").and_then(Value::as_str),
+            Some("203.0.113.9")
+        );
+        assert_eq!(
+            value.pointer("/od/client_ip_source").and_then(Value::as_str),
+            Some("forwarded")
+        );
+    }
+
+    #[test]
+    fn ignores_xff_from_untrusted_peer() {
+        let trusted = vec![parse_cidr("192.168.1.0/24").expect("valid cidr")];
+        let event = json!({
+            "@timestamp": "2026-04-04T16:07:22.839Z",
+            "message": "1775318877.918 7 10.10.10.10 TCP_TUNNEL/200 39 CONNECT www.bing.com:443 - HIER_DIRECT/150.171.28.16 - \"for=203.0.113.9\" \"203.0.113.9\""
+        });
+        let (_index, value) = normalize_event("traffic-events".into(), event, true, &trusted);
+        assert_eq!(
+            value.pointer("/client/ip").and_then(Value::as_str),
+            Some("10.10.10.10")
+        );
+        assert_eq!(
+            value.pointer("/od/client_ip_source").and_then(Value::as_str),
+            Some("peer")
+        );
+    }
+
+    #[test]
+    fn ignores_forwarding_headers_when_disabled() {
+        let trusted = vec![parse_cidr("192.168.1.0/24").expect("valid cidr")];
+        let event = json!({
+            "@timestamp": "2026-04-04T16:07:22.839Z",
+            "message": "1775318877.918 7 192.168.1.44 TCP_TUNNEL/200 39 CONNECT www.bing.com:443 - HIER_DIRECT/150.171.28.16 - \"for=203.0.113.9\" \"203.0.113.9\""
+        });
+        let (_index, value) = normalize_event("traffic-events".into(), event, false, &trusted);
+        assert_eq!(
+            value.pointer("/client/ip").and_then(Value::as_str),
+            Some("192.168.1.44")
+        );
+        assert_eq!(
+            value.pointer("/od/client_ip_source").and_then(Value::as_str),
+            Some("peer")
         );
     }
 }

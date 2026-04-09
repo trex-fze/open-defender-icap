@@ -147,6 +147,8 @@ Local auth startup note: in `local`/`hybrid` mode, `OD_LOCAL_AUTH_JWT_SECRET` is
 | `GET` | `/health/ready` | Health probe. | None. | — | `HealthResponse`. |
 | `GET` | `/metrics` | Prometheus counters for ingest batches, page fetch scheduling. | None. | — | Text metrics. |
 
+Traffic IP enrichment note: ingester persists `source.ip` as the immediate Squid peer and always sets `client.ip` (defaults to peer IP). When `OD_TRUST_PROXY_HEADERS=true` and `source.ip` is inside `OD_TRUSTED_PROXY_CIDRS`, ingester resolves client identity from `Forwarded` first, then `X-Forwarded-For`; otherwise it keeps peer IP. Provenance is stored in `od.client_ip_source`.
+
 ---
 
 ## Admin Tooling & Workers

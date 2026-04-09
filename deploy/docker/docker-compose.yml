@@ -213,6 +213,8 @@ services:
       OD_PAGE_FETCH_REDIS_URL: ${OD_PAGE_FETCH_REDIS_URL:-redis://redis:6379}
       OD_PAGE_FETCH_STREAM: ${OD_PAGE_FETCH_STREAM:-page-fetch-jobs}
       OD_PAGE_FETCH_TTL_SECONDS: ${OD_PAGE_FETCH_TTL_SECONDS:-21600}
+      OD_TRUST_PROXY_HEADERS: ${OD_TRUST_PROXY_HEADERS:-false}
+      OD_TRUSTED_PROXY_CIDRS: ${OD_TRUSTED_PROXY_CIDRS:-}
     ports:
       - "19100:19100"
     depends_on:
@@ -317,13 +319,37 @@ services:
       admin-api:
         condition: service_started
 
+  haproxy:
+    image: haproxy:2.9-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - sh /usr/local/etc/haproxy/render-haproxy-cfg.sh /tmp/haproxy.generated.cfg && haproxy -W -db -f /tmp/haproxy.generated.cfg
+    ports:
+      - "${OD_HAPROXY_BIND_HOST:-0.0.0.0}:${OD_HAPROXY_BIND_PORT:-3128}:3128"
+    environment:
+      OD_SQUID_ALLOWED_CLIENT_CIDRS: ${OD_SQUID_ALLOWED_CLIENT_CIDRS:-192.168.1.0/24}
+      OD_HAPROXY_BACKEND_HOST: squid
+      OD_HAPROXY_BACKEND_PORT: 3128
+      OD_HAPROXY_LISTEN_PORT: 3128
+    volumes:
+      - ./haproxy/render-haproxy-cfg.sh:/usr/local/etc/haproxy/render-haproxy-cfg.sh:ro
+    depends_on:
+      squid:
+        condition: service_started
+
   squid:
     image: ubuntu/squid:5.2-22.04_edge
     restart: unless-stopped
-    ports:
-      - "0.0.0.0:3128:3128"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - sh /etc/squid/render-squid-conf.sh /etc/squid/squid.conf /tmp/squid.generated.conf && squid -N -f /tmp/squid.generated.conf
+    environment:
+      OD_SQUID_ALLOWED_CLIENT_CIDRS: ${OD_SQUID_ALLOWED_CLIENT_CIDRS:-192.168.1.0/24}
+      OD_TRUSTED_PROXY_CIDRS: ${OD_TRUSTED_PROXY_CIDRS:-}
     volumes:
       - ./squid/squid.conf:/etc/squid/squid.conf:ro
+      - ./squid/render-squid-conf.sh:/etc/squid/render-squid-conf.sh:ro
       - ./squid/certs:/etc/squid/certs:ro
       - ../../data/squid-logs:/var/log/squid
     depends_on:
@@ -361,6 +387,8 @@ services:
       event-ingester:
         condition: service_started
       squid:
+        condition: service_started
+      haproxy:
         condition: service_started
 
   odctl-runner:

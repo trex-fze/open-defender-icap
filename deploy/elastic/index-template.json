@@ -17,10 +17,18 @@
           "properties": {
             "environment": { "type": "keyword" },
             "service": { "type": "keyword" },
-            "source": { "type": "keyword" }
+            "source": { "type": "keyword" },
+            "client_ip_source": { "type": "keyword" },
+            "forwarded_raw": { "type": "keyword", "ignore_above": 4096 },
+            "forwarded_for_raw": { "type": "keyword", "ignore_above": 4096 }
           }
         },
         "source": {
+          "properties": {
+            "ip": { "type": "ip" }
+          }
+        },
+        "client": {
           "properties": {
             "ip": { "type": "ip" }
           }
