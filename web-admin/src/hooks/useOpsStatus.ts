@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { adminGetJson, type AdminApiContext } from '../api/adminClient';
 import type { CursorPaged } from '../types/pagination';
+import { queryKeys } from './queryKeys';
 import { useAdminApi } from './useAdminApi';
 
 type PendingRecord = {
@@ -9,9 +10,6 @@ type PendingRecord = {
 
 type ProviderSummary = {
   name: string;
-  provider_type: string;
-  endpoint: string;
-  role: string;
 };
 
 export type OpsSnapshot = {
@@ -22,78 +20,78 @@ export type OpsSnapshot = {
 
 const PROVIDERS_URL = (import.meta.env.VITE_LLM_PROVIDERS_URL ?? '').trim();
 
-export const useOpsStatus = () => {
+const DEFAULT_SNAPSHOT: OpsSnapshot = {
+  pendingCount: 0,
+  llmProviderNames: [],
+  source: 'mock',
+};
+
+export const useOpsStatus = (refreshIntervalMs = 0) => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
-  const [data, setData] = useState<OpsSnapshot>({
-    pendingCount: 0,
-    llmProviderNames: [],
-    source: 'mock',
-  });
-  const [loading, setLoading] = useState(Boolean(canCallApi));
-  const [error, setError] = useState<string | undefined>();
+  const enabled = Boolean(baseUrl && canCallApi);
 
-  useEffect(() => {
-    if (!baseUrl || !canCallApi) {
-      setData({ pendingCount: 0, llmProviderNames: [], source: 'mock' });
-      setLoading(false);
-      return;
-    }
+  const query = useQuery({
+    queryKey: queryKeys.opsStatus(baseUrl, PROVIDERS_URL || 'none'),
+    enabled,
+    refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : false,
+    refetchIntervalInBackground: false,
+    queryFn: async (): Promise<OpsSnapshot> => {
+      const pending = await adminGetJson<CursorPaged<PendingRecord>>(
+        { baseUrl, canCallApi, headers } as AdminApiContext,
+        '/api/v1/classifications/pending',
+        { limit: 500 },
+      );
 
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const fetchOps = async () => {
-      setLoading(true);
-      setError(undefined);
-      try {
-        const pending = await adminGetJson<CursorPaged<PendingRecord>>(
-          { baseUrl, canCallApi, headers } as AdminApiContext,
-          '/api/v1/classifications/pending',
-          { limit: 500 },
-          { signal: controller.signal },
-        );
-
-        let providers: ProviderSummary[] = [];
-        let source: OpsSnapshot['source'] = 'live';
-        if (PROVIDERS_URL) {
-          try {
-            const resp = await fetch(PROVIDERS_URL, { signal: controller.signal });
-            if (resp.ok) {
-              providers = (await resp.json()) as ProviderSummary[];
-            } else {
-              source = 'partial';
-            }
-          } catch {
-            source = 'partial';
-          }
-        } else {
-          source = 'partial';
-        }
-
-        if (!cancelled) {
-          setData({
-            pendingCount: pending.data.length,
-            llmProviderNames: providers.map((item) => item.name),
-            source,
-          });
-        }
-      } catch (err) {
-        if (controller.signal.aborted || cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to fetch operations status');
-        setData({ pendingCount: 0, llmProviderNames: [], source: 'mock' });
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+      if (!PROVIDERS_URL) {
+        return {
+          pendingCount: pending.data.length,
+          llmProviderNames: [],
+          source: 'partial',
+        };
       }
-    };
 
-    fetchOps();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [baseUrl, canCallApi, headers]);
+      try {
+        const resp = await fetch(PROVIDERS_URL);
+        if (!resp.ok) {
+          return {
+            pendingCount: pending.data.length,
+            llmProviderNames: [],
+            source: 'partial',
+          };
+        }
+        const providers = (await resp.json()) as ProviderSummary[];
+        return {
+          pendingCount: pending.data.length,
+          llmProviderNames: providers.map((item) => item.name),
+          source: 'live',
+        };
+      } catch {
+        return {
+          pendingCount: pending.data.length,
+          llmProviderNames: [],
+          source: 'partial',
+        };
+      }
+    },
+  });
 
-  return { data, loading, error } as const;
+  if (!enabled) {
+    return { data: DEFAULT_SNAPSHOT, loading: false, error: undefined, updatedAt: undefined } as const;
+  }
+
+  if (query.isError) {
+    return {
+      data: DEFAULT_SNAPSHOT,
+      loading: false,
+      error: query.error instanceof Error ? query.error.message : 'Failed to fetch operations status',
+      updatedAt: query.dataUpdatedAt,
+    } as const;
+  }
+
+  return {
+    data: query.data ?? DEFAULT_SNAPSHOT,
+    loading: query.isLoading,
+    error: undefined,
+    updatedAt: query.dataUpdatedAt,
+  } as const;
 };

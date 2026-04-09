@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ResponsiveContainer,
@@ -46,8 +46,19 @@ export const DashboardPage = () => {
   const navigate = useNavigate();
   const [range, setRange] = useState('24h');
   const [topN, setTopN] = useState(10);
-  const { data: ops, loading: opsLoading, error: opsError } = useOpsStatus();
-  const dashboard = useDashboardReportData(range, topN);
+  const [refreshIntervalMs, setRefreshIntervalMs] = useState<number>(() => {
+    if (typeof window === 'undefined') return 30_000;
+    const raw = window.localStorage.getItem('od.dashboard.refresh.ms');
+    const parsed = raw ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 30_000;
+  });
+  const { data: ops, loading: opsLoading, error: opsError, updatedAt: opsUpdatedAt } = useOpsStatus(refreshIntervalMs);
+  const dashboard = useDashboardReportData(range, topN, undefined, refreshIntervalMs);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('od.dashboard.refresh.ms', String(refreshIntervalMs));
+  }, [refreshIntervalMs]);
 
   const overview = dashboard.data?.overview;
   const coverage = dashboard.data?.coverage;
@@ -80,6 +91,8 @@ export const DashboardPage = () => {
     [dashboard.data?.top_blocked_domains],
   );
 
+  const lastUpdated = Math.max(dashboard.updatedAt ?? 0, opsUpdatedAt ?? 0);
+
   return (
     <div>
       <div className="page-header">
@@ -90,18 +103,29 @@ export const DashboardPage = () => {
             Client-IP traffic intelligence with usage, bandwidth, and block trends.
           </p>
         </div>
-        <div className="page-header-actions">
-          <select className="search-input" value={range} onChange={(event) => setRange(event.target.value)}>
+        <div className="page-header-actions dashboard-header-actions">
+          <select className="search-input dashboard-header-select" value={range} onChange={(event) => setRange(event.target.value)}>
             <option value="1h">1h</option>
             <option value="6h">6h</option>
             <option value="24h">24h</option>
             <option value="7d">7d</option>
             <option value="30d">30d</option>
           </select>
-          <select className="search-input" value={topN} onChange={(event) => setTopN(Number(event.target.value))}>
+          <select className="search-input dashboard-header-select" value={topN} onChange={(event) => setTopN(Number(event.target.value))}>
             <option value={5}>Top 5</option>
             <option value={10}>Top 10</option>
             <option value={20}>Top 20</option>
+          </select>
+          <select
+            className="search-input dashboard-header-select"
+            value={refreshIntervalMs}
+            onChange={(event) => setRefreshIntervalMs(Number(event.target.value))}
+            title="Auto refresh interval"
+          >
+            <option value={0}>Auto Refresh: Off</option>
+            <option value={15000}>Auto Refresh: 15s</option>
+            <option value={30000}>Auto Refresh: 30s</option>
+            <option value={60000}>Auto Refresh: 60s</option>
           </select>
           <button className="cta-button" onClick={() => dashboard.refresh()} disabled={dashboard.loading}>
             {dashboard.loading ? 'Refreshing...' : 'Refresh'}
@@ -109,6 +133,10 @@ export const DashboardPage = () => {
           <button className="cta-button" onClick={() => navigate('/reports')}>Open Reports</button>
         </div>
       </div>
+
+      <p style={{ marginTop: '-0.9rem', color: 'var(--muted)', fontSize: '0.82rem' }}>
+        Last updated: {lastUpdated > 0 ? new Date(lastUpdated).toLocaleTimeString() : '—'}
+      </p>
 
       {dashboard.error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>

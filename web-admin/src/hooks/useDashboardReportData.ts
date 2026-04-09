@@ -54,6 +54,7 @@ type DashboardReportState = {
   loading: boolean;
   error?: string;
   isMock: boolean;
+  updatedAt?: number;
   refresh: () => Promise<unknown>;
 };
 
@@ -61,6 +62,7 @@ export const useDashboardReportData = (
   range = '24h',
   topN = 10,
   bucket?: string,
+  refreshIntervalMs = 0,
 ): DashboardReportState => {
   const { baseUrl, canCallApi, headers } = useAdminApi();
   const enabled = Boolean(baseUrl && canCallApi);
@@ -68,6 +70,8 @@ export const useDashboardReportData = (
   const query = useQuery({
     queryKey: queryKeys.reportingDashboard(baseUrl, range, topN, bucket),
     enabled,
+    refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : false,
+    refetchIntervalInBackground: false,
     queryFn: async () =>
       adminGetJson<DashboardReport>(
         { baseUrl, canCallApi, headers } as AdminApiContext,
@@ -81,7 +85,7 @@ export const useDashboardReportData = (
   });
 
   if (!enabled) {
-    return { data: undefined, loading: false, isMock: true, refresh: query.refetch };
+    return { data: undefined, loading: false, isMock: true, updatedAt: undefined, refresh: query.refetch };
   }
   if (query.isError) {
     const message =
@@ -95,6 +99,7 @@ export const useDashboardReportData = (
       loading: false,
       error: message,
       isMock: true,
+      updatedAt: query.dataUpdatedAt,
       refresh: query.refetch,
     };
   }
@@ -104,6 +109,7 @@ export const useDashboardReportData = (
     loading: query.isLoading,
     error: undefined,
     isMock: false,
+    updatedAt: query.dataUpdatedAt,
     refresh: query.refetch,
   };
 };

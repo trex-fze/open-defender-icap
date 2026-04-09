@@ -266,6 +266,17 @@ a {
   justify-content: flex-end;
 }
 
+.dashboard-header-actions {
+  flex-wrap: nowrap;
+}
+
+.dashboard-header-select {
+  width: auto;
+  min-width: 125px;
+  max-width: 170px;
+  padding-right: 2rem;
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -385,6 +396,15 @@ a {
   .page-header-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .dashboard-header-actions {
+    flex-wrap: wrap;
+  }
+
+  .dashboard-header-select {
+    width: 100%;
+    max-width: none;
   }
 
   .exchange-action-button {
