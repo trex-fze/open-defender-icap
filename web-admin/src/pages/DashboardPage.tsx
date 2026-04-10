@@ -46,6 +46,27 @@ const formatMiB = (input: number) => {
   return `${input.toFixed(3)} MiB`;
 };
 
+const renderDomainTooltip = (valueLabel: string) => ({ active, payload }: { active?: boolean; payload?: Array<{ value?: number; payload?: { domain?: string } }> }) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const point = payload[0];
+  const domain = point?.payload?.domain?.trim() || '(unknown domain)';
+  return (
+    <div
+      style={{
+        background: 'rgba(6, 12, 24, 0.95)',
+        border: '1px solid rgba(255,255,255,0.16)',
+        borderRadius: '0.75rem',
+        padding: '0.6rem 0.75rem',
+      }}
+    >
+      <p style={{ margin: '0 0 0.3rem', color: '#e7efff', fontWeight: 600 }}>Domain: {domain}</p>
+      <p style={{ margin: 0, color: '#c8d6ff' }}>
+        {valueLabel}: {formatCompact(Number(point?.value ?? 0))}
+      </p>
+    </div>
+  );
+};
+
 export const DashboardPage = () => {
   const navigate = useNavigate();
   const [range, setRange] = useState('24h');
@@ -80,7 +101,7 @@ export const DashboardPage = () => {
   const domainChart = useMemo(
     () =>
       (dashboard.data?.top_domains ?? []).slice(0, 10).map((entry) => ({
-        domain: entry.key,
+        domain: entry.key?.trim() || '(unknown domain)',
         hits: entry.doc_count,
       })),
     [dashboard.data?.top_domains],
@@ -89,7 +110,7 @@ export const DashboardPage = () => {
   const blockedDomainChart = useMemo(
     () =>
       (dashboard.data?.top_blocked_domains ?? []).slice(0, 10).map((entry) => ({
-        domain: entry.key,
+        domain: entry.key?.trim() || '(unknown domain)',
         blocked: entry.doc_count,
       })),
     [dashboard.data?.top_blocked_domains],
@@ -274,7 +295,7 @@ export const DashboardPage = () => {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
                 <XAxis dataKey="domain" hide />
                 <YAxis stroke="rgba(255,255,255,0.8)" />
-                <Tooltip />
+                <Tooltip content={renderDomainTooltip('Hits')} />
                 <Bar dataKey="hits" fill="#60a5fa" />
               </BarChart>
             </ResponsiveContainer>
@@ -307,7 +328,7 @@ export const DashboardPage = () => {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
                 <XAxis dataKey="domain" hide />
                 <YAxis stroke="rgba(255,255,255,0.8)" />
-                <Tooltip />
+                <Tooltip content={renderDomainTooltip('Blocked Hits')} />
                 <Bar dataKey="blocked" fill="#f87171" />
               </BarChart>
             </ResponsiveContainer>
