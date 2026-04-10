@@ -290,7 +290,7 @@ Use `down -v` only when you explicitly need a clean local data state.
   - For remote clients, use the Docker host LAN IP (for example `192.168.1.103:3128`), not `localhost:3128`.
   - Check Squid ACLs first. `OD_SQUID_ALLOWED_CLIENT_CIDRS` must include your client source IP/CIDR or Squid will return `TCP_DENIED/403`.
   - Confirm `OD_TRUSTED_PROXY_CIDRS` includes the HAProxy/Squid ingress network; otherwise Squid will ignore forwarded headers and fall back to peer IP.
-  - Check logs with `docker compose -f deploy/docker/docker-compose.yml logs --tail=100 squid`.
+  - Check logs with `docker compose --env-file .env -f deploy/docker/docker-compose.yml logs --tail=100 squid`.
   - If you changed `squid.conf`, restart the stack so ACL changes apply.
 - I can reach `192.168.1.103:3128` but still get `403 Forbidden`. What is the root cause?
   - This is usually ACL denial, not TCP reachability failure: HAProxy can deny at frontend before Squid backend forwarding.
@@ -363,9 +363,9 @@ Use `down -v` only when you explicitly need a clean local data state.
 
 - Keep failure artifacts from `tests/artifacts/content-pending/` when debugging classification timing or queue behavior.
 - When changing `deploy/docker/squid/squid.conf`, apply safely with:
-  1. `docker compose -f deploy/docker/docker-compose.yml down`
-  2. `docker compose -f deploy/docker/docker-compose.yml up -d --build`
-  3. `docker compose -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl migrate run all`
+  1. `docker compose --env-file .env -f deploy/docker/docker-compose.yml down`
+  2. `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --build`
+  3. `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl migrate run all`
 - If integration fails, isolate by stage:
   1. `odctl smoke --profile compose`
   2. `tests/stage06_ingest.sh`

@@ -4,7 +4,7 @@ This runbook describes how operators validate Stage 10 management parity in the 
 
 ## Preconditions
 
-- Stack is running (`make compose-up` or `docker compose up -d --build`)
+- Stack is running (`make compose-up` or `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --build`)
 - Admin API is healthy (`http://localhost:19000/health/ready`)
 - Web admin is reachable (`http://localhost:19001`)
 - User has a token with at least `policy-admin` for full workflow testing

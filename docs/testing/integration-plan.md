@@ -31,7 +31,7 @@ This document defines the compose-driven integration validation used for Stage 7
   4. `tests/page-fetch-flow.sh` (event → page fetch → Admin API/CLI)
   5. `tests/content-pending-smoke.sh` (ContentPending → Crawl4AI → LLM verdict)
   6. Health checks (`admin-api`, `policy-engine`, `event-ingester`)
-  7. Tear down stack (`docker compose down`)
+  7. Tear down stack (`docker compose --env-file .env -f deploy/docker/docker-compose.yml down`)
 
 ## Build reliability controls
 
@@ -56,7 +56,7 @@ Recommended runs:
 If integration fails:
 
 1. Save script output and compose logs:
-   - `docker compose -f deploy/docker/docker-compose.yml logs --tail=200`
+   - `docker compose --env-file .env -f deploy/docker/docker-compose.yml logs --tail=200`
 2. Confirm host and Docker space:
    - `df -h`
    - `docker system df`

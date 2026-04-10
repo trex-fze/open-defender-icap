@@ -6,8 +6,8 @@ This document outlines the steps for deploying the Open Defender stack (Docker c
 1. `make compose-up` (build + start all services).
 2. Run `tests/integration.sh` to validate the stack.
 3. For rollback:
-   - `docker compose down`
-   - Revert to previous tagged image (`git checkout <tag>` and `docker compose up -d --build`).
+   - `docker compose --env-file .env -f deploy/docker/docker-compose.yml down`
+   - Revert to previous tagged image (`git checkout <tag>` and `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --build`).
    - Run `tests/integration.sh` again to confirm health.
 
 ## Kubernetes (future)

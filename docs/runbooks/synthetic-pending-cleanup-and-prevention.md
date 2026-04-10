@@ -76,7 +76,7 @@ Escalate if these remain in `waiting_content` for extended windows.
 Confirm no synthetic rows remain:
 
 ```bash
-docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml exec -T postgres \
+docker compose --env-file .env -f deploy/docker/docker-compose.yml exec -T postgres \
   bash -lc "psql -U defender -d defender_admin -P pager=off -c \"SELECT count(*) FROM classifications WHERE normalized_key LIKE 'domain:prompt-injection.%'; SELECT count(*) FROM classification_requests WHERE normalized_key LIKE 'domain:prompt-injection.%';\""
 ```
 
