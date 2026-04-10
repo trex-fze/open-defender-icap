@@ -1,6 +1,15 @@
 describe('Accessibility smoke', () => {
   const seedAuth = (win: Window) => {
     win.localStorage.setItem('od.admin.tokens', JSON.stringify({ accessToken: 'demo-token' }));
+    win.localStorage.setItem(
+      'od.admin.user',
+      JSON.stringify({
+        username: 'a11y-user',
+        name: 'A11y User',
+        email: 'a11y@example.com',
+        roles: ['policy-admin', 'policy-editor', 'policy-viewer', 'auditor'],
+      }),
+    );
   };
 
   it('passes axe-core scan on login page', () => {

@@ -1,5 +1,14 @@
 const seedAuthAndApi = (win: Window) => {
   win.localStorage.setItem('od.admin.tokens', JSON.stringify({ accessToken: 'demo-token' }));
+  win.localStorage.setItem(
+    'od.admin.user',
+    JSON.stringify({
+      username: 'stage10-admin',
+      name: 'Stage10 Admin',
+      email: 'stage10@example.com',
+      roles: ['policy-admin'],
+    }),
+  );
   (win as Window & { __OD_ADMIN_API_URL__?: string }).__OD_ADMIN_API_URL__ =
     'http://127.0.0.1:19001';
 };
@@ -30,6 +39,11 @@ describe('Stage 10 management parity flows', () => {
       },
     }).as('policyDetail');
 
+    cy.intercept('GET', '**/api/v1/policies/pol-stage10/versions', {
+      statusCode: 200,
+      body: [],
+    }).as('policyVersions');
+
     cy.intercept('POST', '**/api/v1/policies/pol-stage10/publish', {
       statusCode: 200,
       body: { ok: true },
@@ -44,37 +58,58 @@ describe('Stage 10 management parity flows', () => {
     cy.wait('@policyDetail');
     cy.contains('Policy Detail').should('be.visible');
 
-    cy.contains('button', 'Publish Draft').click();
+    cy.contains('button', 'Activate').click();
     cy.wait('@publishPolicy');
-    cy.contains(/published successfully/i).should('be.visible');
+    cy.contains(/activated successfully/i).should('be.visible');
   });
 
   it('applies manual decisions for pending classifications', () => {
     cy.intercept('GET', '**/api/v1/classifications/pending*', {
       statusCode: 200,
-      body: [
-        {
-          normalized_key: 'domain:stage10.example',
-          status: 'pending',
-          base_url: 'http://stage10.example/',
-          updated_at: '2026-03-25T00:00:00Z',
-          requested_at: '2026-03-25T00:00:00Z',
-        },
-      ],
+      body: {
+        data: [
+          {
+            normalized_key: 'domain:stage10.example',
+            status: 'pending',
+            base_url: 'http://stage10.example/',
+            updated_at: '2026-03-25T00:00:00Z',
+            requested_at: '2026-03-25T00:00:00Z',
+          },
+        ],
+        meta: { has_more: false, limit: 50 },
+      },
     }).as('pendingList');
 
-    cy.intercept('POST', '**/api/v1/classifications/domain%3Astage10.example/unblock', {
+    cy.intercept('GET', '**/api/v1/taxonomy', {
+      statusCode: 200,
+      body: {
+        version: '2026.03',
+        categories: [
+          {
+            id: 'social-media',
+            name: 'Social Media',
+            enabled: true,
+            locked: false,
+            subcategories: [
+              { id: 'social-networking', name: 'Social Networking', enabled: true, locked: false },
+            ],
+          },
+        ],
+      },
+    }).as('taxonomy');
+
+    cy.intercept('POST', '**/api/v1/classifications/domain%3Astage10.example/manual-classify', {
       statusCode: 200,
       body: { ok: true },
-    }).as('manualUnblock');
+    }).as('manualClassify');
 
     cy.visit('/classifications/pending', { onBeforeLoad: seedAuthAndApi });
     cy.wait('@pendingList');
-    cy.contains('button', 'Manual Unblock').click();
-    cy.get('select').first().select('Block');
-    cy.contains('button', 'Apply Decision').click();
-    cy.wait('@manualUnblock');
-    cy.contains(/updated domain:stage10.example/i).should('be.visible');
+    cy.wait('@taxonomy');
+    cy.contains('button', 'Manual Classify').click();
+    cy.contains('button', 'Save Classification').click();
+    cy.wait('@manualClassify');
+    cy.contains(/saved classification for domain:stage10.example/i).should('be.visible');
   });
 
   it('runs diagnostics for page content and cache entries', () => {
@@ -107,7 +142,7 @@ describe('Stage 10 management parity flows', () => {
     }).as('pageContentHistory');
 
     cy.visit('/diagnostics/page-content', { onBeforeLoad: seedAuthAndApi });
-    cy.get('input').clear().type('domain:stage10.example');
+    cy.contains('span', 'Normalized key').parent().find('input').clear().type('domain:stage10.example');
     cy.contains('button', 'Lookup').click();
     cy.wait('@pageContentLatest');
     cy.wait('@pageContentHistory');
@@ -130,7 +165,7 @@ describe('Stage 10 management parity flows', () => {
     }).as('cacheDelete');
 
     cy.visit('/diagnostics/cache', { onBeforeLoad: seedAuthAndApi });
-    cy.get('input').clear().type('domain:stage10.example');
+    cy.contains('span', 'Cache key').parent().find('input').clear().type('domain:stage10.example');
     cy.contains('button', 'Lookup').click();
     cy.wait('@cacheLookup');
     cy.contains('Result').should('be.visible');

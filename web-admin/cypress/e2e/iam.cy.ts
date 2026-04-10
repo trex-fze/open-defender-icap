@@ -2,6 +2,15 @@ export {};
 
 const setAuthToken = (win: Window) => {
   win.localStorage.setItem('od.admin.tokens', JSON.stringify({ accessToken: 'demo-token' }));
+  win.localStorage.setItem(
+    'od.admin.user',
+    JSON.stringify({
+      username: 'iam-admin',
+      name: 'IAM Admin',
+      email: 'iam@example.com',
+      roles: ['policy-admin'],
+    }),
+  );
 };
 
 const stubIamApi = () => {
@@ -79,11 +88,26 @@ const stubIamApi = () => {
     },
   ];
 
-  cy.intercept('GET', '**/api/v1/iam/users', users).as('listUsers');
+  cy.intercept('GET', '**/api/v1/iam/users**', {
+    data: users,
+    meta: { has_more: false, limit: 50 },
+  }).as('listUsers');
   cy.intercept('GET', '**/api/v1/iam/roles', roles).as('listRoles');
-  cy.intercept('GET', '**/api/v1/iam/groups', groups).as('listGroups');
-  cy.intercept('GET', '**/api/v1/iam/service-accounts', serviceAccounts).as('listServiceAccounts');
-  cy.intercept('GET', '**/api/v1/iam/audit', audit).as('listAudit');
+  cy.intercept('GET', '**/api/v1/iam/groups**', {
+    data: groups,
+    meta: { has_more: false, limit: 50 },
+  }).as('listGroups');
+  cy.intercept('GET', '**/api/v1/iam/service-accounts**', {
+    data: serviceAccounts,
+    meta: { has_more: false, limit: 50 },
+  }).as('listServiceAccounts');
+  cy.intercept('GET', '**/api/v1/iam/audit**', {
+    data: audit,
+    meta: { has_more: false, limit: 50 },
+  }).as('listAudit');
+  cy.intercept('GET', '**/api/v1/auth/mode', {
+    mode: 'local',
+  }).as('authMode');
   cy.intercept('POST', '**/api/v1/iam/service-accounts', {
     account: serviceAccounts[0].account,
     token: 'svc.token.value',
