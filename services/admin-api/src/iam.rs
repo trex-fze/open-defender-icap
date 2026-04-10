@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{types::chrono::Utc, PgPool, Row};
 use std::collections::HashSet;
+use std::env;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -585,7 +586,7 @@ impl IamService {
     pub async fn list_service_accounts(&self) -> Result<Vec<ServiceAccountRecord>, IamError> {
         let accounts = sqlx::query_as::<_, ServiceAccountRecord>(
             r#"
-            SELECT id, name, description, status, token_hint, created_at, last_rotated_at
+            SELECT id, name, description, status, token_hint, created_at, last_rotated_at, expires_at
             FROM iam_service_accounts
             ORDER BY name
         "#,
@@ -598,7 +599,7 @@ impl IamService {
     pub async fn get_service_account(&self, id: Uuid) -> Result<ServiceAccountRecord, IamError> {
         let account = sqlx::query_as::<_, ServiceAccountRecord>(
             r#"
-            SELECT id, name, description, status, token_hint, created_at, last_rotated_at
+            SELECT id, name, description, status, token_hint, created_at, last_rotated_at, expires_at
             FROM iam_service_accounts
             WHERE id = $1
         "#,
@@ -619,11 +620,14 @@ impl IamService {
         let token = generate_token();
         let hash = hash_token(&token)?;
         let hint = token_hint(&token);
+        let expires_at = payload
+            .expires_at
+            .unwrap_or_else(default_service_account_expiry);
         let record = sqlx::query_as::<_, ServiceAccountRecord>(
             r#"
-            INSERT INTO iam_service_accounts (id, name, description, token_hash, token_hint, status, last_rotated_at)
-            VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'active'), NOW())
-            RETURNING id, name, description, status, token_hint, created_at, last_rotated_at
+            INSERT INTO iam_service_accounts (id, name, description, token_hash, token_hint, status, last_rotated_at, expires_at)
+            VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'active'), NOW(), $7)
+            RETURNING id, name, description, status, token_hint, created_at, last_rotated_at, expires_at
         "#,
         )
         .bind(Uuid::new_v4())
@@ -632,6 +636,7 @@ impl IamService {
         .bind(hash)
         .bind(hint)
         .bind(payload.status)
+        .bind(expires_at)
         .fetch_one(&self.pool)
         .await
         .map_err(map_db_error)?;
@@ -650,19 +655,25 @@ impl IamService {
         let token = generate_token();
         let hash = hash_token(&token)?;
         let hint = token_hint(&token);
+        let expires_at = payload
+            .as_ref()
+            .and_then(|update| update.expires_at)
+            .unwrap_or_else(default_service_account_expiry);
         let record = sqlx::query_as::<_, ServiceAccountRecord>(
             r#"
             UPDATE iam_service_accounts
             SET token_hash = $2,
                 token_hint = $3,
-                last_rotated_at = NOW()
+                last_rotated_at = NOW(),
+                expires_at = $4
             WHERE id = $1
-            RETURNING id, name, description, status, token_hint, created_at, last_rotated_at
+            RETURNING id, name, description, status, token_hint, created_at, last_rotated_at, expires_at
         "#,
         )
         .bind(id)
         .bind(hash)
         .bind(hint)
+        .bind(expires_at)
         .fetch_optional(&self.pool)
         .await?;
         let record = record.ok_or(IamError::NotFound("service_account".into()))?;
@@ -809,7 +820,9 @@ impl IamService {
             r#"
             SELECT id, name, token_hash
             FROM iam_service_accounts
-            WHERE status = 'active' AND token_hint = $1
+            WHERE status = 'active'
+              AND token_hint = $1
+              AND (expires_at IS NULL OR expires_at > NOW())
         "#,
         )
         .bind(hint)
@@ -1431,6 +1444,7 @@ pub struct ServiceAccountRecord {
     pub token_hint: Option<String>,
     pub created_at: sqlx::types::chrono::DateTime<Utc>,
     pub last_rotated_at: Option<sqlx::types::chrono::DateTime<Utc>>,
+    pub expires_at: Option<sqlx::types::chrono::DateTime<Utc>>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -1532,12 +1546,23 @@ pub struct CreateServiceAccountRequest {
     #[serde(default)]
     pub roles: Vec<String>,
     pub status: Option<String>,
+    pub expires_at: Option<sqlx::types::chrono::DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateServiceAccountRoles {
     #[serde(default)]
     pub roles: Vec<String>,
+    pub expires_at: Option<sqlx::types::chrono::DateTime<Utc>>,
+}
+
+fn default_service_account_expiry() -> sqlx::types::chrono::DateTime<Utc> {
+    let ttl_days = env::var("OD_IAM_SERVICE_TOKEN_TTL_DAYS")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(90)
+        .max(1);
+    Utc::now() + ChronoDuration::days(ttl_days)
 }
 
 #[derive(Debug, Serialize)]
@@ -2374,7 +2399,7 @@ pub async fn list_service_accounts_route(
     let iam = state.iam();
     let accounts = sqlx::query_as::<_, ServiceAccountRecord>(
         r#"
-        SELECT id, name, description, status, token_hint, created_at, last_rotated_at
+        SELECT id, name, description, status, token_hint, created_at, last_rotated_at, expires_at
         FROM iam_service_accounts
         WHERE ($1::text = '' OR (name, id) > ($1, $2))
         ORDER BY name ASC, id ASC

@@ -6,6 +6,10 @@ RUNS=${RUNS:-10}
 OUT_DIR=${OUT_DIR:-"$ROOT_DIR/tests/artifacts/facebook-e2e-reliability"}
 AUTO_COLLECT_DIAGNOSTICS=${AUTO_COLLECT_DIAGNOSTICS:-1}
 DIAG_HOST_TAG=${DIAG_HOST_TAG:-reliability}
+AUTO_STACK_BOOTSTRAP=${AUTO_STACK_BOOTSTRAP:-1}
+AUTO_STACK_TEARDOWN=${AUTO_STACK_TEARDOWN:-0}
+
+COMPOSE_BOOTSTRAP_FILE=${COMPOSE_BOOTSTRAP_FILE:-"$ROOT_DIR/tests/ops/golden-profile.sh"}
 
 mkdir -p "$OUT_DIR"
 SUMMARY_FILE="$OUT_DIR/summary-$(date +%Y%m%d%H%M%S).txt"
@@ -15,6 +19,11 @@ fail=0
 
 printf 'facebook-e2e reliability run\n' >"$SUMMARY_FILE"
 printf 'runs=%s\n' "$RUNS" >>"$SUMMARY_FILE"
+
+if [[ "$AUTO_STACK_BOOTSTRAP" == "1" ]]; then
+  printf '[reliability] bootstrapping golden-local stack\n' | tee -a "$SUMMARY_FILE"
+  PROFILE=golden-local bash "$COMPOSE_BOOTSTRAP_FILE" up >>"$SUMMARY_FILE" 2>&1
+fi
 
 for ((i = 1; i <= RUNS; i++)); do
   run_id="fb-e2e-$(date +%Y%m%d%H%M%S)-${i}"
@@ -40,6 +49,11 @@ done
 
 rate=$((pass * 100 / RUNS))
 printf 'result pass=%s fail=%s pass_rate=%s%%\n' "$pass" "$fail" "$rate" | tee -a "$SUMMARY_FILE"
+
+if [[ "$AUTO_STACK_TEARDOWN" == "1" ]]; then
+  printf '[reliability] tearing down golden-local stack\n' | tee -a "$SUMMARY_FILE"
+  PROFILE=golden-local bash "$COMPOSE_BOOTSTRAP_FILE" down >>"$SUMMARY_FILE" 2>&1 || true
+fi
 
 if (( rate < 90 )); then
   exit 1

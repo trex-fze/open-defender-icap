@@ -1,6 +1,6 @@
 # Stage 24 Implementation Plan - Reliability and Operability Hardening
 
-**Status**: Proposed  
+**Status**: Complete  
 **Depends on**: Stages 20, 21, and 23 hardening foundations  
 **Execution checklist**: `implementation-plan/stage-24-checklist.md`
 
@@ -84,13 +84,16 @@ Evidence targets:
 
 - `tests/artifacts/ops-triage/*` (expanded bundle)
 - stage-specific verification note under `implementation-plan/`
+- `implementation-plan/stage-24-verification.md`
+- `implementation-plan/stage-24-env-alias-migration-map.md`
+- `implementation-plan/stage-24-decisions.md`
 - updated runbooks and env reference docs
 
 ## 5) Acceptance Tracking
 
-- [ ] `odctl doctor config` validates required runtime knobs before startup.
-- [ ] Service `--check-config` exits non-zero on misconfig with actionable remediation text.
-- [ ] Queue restart/replay stress suite passes within defined SLO bounds.
-- [ ] Unified diagnostics bundle is generated in under five minutes.
-- [ ] Refresh token flow and service-account rotation policies are enforced and audited.
-- [ ] Golden profile documentation and smoke gates are complete.
+- [x] `odctl doctor config` validates required runtime knobs before startup.
+- [x] Service `--check-config` exits non-zero on misconfig with actionable remediation text.
+- [x] Queue restart/replay stress suite passes within defined SLO bounds.
+- [x] Unified diagnostics bundle is generated in under five minutes.
+- [x] Refresh token flow and service-account rotation policies are enforced and audited.
+- [x] Golden profile documentation and smoke gates are complete.

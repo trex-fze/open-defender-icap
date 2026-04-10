@@ -42,6 +42,8 @@ struct WorkerConfig {
     pub ttl_seconds: i32,
     #[serde(default = "default_fetch_timeout")]
     pub fetch_timeout_seconds: u64,
+    #[serde(default = "default_idempotency_ttl_seconds")]
+    pub idempotency_ttl_seconds: u64,
     #[serde(default = "default_pool_size")]
     pub database_pool_size: u32,
     #[serde(default = "default_terminal_retry_cooldown_seconds")]
@@ -94,6 +96,10 @@ const fn default_fetch_timeout() -> u64 {
     60
 }
 
+const fn default_idempotency_ttl_seconds() -> u64 {
+    86_400
+}
+
 const fn default_pool_size() -> u32 {
     5
 }
@@ -108,6 +114,53 @@ const fn default_blocked_retry_cooldown_seconds() -> u64 {
 
 const fn default_unsupported_retry_cooldown_seconds() -> u64 {
     21_600
+}
+
+fn check_config_mode_enabled() -> bool {
+    std::env::args().any(|arg| arg == "--check-config")
+}
+
+fn default_stream_consumer_name(prefix: &str) -> String {
+    let host = env::var("HOSTNAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "local".to_string());
+    let sanitized_host: String = host
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("{}-{}-{}", prefix, sanitized_host, std::process::id())
+}
+
+fn validate_config(cfg: &WorkerConfig) -> Result<()> {
+    let mut validator = config_core::ConfigValidator::new("page-fetcher");
+    validator.require_non_empty(
+        "queue_name",
+        Some(cfg.queue_name.as_str()),
+        "set queue_name in config/page-fetcher.json",
+    );
+    validator.require_non_empty(
+        "redis_url",
+        Some(cfg.redis_url.as_str()),
+        "set redis_url in config/page-fetcher.json",
+    );
+    validator.require_non_empty(
+        "crawl_service_url",
+        Some(cfg.crawl_service_url.as_str()),
+        "set crawl_service_url in config/page-fetcher.json",
+    );
+    validator.require_non_empty(
+        "database_url",
+        Some(cfg.database_url.as_str()),
+        "set database_url in config/page-fetcher.json",
+    );
+    validator.finish()
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +218,11 @@ async fn main() -> Result<()> {
         .init();
 
     let cfg: WorkerConfig = load_config("config/page-fetcher.json")?;
+    validate_config(&cfg)?;
+    if check_config_mode_enabled() {
+        println!("page-fetcher config check passed");
+        return Ok(());
+    }
     let pool = PgPoolOptions::new()
         .max_connections(cfg.database_pool_size)
         .connect(&cfg.database_url)
@@ -234,10 +292,12 @@ impl PageFetcher {
     async fn run(self) -> Result<()> {
         let redis = redis::Client::open(self.cfg.redis_url.clone())?;
         let mut conn = redis.get_async_connection().await?;
-        let stream_group = env::var("OD_PAGE_FETCH_STREAM_GROUP")
-            .unwrap_or_else(|_| "page-fetcher".into());
+        let stream_group =
+            env::var("OD_PAGE_FETCH_STREAM_GROUP").unwrap_or_else(|_| "page-fetcher".into());
         let stream_consumer = env::var("OD_PAGE_FETCH_STREAM_CONSUMER")
-            .unwrap_or_else(|_| self.cfg.queue_name.clone());
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| default_stream_consumer_name(&self.cfg.queue_name));
         let start_id = env::var("OD_PAGE_FETCH_STREAM_GROUP_START_ID")
             .unwrap_or_else(|_| self.cfg.stream_start_id.clone());
         let dead_letter_stream = env::var("OD_PAGE_FETCH_STREAM_DEAD_LETTER")
@@ -250,6 +310,12 @@ impl PageFetcher {
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(25);
+        info!(
+            target = "svc-page-fetcher",
+            stream_group = %stream_group,
+            stream_consumer = %stream_consumer,
+            "using stream consumer identity"
+        );
         ensure_stream_group(&mut conn, &self.cfg.stream, &stream_group, &start_id).await?;
         let options_pending = StreamReadOptions::default()
             .group(&stream_group, &stream_consumer)
@@ -298,6 +364,8 @@ impl PageFetcher {
                                     &self.cfg.stream,
                                     &entry.id,
                                     "invalid_payload",
+                                    1,
+                                    None,
                                     Some(&payload),
                                 )
                                 .await;
@@ -313,6 +381,8 @@ impl PageFetcher {
                             &self.cfg.stream,
                             &entry.id,
                             "missing_payload",
+                            1,
+                            None,
                             None,
                         )
                         .await;
@@ -355,6 +425,8 @@ impl PageFetcher {
                                     &self.cfg.stream,
                                     &entry.id,
                                     "invalid_payload",
+                                    1,
+                                    None,
                                     Some(&payload),
                                 )
                                 .await;
@@ -370,6 +442,8 @@ impl PageFetcher {
                             &self.cfg.stream,
                             &entry.id,
                             "missing_payload",
+                            1,
+                            None,
                             None,
                         )
                         .await;
@@ -388,6 +462,17 @@ impl PageFetcher {
     async fn process_job(&self, payload: &str) -> Result<()> {
         self.metrics.record_job_started();
         let job: PageFetchJob = serde_json::from_str(payload)?;
+        let idempotency_key = page_fetch_idempotency_key(&job);
+        if self.idempotency_key_seen(&idempotency_key).await? {
+            self.metrics.record_job_duplicate();
+            info!(
+                target = "svc-page-fetcher",
+                key = %job.normalized_key,
+                idempotency_key = %idempotency_key,
+                "duplicate page fetch job skipped"
+            );
+            return Ok(());
+        }
         let ttl_seconds = job.ttl_seconds.unwrap_or(self.cfg.ttl_seconds);
 
         if self.content_fresh(&job.normalized_key).await? {
@@ -397,6 +482,7 @@ impl PageFetcher {
                 key = job.normalized_key,
                 "existing content still fresh; skipping"
             );
+            self.idempotency_mark_processed(&idempotency_key).await?;
             return Ok(());
         }
 
@@ -411,6 +497,7 @@ impl PageFetcher {
                 key = job.normalized_key,
                 "recent terminal fetch outcome still in cooldown; skipping"
             );
+            self.idempotency_mark_processed(&idempotency_key).await?;
             return Ok(());
         }
 
@@ -475,6 +562,7 @@ impl PageFetcher {
                         attempts = attempts.len(),
                         "stored crawl content"
                     );
+                    self.idempotency_mark_processed(&idempotency_key).await?;
                     return Ok(());
                 }
                 Err(fetch_failure) => {
@@ -512,6 +600,33 @@ impl PageFetcher {
             .await?;
         self.metrics.record_crawl_failure();
         Err(anyhow!(failure.detail))
+    }
+
+    async fn idempotency_key_seen(&self, idempotency_key: &str) -> Result<bool> {
+        let mut conn = redis::Client::open(self.cfg.redis_url.clone())?
+            .get_async_connection()
+            .await?;
+        let key = format!("od:idempotency:page-fetch:{}", idempotency_key);
+        let exists = redis::cmd("EXISTS")
+            .arg(&key)
+            .query_async::<_, i64>(&mut conn)
+            .await?;
+        Ok(exists > 0)
+    }
+
+    async fn idempotency_mark_processed(&self, idempotency_key: &str) -> Result<()> {
+        let mut conn = redis::Client::open(self.cfg.redis_url.clone())?
+            .get_async_connection()
+            .await?;
+        let key = format!("od:idempotency:page-fetch:{}", idempotency_key);
+        redis::cmd("SET")
+            .arg(&key)
+            .arg("1")
+            .arg("EX")
+            .arg(self.cfg.idempotency_ttl_seconds as i64)
+            .query_async::<_, ()>(&mut conn)
+            .await?;
+        Ok(())
     }
 
     async fn host_resolves(&self, host: &str, cache: &mut HashMap<String, bool>) -> bool {
@@ -857,6 +972,17 @@ fn resolve_candidate_urls(job: &PageFetchJob) -> Result<Vec<String>> {
     Ok(deduped)
 }
 
+fn page_fetch_idempotency_key(job: &PageFetchJob) -> String {
+    job.idempotency_key
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| {
+            let trace = job.trace_id.clone().unwrap_or_else(|| "none".to_string());
+            format!("{}:{}:{}", job.normalized_key, job.url, trace)
+        })
+}
+
 fn entry_too_old(entry_id: &str, max_age_ms: u64) -> bool {
     let Some((millis, _)) = entry_id.split_once('-') else {
         return false;
@@ -925,8 +1051,12 @@ async fn publish_dead_letter(
     source_stream: &str,
     entry_id: &str,
     reason: &str,
+    delivery_count: u64,
+    trace_id: Option<&str>,
     payload: Option<&str>,
 ) -> Result<(), redis::RedisError> {
+    let first_seen_at = entry_id_timestamp_iso8601(entry_id).unwrap_or_default();
+    let last_seen_at = chrono::Utc::now().to_rfc3339();
     redis::cmd("XADD")
         .arg(dlq_stream)
         .arg("*")
@@ -936,11 +1066,27 @@ async fn publish_dead_letter(
         .arg(entry_id)
         .arg("reason")
         .arg(reason)
+        .arg("delivery_count")
+        .arg(delivery_count as i64)
+        .arg("first_seen_at")
+        .arg(first_seen_at)
+        .arg("last_seen_at")
+        .arg(last_seen_at)
+        .arg("trace_id")
+        .arg(trace_id.unwrap_or_default())
         .arg("payload")
         .arg(payload.unwrap_or_default())
         .query_async::<_, ()>(conn)
         .await?;
+    metrics::record_dlq_published(reason);
     Ok(())
+}
+
+fn entry_id_timestamp_iso8601(entry_id: &str) -> Option<String> {
+    let (millis, _) = entry_id.split_once('-')?;
+    let ts_ms = millis.parse::<i64>().ok()?;
+    let dt = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ts_ms)?;
+    Some(dt.to_rfc3339())
 }
 
 #[cfg(test)]
@@ -1007,6 +1153,7 @@ mod tests {
                 "https://www.example.com/".to_string(),
             ],
             trace_id: None,
+            idempotency_key: None,
             ttl_seconds: None,
         };
         let resolved = resolve_candidate_urls(&job).expect("should resolve candidates");

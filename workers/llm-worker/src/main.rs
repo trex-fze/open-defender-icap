@@ -857,11 +857,65 @@ fn env_csv_strings(key: &str) -> Option<Vec<String>> {
     }
 }
 
+fn default_stream_consumer_name(prefix: &str) -> String {
+    let host = env::var("HOSTNAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "local".to_string());
+    let sanitized_host: String = host
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("{}-{}-{}", prefix, sanitized_host, std::process::id())
+}
+
+fn check_config_mode_enabled() -> bool {
+    std::env::args().any(|arg| arg == "--check-config")
+}
+
+fn validate_config(cfg: &WorkerConfig) -> Result<()> {
+    let mut validator = config_core::ConfigValidator::new("llm-worker");
+    validator.require_non_empty(
+        "queue_name",
+        Some(cfg.queue_name.as_str()),
+        "set queue_name in config/llm-worker.json",
+    );
+    validator.require_non_empty(
+        "redis_url",
+        Some(cfg.redis_url.as_str()),
+        "set redis_url in config/llm-worker.json",
+    );
+    validator.require_non_empty(
+        "database_url",
+        Some(cfg.database_url.as_str()),
+        "set database_url in config/llm-worker.json",
+    );
+    validator.finish()?;
+    cfg.resolve_router()
+        .context("failed to resolve LLM providers for startup")?;
+    cfg.resolve_stale_pending()
+        .context("failed stale-pending provider validation")?;
+    cfg.resolve_online_context()
+        .context("failed online-context validation")?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing()?;
 
     let cfg: WorkerConfig = config_core::load_config("config/llm-worker.json")?;
+    validate_config(&cfg)?;
+    if check_config_mode_enabled() {
+        println!("llm-worker config check passed");
+        return Ok(());
+    }
     let failover = FailoverRuntime::from_routing(&cfg.routing);
     let stale_pending = cfg
         .resolve_stale_pending()
@@ -1166,6 +1220,7 @@ impl PendingReconciler {
                 hostname: hostname.clone(),
                 full_url: full_url.clone(),
                 trace_id: trace_id.clone(),
+                idempotency_key: Some(format!("cls:{}:{}", pending.normalized_key, trace_id)),
                 requires_content: true,
                 base_url: Some(base_url.clone()),
                 content_excerpt: None,
@@ -1180,6 +1235,7 @@ impl PendingReconciler {
                 hostname,
                 candidate_urls: vec![base_url.clone()],
                 trace_id: Some(trace_id),
+                idempotency_key: Some(format!("page:{}:{}", pending.normalized_key, base_url)),
                 ttl_seconds: None,
             };
 
@@ -1247,9 +1303,11 @@ struct JobConsumer {
     stale_divert_budget: Mutex<WindowBudgetState>,
     provider_health: Mutex<HashMap<String, ProviderHealthState>>,
     max_requeue_attempts: usize,
+    idempotency_ttl_seconds: usize,
 }
 
 const DEFAULT_JOB_REQUEUE_MAX_ATTEMPTS: usize = 6;
+const DEFAULT_LLM_IDEMPOTENCY_TTL_SECONDS: usize = 86_400;
 
 impl JobConsumer {
     async fn new(
@@ -1285,6 +1343,9 @@ impl JobConsumer {
                 .or(cfg.routing.requeue_max_attempts)
                 .unwrap_or(DEFAULT_JOB_REQUEUE_MAX_ATTEMPTS)
                 .max(1),
+            idempotency_ttl_seconds: env_usize("OD_LLM_IDEMPOTENCY_TTL_SECONDS")
+                .unwrap_or(DEFAULT_LLM_IDEMPOTENCY_TTL_SECONDS)
+                .max(60),
         })
     }
 
@@ -1302,12 +1363,20 @@ impl JobConsumer {
         let mut conn = client.get_async_connection().await?;
         let stream_group = env::var("OD_LLM_STREAM_GROUP").unwrap_or_else(|_| "llm-worker".into());
         let stream_consumer = env::var("OD_LLM_STREAM_CONSUMER")
-            .unwrap_or_else(|_| "llm-worker".into());
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| default_stream_consumer_name("llm-worker"));
         let start_id = env::var("OD_LLM_STREAM_GROUP_START_ID").unwrap_or_else(|_| "$".into());
-        let dead_letter_stream =
-            env::var("OD_LLM_STREAM_DEAD_LETTER").unwrap_or_else(|_| "classification-jobs-dlq".into());
+        let dead_letter_stream = env::var("OD_LLM_STREAM_DEAD_LETTER")
+            .unwrap_or_else(|_| "classification-jobs-dlq".into());
         let claim_idle_ms = env_u64("OD_LLM_STREAM_CLAIM_IDLE_MS").unwrap_or(30_000);
         let claim_batch = env_usize("OD_LLM_STREAM_CLAIM_BATCH").unwrap_or(25);
+        info!(
+            target = "svc-llm-worker",
+            stream_group = %stream_group,
+            stream_consumer = %stream_consumer,
+            "using stream consumer identity"
+        );
         ensure_stream_group(&mut conn, &self.stream, &stream_group, &start_id).await?;
 
         let options_pending = StreamReadOptions::default()
@@ -1343,7 +1412,8 @@ impl JobConsumer {
                         continue;
                     }
                     if let Some(payload) = entry.get::<String>("payload") {
-                        let parseable = serde_json::from_str::<ClassificationJobPayload>(&payload).is_ok();
+                        let parseable =
+                            serde_json::from_str::<ClassificationJobPayload>(&payload).is_ok();
                         if let Err(err) = self.process_job(&payload).await {
                             error!(target = "svc-llm-worker", %err, "failed to process pending job");
                             if !parseable {
@@ -1353,6 +1423,8 @@ impl JobConsumer {
                                     &self.stream,
                                     &entry.id,
                                     "invalid_payload",
+                                    1,
+                                    None,
                                     Some(&payload),
                                 )
                                 .await;
@@ -1366,6 +1438,8 @@ impl JobConsumer {
                             &self.stream,
                             &entry.id,
                             "missing_payload",
+                            1,
+                            None,
                             None,
                         )
                         .await;
@@ -1394,7 +1468,8 @@ impl JobConsumer {
                         continue;
                     }
                     if let Some(payload) = entry.get::<String>("payload") {
-                        let parseable = serde_json::from_str::<ClassificationJobPayload>(&payload).is_ok();
+                        let parseable =
+                            serde_json::from_str::<ClassificationJobPayload>(&payload).is_ok();
                         if let Err(err) = self.process_job(&payload).await {
                             error!(target = "svc-llm-worker", %err, "failed to process job");
                             if !parseable {
@@ -1404,6 +1479,8 @@ impl JobConsumer {
                                     &self.stream,
                                     &entry.id,
                                     "invalid_payload",
+                                    1,
+                                    None,
                                     Some(&payload),
                                 )
                                 .await;
@@ -1417,6 +1494,8 @@ impl JobConsumer {
                             &self.stream,
                             &entry.id,
                             "missing_payload",
+                            1,
+                            None,
                             None,
                         )
                         .await;
@@ -1435,9 +1514,46 @@ impl JobConsumer {
     async fn process_job(&self, payload: &str) -> Result<(), anyhow::Error> {
         metrics::record_job_started();
         let job_hint = serde_json::from_str::<ClassificationJobPayload>(payload).ok();
+        if let Some(job) = job_hint.as_ref() {
+            let dedupe_key = classification_idempotency_key(job);
+            match self.idempotency_key_seen(&dedupe_key).await {
+                Ok(true) => {
+                    metrics::record_job_duplicate();
+                    info!(
+                        target = "svc-llm-worker",
+                        normalized_key = %job.normalized_key,
+                        idempotency_key = %dedupe_key,
+                        "duplicate classification job skipped"
+                    );
+                    return Ok(());
+                }
+                Ok(false) => {}
+                Err(err) => {
+                    warn!(
+                        target = "svc-llm-worker",
+                        %err,
+                        normalized_key = %job.normalized_key,
+                        "failed to check idempotency marker; continuing"
+                    );
+                }
+            }
+        }
         let result = self.handle_job(payload).await;
         match &result {
-            Ok(_) => metrics::record_job_completed(),
+            Ok(_) => {
+                metrics::record_job_completed();
+                if let Some(job) = job_hint.as_ref() {
+                    let dedupe_key = classification_idempotency_key(job);
+                    if let Err(err) = self.idempotency_mark_processed(&dedupe_key).await {
+                        warn!(
+                            target = "svc-llm-worker",
+                            %err,
+                            normalized_key = %job.normalized_key,
+                            "failed to persist idempotency marker"
+                        );
+                    }
+                }
+            }
             Err(err) => {
                 let requires_content = job_hint
                     .as_ref()
@@ -1522,6 +1638,33 @@ impl JobConsumer {
         result
     }
 
+    async fn idempotency_key_seen(&self, idempotency_key: &str) -> Result<bool> {
+        let mut conn = redis::Client::open(self.redis_url.clone())?
+            .get_async_connection()
+            .await?;
+        let key = format!("od:idempotency:llm:{}", idempotency_key);
+        let exists = redis::cmd("EXISTS")
+            .arg(&key)
+            .query_async::<_, i64>(&mut conn)
+            .await?;
+        Ok(exists > 0)
+    }
+
+    async fn idempotency_mark_processed(&self, idempotency_key: &str) -> Result<()> {
+        let mut conn = redis::Client::open(self.redis_url.clone())?
+            .get_async_connection()
+            .await?;
+        let key = format!("od:idempotency:llm:{}", idempotency_key);
+        redis::cmd("SET")
+            .arg(&key)
+            .arg("1")
+            .arg("EX")
+            .arg(self.idempotency_ttl_seconds as i64)
+            .query_async::<_, ()>(&mut conn)
+            .await?;
+        Ok(())
+    }
+
     async fn requeue(
         &self,
         payload: &str,
@@ -1556,6 +1699,7 @@ impl JobConsumer {
                         .map(|value| vec![value.clone()])
                         .unwrap_or_default(),
                     trace_id: Some(job.trace_id.clone()),
+                    idempotency_key: Some(format!("page:{}:{}", job.normalized_key, job.trace_id)),
                     ttl_seconds: None,
                 };
                 if let Ok(fetch_payload) = serde_json::to_string(&fetch_job) {
@@ -2584,8 +2728,12 @@ async fn publish_dead_letter(
     source_stream: &str,
     entry_id: &str,
     reason: &str,
+    delivery_count: u64,
+    trace_id: Option<&str>,
     payload: Option<&str>,
 ) -> Result<(), redis::RedisError> {
+    let first_seen_at = entry_id_timestamp_iso8601(entry_id).unwrap_or_default();
+    let last_seen_at = chrono::Utc::now().to_rfc3339();
     redis::cmd("XADD")
         .arg(dlq_stream)
         .arg("*")
@@ -2595,11 +2743,27 @@ async fn publish_dead_letter(
         .arg(entry_id)
         .arg("reason")
         .arg(reason)
+        .arg("delivery_count")
+        .arg(delivery_count as i64)
+        .arg("first_seen_at")
+        .arg(first_seen_at)
+        .arg("last_seen_at")
+        .arg(last_seen_at)
+        .arg("trace_id")
+        .arg(trace_id.unwrap_or_default())
         .arg("payload")
         .arg(payload.unwrap_or_default())
         .query_async::<_, ()>(conn)
         .await?;
+    metrics::record_dlq_published(reason);
     Ok(())
+}
+
+fn entry_id_timestamp_iso8601(entry_id: &str) -> Option<String> {
+    let (millis, _) = entry_id.split_once('-')?;
+    let ts_ms = millis.parse::<i64>().ok()?;
+    let dt = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ts_ms)?;
+    Some(dt.to_rfc3339())
 }
 
 fn entry_too_old(entry_id: &str, max_age_ms: u64) -> bool {
@@ -2662,6 +2826,8 @@ struct ClassificationJobPayload {
     hostname: String,
     full_url: String,
     trace_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    idempotency_key: Option<String>,
     #[serde(default)]
     requires_content: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2676,6 +2842,14 @@ struct ClassificationJobPayload {
     content_language: Option<String>,
     #[serde(default)]
     requeue_attempt: usize,
+}
+
+fn classification_idempotency_key(job: &ClassificationJobPayload) -> String {
+    job.idempotency_key
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| format!("{}:{}:{}", job.normalized_key, job.full_url, job.trace_id))
 }
 
 #[derive(Debug)]
@@ -2937,6 +3111,7 @@ async fn invoke_provider_healthcheck(provider: &ResolvedProvider) -> Result<()> 
         hostname: "healthcheck.internal".into(),
         full_url: "https://healthcheck.internal/".into(),
         trace_id: "stale-pending-healthcheck".into(),
+        idempotency_key: None,
         requires_content: false,
         base_url: None,
         content_excerpt: Some("Healthcheck payload".into()),
@@ -3513,6 +3688,7 @@ mod tests {
             hostname: "example.com".into(),
             full_url: "https://example.com/".into(),
             trace_id: "trace-test".into(),
+            idempotency_key: None,
             requires_content: false,
             base_url: None,
             content_excerpt: Some("This is a captured page excerpt.".into()),
@@ -3540,6 +3716,7 @@ mod tests {
             hostname: "empty.example".into(),
             full_url: "https://empty.example".into(),
             trace_id: "trace-empty".into(),
+            idempotency_key: None,
             requires_content: false,
             base_url: None,
             content_excerpt: None,
@@ -3788,6 +3965,7 @@ mod tests {
             hostname: "integration.test".into(),
             full_url: "https://integration.test/".into(),
             trace_id: "trace-123".into(),
+            idempotency_key: None,
             requires_content: false,
             base_url: None,
             content_excerpt: None,
@@ -3885,6 +4063,7 @@ mod tests {
             hostname: "invalid-llm.test".into(),
             full_url: "https://invalid-llm.test/".into(),
             trace_id: "trace-invalid".into(),
+            idempotency_key: None,
             requires_content: false,
             base_url: None,
             content_excerpt: None,
@@ -3977,6 +4156,7 @@ mod tests {
             hostname: "canonical.test".into(),
             full_url: "https://canonical.test/".into(),
             trace_id: "trace-canonical".into(),
+            idempotency_key: None,
             requires_content: false,
             base_url: None,
             content_excerpt: None,

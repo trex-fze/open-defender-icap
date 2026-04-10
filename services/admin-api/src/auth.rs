@@ -14,9 +14,11 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
+use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::Sha256;
+use sqlx::Row;
 use std::{collections::HashSet, env, sync::Arc};
 use tracing::error;
 use uuid::Uuid;
@@ -37,6 +39,8 @@ pub struct AdminAuth {
     local_jwt: LocalJwtIssuer,
     max_failed_attempts: i32,
     lockout_seconds: i64,
+    refresh_ttl_seconds: i64,
+    refresh_max_sessions: i64,
     jwt: Option<JwtValidator>,
     iam: Arc<IamService>,
 }
@@ -59,6 +63,10 @@ pub struct AuthSettings {
     pub max_failed_attempts: i32,
     #[serde(default = "default_lockout_seconds")]
     pub lockout_seconds: i64,
+    #[serde(default = "default_refresh_ttl_seconds")]
+    pub refresh_ttl_seconds: i64,
+    #[serde(default = "default_refresh_max_sessions")]
+    pub refresh_max_sessions: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, Default, PartialEq, Eq)]
@@ -106,11 +114,34 @@ impl AuthSettings {
                 self.lockout_seconds = parsed.max(30);
             }
         }
+        if let Ok(value) = env::var("OD_LOCAL_AUTH_REFRESH_TTL_SECONDS") {
+            if let Ok(parsed) = value.parse::<i64>() {
+                self.refresh_ttl_seconds = parsed.max(600);
+            }
+        }
+        if let Ok(value) = env::var("OD_LOCAL_AUTH_REFRESH_MAX_SESSIONS") {
+            if let Ok(parsed) = value.parse::<i64>() {
+                self.refresh_max_sessions = parsed.max(1);
+            }
+        }
         if self.static_roles.as_ref().map_or(true, |r| r.is_empty()) {
             self.static_roles = Some(default_static_roles());
         }
         self
     }
+}
+
+pub fn validate_settings_for_startup(settings: AuthSettings) -> anyhow::Result<AuthSettings> {
+    let merged = settings.merge_env();
+    if matches!(merged.mode, AuthMode::Local | AuthMode::Hybrid) {
+        let secret = merged.local_jwt_secret.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "OD_LOCAL_AUTH_JWT_SECRET is required when auth.mode is local or hybrid"
+            )
+        })?;
+        validate_local_jwt_secret(secret)?;
+    }
+    Ok(merged)
 }
 
 fn default_static_roles() -> Vec<String> {
@@ -136,6 +167,14 @@ const fn default_max_failed_attempts() -> i32 {
 
 const fn default_lockout_seconds() -> i64 {
     15 * 60
+}
+
+const fn default_refresh_ttl_seconds() -> i64 {
+    7 * 24 * 60 * 60
+}
+
+const fn default_refresh_max_sessions() -> i64 {
+    5
 }
 
 fn validate_local_jwt_secret(secret: &str) -> anyhow::Result<()> {
@@ -166,7 +205,7 @@ impl AdminAuth {
         settings: AuthSettings,
         iam: Arc<IamService>,
     ) -> anyhow::Result<Self> {
-        let merged = settings.merge_env();
+        let merged = validate_settings_for_startup(settings)?;
         let local_secret = match merged.mode {
             AuthMode::Local | AuthMode::Hybrid => {
                 let secret = merged.local_jwt_secret.clone().ok_or_else(|| {
@@ -203,6 +242,8 @@ impl AdminAuth {
             local_jwt: LocalJwtIssuer::new(local_secret, merged.local_jwt_ttl_seconds),
             max_failed_attempts: merged.max_failed_attempts,
             lockout_seconds: merged.lockout_seconds,
+            refresh_ttl_seconds: merged.refresh_ttl_seconds,
+            refresh_max_sessions: merged.refresh_max_sessions,
             jwt,
             iam,
         })
@@ -336,6 +377,164 @@ impl AdminAuth {
         })
     }
 
+    async fn local_user_for_token(
+        &self,
+        user_id: Uuid,
+    ) -> Result<LocalAuthenticatedUser, AuthError> {
+        let user = self.iam.get_user(user_id).await?;
+        if user.status != "active" {
+            return Err(AuthError::Disabled);
+        }
+        let access = self.iam.effective_permissions_for_user(user.id).await?;
+        Ok(LocalAuthenticatedUser {
+            id: user.id,
+            username: user.username,
+            email: user.email.unwrap_or_else(|| user.id.to_string()),
+            display_name: user.display_name,
+            roles: access.roles,
+            permissions: access.permissions,
+            must_change_password: false,
+            token_version: self.iam.user_token_version(user.id).await?,
+        })
+    }
+
+    async fn issue_refresh_token(
+        &self,
+        state: &AppState,
+        user_id: Uuid,
+    ) -> Result<String, AuthError> {
+        let token = generate_refresh_token();
+        let token_hash = hash_refresh_token(&token);
+        let token_hint = refresh_token_hint(&token);
+        let token_version = self.iam.user_token_version(user_id).await?;
+        let expires_at = Utc::now() + chrono::Duration::seconds(self.refresh_ttl_seconds.max(600));
+        let refresh_id = Uuid::new_v4();
+
+        sqlx::query(
+            r#"INSERT INTO iam_refresh_tokens (id, user_id, token_hash, token_hint, token_version, expires_at)
+               VALUES ($1, $2, $3, $4, $5, $6)"#,
+        )
+        .bind(refresh_id)
+        .bind(user_id)
+        .bind(token_hash)
+        .bind(token_hint)
+        .bind(token_version)
+        .bind(expires_at)
+        .execute(state.pool())
+        .await
+        .map_err(|err| AuthError::Database(err.to_string()))?;
+
+        self.enforce_refresh_session_limit(state, user_id).await?;
+        Ok(token)
+    }
+
+    async fn enforce_refresh_session_limit(
+        &self,
+        state: &AppState,
+        user_id: Uuid,
+    ) -> Result<(), AuthError> {
+        sqlx::query(
+            r#"
+            WITH ranked AS (
+                SELECT id,
+                       row_number() OVER (ORDER BY created_at DESC) AS rn
+                FROM iam_refresh_tokens
+                WHERE user_id = $1
+                  AND revoked_at IS NULL
+                  AND expires_at > NOW()
+            )
+            UPDATE iam_refresh_tokens rt
+            SET revoked_at = NOW(),
+                revoked_reason = 'max_sessions_exceeded'
+            FROM ranked
+            WHERE rt.id = ranked.id
+              AND ranked.rn > $2
+              AND rt.revoked_at IS NULL
+            "#,
+        )
+        .bind(user_id)
+        .bind(self.refresh_max_sessions.max(1))
+        .execute(state.pool())
+        .await
+        .map_err(|err| AuthError::Database(err.to_string()))?;
+        Ok(())
+    }
+
+    async fn rotate_refresh_token(
+        &self,
+        state: &AppState,
+        refresh_token: &str,
+    ) -> Result<(String, String), AuthError> {
+        let token_hash = hash_refresh_token(refresh_token);
+        let row = sqlx::query(
+            r#"SELECT id, user_id, token_version
+               FROM iam_refresh_tokens
+               WHERE token_hash = $1
+                 AND revoked_at IS NULL
+                 AND expires_at > NOW()"#,
+        )
+        .bind(token_hash)
+        .fetch_optional(state.pool())
+        .await
+        .map_err(|err| AuthError::Database(err.to_string()))?
+        .ok_or(AuthError::InvalidCredentials)?;
+
+        let refresh_id: Uuid = row.get("id");
+        let user_id: Uuid = row.get("user_id");
+        let token_version: i64 = row.get("token_version");
+
+        let user = self.local_user_for_token(user_id).await?;
+        if user.token_version != token_version {
+            sqlx::query(
+                "UPDATE iam_refresh_tokens SET revoked_at = NOW(), revoked_reason = 'token_version_mismatch' WHERE id = $1",
+            )
+            .bind(refresh_id)
+            .execute(state.pool())
+            .await
+            .map_err(|err| AuthError::Database(err.to_string()))?;
+            return Err(AuthError::InvalidCredentials);
+        }
+
+        let new_access = self.local_jwt.issue(&user)?;
+        let new_refresh = self.issue_refresh_token(state, user_id).await?;
+
+        let new_hash = hash_refresh_token(&new_refresh);
+        let replacement =
+            sqlx::query("SELECT id FROM iam_refresh_tokens WHERE token_hash = $1 LIMIT 1")
+                .bind(new_hash)
+                .fetch_one(state.pool())
+                .await
+                .map_err(|err| AuthError::Database(err.to_string()))?;
+        let replacement_id: Uuid = replacement.get("id");
+
+        sqlx::query(
+            "UPDATE iam_refresh_tokens SET revoked_at = NOW(), revoked_reason = 'rotated', replaced_by_id = $2, last_used_at = NOW() WHERE id = $1",
+        )
+        .bind(refresh_id)
+        .bind(replacement_id)
+        .execute(state.pool())
+        .await
+        .map_err(|err| AuthError::Database(err.to_string()))?;
+
+        Ok((new_access, new_refresh))
+    }
+
+    async fn revoke_refresh_token(
+        &self,
+        state: &AppState,
+        refresh_token: &str,
+    ) -> Result<(), AuthError> {
+        let token_hash = hash_refresh_token(refresh_token);
+        sqlx::query(
+            "UPDATE iam_refresh_tokens SET revoked_at = NOW(), revoked_reason = 'logout' WHERE token_hash = $1 AND revoked_at IS NULL",
+        )
+        .bind(token_hash)
+        .execute(state.pool())
+        .await
+        .map_err(|err| AuthError::Database(err.to_string()))?;
+        Ok(())
+    }
+
     async fn resolve_claims(&self, claims: Claims) -> Result<UserContext, AuthError> {
         let actor = claims.actor();
         if let Some(user) = self.iam.find_user_by_subject(&claims.sub).await? {
@@ -409,8 +608,18 @@ pub struct LocalLoginRequest {
 #[derive(Debug, Serialize)]
 pub struct LocalLoginResponse {
     pub access_token: String,
+    pub refresh_token: String,
     pub expires_in: i64,
+    pub refresh_expires_in: i64,
     pub user: LocalLoginUser,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RefreshTokenResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: i64,
+    pub refresh_expires_in: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -435,6 +644,16 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LogoutRequest {
+    pub refresh_token: String,
+}
+
 pub async fn login_route(
     State(state): State<AppState>,
     Json(payload): Json<LocalLoginRequest>,
@@ -449,11 +668,25 @@ pub async fn login_route(
         ));
     }
 
-    let login = state
-        .admin_auth()
+    let auth = state.admin_auth();
+    let login = match auth
         .login_local(payload.username.trim(), payload.password.as_str())
         .await
+    {
+        Ok(login) => login,
+        Err(err) => {
+            match &err {
+                AuthError::Locked(_) => crate::metrics::record_auth_lockout(),
+                _ => crate::metrics::record_auth_login_failure(),
+            }
+            return Err(map_login_error(err));
+        }
+    };
+    let refresh_token = auth
+        .issue_refresh_token(&state, login.user.id)
+        .await
         .map_err(map_login_error)?;
+    crate::metrics::record_auth_login_success();
 
     state
         .log_iam_event(
@@ -467,7 +700,9 @@ pub async fn login_route(
 
     Ok(Json(LocalLoginResponse {
         access_token: login.access_token,
+        refresh_token,
         expires_in: login.expires_in,
+        refresh_expires_in: auth.refresh_ttl_seconds,
         user: LocalLoginUser {
             id: login.user.id,
             username: login.user.username,
@@ -478,6 +713,63 @@ pub async fn login_route(
             must_change_password: login.user.must_change_password,
         },
     }))
+}
+
+pub async fn refresh_route(
+    State(state): State<AppState>,
+    Json(payload): Json<RefreshTokenRequest>,
+) -> Result<Json<RefreshTokenResponse>, (StatusCode, Json<ApiError>)> {
+    if payload.refresh_token.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "VALIDATION_ERROR",
+                "refresh_token is required",
+            )),
+        ));
+    }
+
+    let auth = state.admin_auth();
+    if !matches!(auth.mode(), AuthMode::Local | AuthMode::Hybrid) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "AUTH_MODE_UNSUPPORTED",
+                "refresh tokens are only available in local or hybrid auth mode",
+            )),
+        ));
+    }
+    let (access_token, refresh_token) = auth
+        .rotate_refresh_token(&state, payload.refresh_token.trim())
+        .await
+        .map_err(|err| {
+            crate::metrics::record_auth_refresh_failure();
+            map_login_error(err)
+        })?;
+    crate::metrics::record_auth_refresh_success();
+
+    Ok(Json(RefreshTokenResponse {
+        access_token,
+        refresh_token,
+        expires_in: auth.local_jwt.ttl_seconds,
+        refresh_expires_in: auth.refresh_ttl_seconds,
+    }))
+}
+
+pub async fn logout_route(
+    State(state): State<AppState>,
+    Json(payload): Json<LogoutRequest>,
+) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    if payload.refresh_token.trim().is_empty() {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    state
+        .admin_auth()
+        .revoke_refresh_token(&state, payload.refresh_token.trim())
+        .await
+        .map_err(map_login_error)?;
+    crate::metrics::record_auth_logout();
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn auth_mode_route(
@@ -839,6 +1131,29 @@ struct LocalLoginSuccess {
     access_token: String,
     expires_in: i64,
     user: LocalAuthenticatedUser,
+}
+
+fn generate_refresh_token() -> String {
+    let random: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(64)
+        .map(char::from)
+        .collect();
+    format!("odr_{}", random)
+}
+
+fn hash_refresh_token(token: &str) -> String {
+    use sha2::Digest;
+    let digest = Sha256::digest(token.as_bytes());
+    digest.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn refresh_token_hint(token: &str) -> Option<String> {
+    if token.len() < 8 {
+        None
+    } else {
+        Some(format!("{}...{}", &token[..4], &token[token.len() - 4..]))
+    }
 }
 
 impl From<IamError> for AuthError {

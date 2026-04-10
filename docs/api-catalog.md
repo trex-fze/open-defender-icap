@@ -50,7 +50,9 @@ Override precedence note: policy-engine evaluates active domain overrides before
 
 | Method | Path | Description | Auth | Request Schema | Response |
 | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/auth/login` | Local username/password login (local/hybrid auth mode). | Public route. | `{ username, password }` | `{ access_token, expires_in, user { id, username, email, roles, permissions, must_change_password } }`; local JWT carries user `token_version` and is invalidated after password reset/change/disable. |
+| `POST` | `/api/v1/auth/login` | Local username/password login (local/hybrid auth mode). | Public route. | `{ username, password }` | `{ access_token, refresh_token, expires_in, refresh_expires_in, user { id, username, email, roles, permissions, must_change_password } }`; local JWT carries user `token_version` and is invalidated after password reset/change/disable. |
+| `POST` | `/api/v1/auth/refresh` | Rotate refresh token and mint a new access token (local/hybrid mode). | Public route with refresh token proof. | `{ refresh_token }` | `{ access_token, refresh_token, expires_in, refresh_expires_in }`. |
+| `POST` | `/api/v1/auth/logout` | Revoke an active refresh token. | Public route with refresh token proof. | `{ refresh_token }` | `204 No Content` |
 | `GET` | `/api/v1/auth/mode` | Resolve active authentication mode for UI behavior. | Public route. | — | `{ mode: "local" | "hybrid" | "oidc" }` |
 | `POST` | `/api/v1/auth/change-password` | Change the authenticated local user's password. | Authenticated user principal. | `{ current_password, new_password }` | `204 No Content` |
 
@@ -132,8 +134,8 @@ Policy history note: `GET /api/v1/policies/:id/versions` is served from immutabl
 | `POST`/`DELETE` | `/api/v1/iam/groups/:id/members` | Add/remove members from a group. | `iam:manage`. |
 | `POST`/`DELETE` | `/api/v1/iam/groups/:id/roles` | Assign or revoke role bindings for a group. | `iam:manage`. |
 | `GET` | `/api/v1/iam/roles` | List builtin roles and permissions. | `iam:view`. |
-| `GET`/`POST` | `/api/v1/iam/service-accounts` | List or create service accounts (returns hashed token + rotate endpoint). | `iam:view` / `iam:manage`. `GET` is cursor paginated (`limit`, `cursor`) and returns `{ data, meta }`. |
-| `POST` | `/api/v1/iam/service-accounts/:id/rotate` | Rotate a service-account token (optionally replacing roles). | `iam:manage`. |
+| `GET`/`POST` | `/api/v1/iam/service-accounts` | List or create service accounts (plaintext token returned only on create; records include `expires_at`). | `iam:view` / `iam:manage`. `GET` is cursor paginated (`limit`, `cursor`) and returns `{ data, meta }`. `POST` accepts optional `expires_at` (otherwise default TTL applies). |
+| `POST` | `/api/v1/iam/service-accounts/:id/rotate` | Rotate a service-account token (optionally replacing roles and expiry). | `iam:manage`; accepts optional `expires_at`. |
 | `DELETE` | `/api/v1/iam/service-accounts/:id` | Disable a service account. | `iam:manage`. |
 | `GET` | `/api/v1/iam/whoami` | Introspect the caller’s effective roles and permissions. | Any authenticated caller; user principals include `username`, `email`, `display_name`, and `must_change_password` for forced-password-change UX. |
 
@@ -163,7 +165,7 @@ Traffic IP enrichment note: ingester persists `source.ip` as the immediate Squid
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/providers` | Lists configured LLM providers (name, type, endpoint, role). Useful for operator dashboards and tests. |
-| `GET` | `/metrics` | Prometheus metrics covering `llm_jobs_*`, per-provider latency, failover counters, stale-pending diversion counters (`llm_stale_pending_*`), and online context/guardrail counters (`llm_context_mode_total`, `llm_metadata_only_guardrail_total`, `llm_metadata_only_requeue_total`, `llm_metadata_only_reason_total`, `llm_fetch_failure_fallback_total`, `llm_primary_output_invalid_total`, `llm_online_verification_total`, `llm_terminal_insufficient_evidence_total`). |
+| `GET` | `/metrics` | Prometheus metrics covering `llm_jobs_*` (including duplicate suppression), DLQ growth (`llm_dlq_published_total`), per-provider latency, failover counters, stale-pending diversion counters (`llm_stale_pending_*`), and online context/guardrail counters (`llm_context_mode_total`, `llm_metadata_only_guardrail_total`, `llm_metadata_only_requeue_total`, `llm_metadata_only_reason_total`, `llm_fetch_failure_fallback_total`, `llm_primary_output_invalid_total`, `llm_online_verification_total`, `llm_terminal_insufficient_evidence_total`). |
 
 ### Reclass Worker (`reclass-worker`)
 
@@ -175,7 +177,7 @@ Traffic IP enrichment note: ingester persists `source.ip` as the immediate Squid
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/metrics` | Prometheus metrics (jobs started/completed/failed, crawl latency, Redis consumer stats). |
+| `GET` | `/metrics` | Prometheus metrics (jobs started/completed/failed, duplicate suppression, DLQ growth, crawl latency, Redis consumer stats). |
 
 ### ICAP Adaptor (`services/icap-adaptor`)
 
@@ -200,7 +202,7 @@ Prometheus scrapes these paths; they do not accept application payloads but are 
 
 | Service | Path | Notes |
 | --- | --- | --- |
-| Admin API | `/metrics` | Review queue SLA, cache invalidation stats, `taxonomy_activation_changes_total`. |
+| Admin API | `/metrics` | Review queue SLA, cache invalidation stats, taxonomy activation metric, and auth telemetry counters (`admin_auth_login_*`, `admin_auth_lockout_total`, `admin_auth_refresh_*`, `admin_auth_logout_total`). |
 | Policy Engine | (exposed via `metrics_host` in config) | Counters for decisions, reload times (feature planned). |
 | ICAP Adaptor | `/metrics` | Request rates, cache hits, Redis publication metrics. |
 | Event Ingester | `/metrics` | Ingest batch counts, crawl job attempts. |

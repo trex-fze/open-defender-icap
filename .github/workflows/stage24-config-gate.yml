@@ -1,0 +1,38 @@
+name: Stage24 Config Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  config-preflight:
+    runs-on: ubuntu-latest
+    env:
+      OD_ADMIN_DATABASE_URL: postgres://defender:defender@localhost:5432/defender_admin
+      OD_POLICY_DATABASE_URL: postgres://defender:defender@localhost:5432/defender_policy
+      OD_TAXONOMY_DATABASE_URL: postgres://defender:defender@localhost:5432/defender_admin
+      OD_LOCAL_AUTH_JWT_SECRET: stage24-ci-local-auth-secret-0123456789
+      OD_ELASTIC_URL: http://localhost:9200
+      OPENAI_API_KEY: stage24-ci-openai-placeholder
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build check targets
+        run: cargo check -p config-core -p odctl -p admin-api -p policy-engine -p event-ingester -p llm-worker -p page-fetcher
+
+      - name: Run doctor config preflight
+        run: cargo run -p odctl -- doctor config
+
+      - name: Run service check-config modes
+        run: |
+          cargo run -p admin-api -- --check-config
+          cargo run -p policy-engine -- --check-config
+          cargo run -p event-ingester -- --check-config
+          cargo run -p llm-worker -- --check-config
+          cargo run -p page-fetcher -- --check-config

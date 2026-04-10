@@ -26,12 +26,81 @@ use models::{
 };
 use policy_dsl::PolicyDocument;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use std::{env, net::SocketAddr, sync::Arc};
+use std::{env, net::SocketAddr, path::Path as FsPath, sync::Arc};
 use store::PolicyStore;
 use taxonomy::{ActivationState, TaxonomyStore};
 use tokio::net::TcpListener;
 use tracing::{debug, error, info, warn, Level};
 use uuid::Uuid;
+
+fn check_config_mode_enabled() -> bool {
+    std::env::args().any(|arg| arg == "--check-config")
+}
+
+fn resolve_policy_db_url(cfg: &config::PolicyConfig) -> (Option<String>, Option<String>) {
+    if let Some(url) = cfg.database_url.clone() {
+        return (Some(url), None);
+    }
+    let lookup = config_core::lookup_env("OD_POLICY_DATABASE_URL", &["DATABASE_URL"]);
+    (lookup.value, lookup.deprecated_alias)
+}
+
+fn resolve_activation_db_url(
+    cfg: &config::PolicyConfig,
+    policy_db_url: Option<String>,
+) -> (Option<String>, Option<String>) {
+    if let Some(url) = cfg.activation_database_url.clone() {
+        return (Some(url), None);
+    }
+    let lookup = config_core::lookup_env("OD_TAXONOMY_DATABASE_URL", &["OD_ADMIN_DATABASE_URL"]);
+    (lookup.value.or(policy_db_url), lookup.deprecated_alias)
+}
+
+fn emit_env_alias_warnings(cfg: &config::PolicyConfig) {
+    if cfg.database_url.is_none() {
+        if let Some(alias) =
+            config_core::lookup_env("OD_POLICY_DATABASE_URL", &["DATABASE_URL"]).deprecated_alias
+        {
+            eprintln!(
+                "warning: policy-engine deprecated env alias in use: {} -> OD_POLICY_DATABASE_URL",
+                alias
+            );
+        }
+    }
+    if cfg.activation_database_url.is_none() {
+        if let Some(alias) =
+            config_core::lookup_env("OD_TAXONOMY_DATABASE_URL", &["OD_ADMIN_DATABASE_URL"])
+                .deprecated_alias
+        {
+            eprintln!(
+                "warning: policy-engine deprecated env alias in use: {} -> OD_TAXONOMY_DATABASE_URL",
+                alias
+            );
+        }
+    }
+}
+
+fn validate_config(cfg: &config::PolicyConfig) -> Result<()> {
+    let mut validator = config_core::ConfigValidator::new("policy-engine");
+    validator.require_non_empty(
+        "api_host",
+        Some(cfg.api_host.as_str()),
+        "set api_host in config/policy-engine.json",
+    );
+    validator.require_non_empty(
+        "policy_file",
+        Some(cfg.policy_file.as_str()),
+        "set policy_file in config/policy-engine.json",
+    );
+    if cfg.database_url.is_none() && !FsPath::new(&cfg.policy_file).exists() {
+        validator.require_non_empty(
+            "policy_file_exists",
+            None,
+            "create the policy file path configured in policy_file or configure database_url",
+        );
+    }
+    validator.finish()
+}
 
 #[derive(Debug)]
 struct OverrideRecord {
@@ -338,11 +407,13 @@ async fn main() -> Result<()> {
         .init();
 
     let cfg = config::load()?;
-    let db_url = cfg
-        .database_url
-        .clone()
-        .or_else(|| env::var("OD_POLICY_DATABASE_URL").ok())
-        .or_else(|| env::var("DATABASE_URL").ok());
+    validate_config(&cfg)?;
+    emit_env_alias_warnings(&cfg);
+    if check_config_mode_enabled() {
+        println!("policy-engine config check passed");
+        return Ok(());
+    }
+    let (db_url, _db_alias) = resolve_policy_db_url(&cfg);
     let admin_db_url = env::var("OD_ADMIN_DATABASE_URL").ok();
     if let (Some(policy_db), Some(admin_db)) = (db_url.as_ref(), admin_db_url.as_ref()) {
         if policy_db != admin_db {
@@ -354,12 +425,7 @@ async fn main() -> Result<()> {
             );
         }
     }
-    let activation_db_url = cfg
-        .activation_database_url
-        .clone()
-        .or_else(|| env::var("OD_TAXONOMY_DATABASE_URL").ok())
-        .or_else(|| env::var("OD_ADMIN_DATABASE_URL").ok())
-        .or_else(|| db_url.clone());
+    let (activation_db_url, _activation_alias) = resolve_activation_db_url(&cfg, db_url.clone());
     let taxonomy =
         Arc::new(TaxonomyStore::load_default().context("failed to load canonical taxonomy")?);
     let mut audit_logger = None;
@@ -539,7 +605,10 @@ async fn handle_decision(
     Ok(Json(decision))
 }
 
-fn decision_source_for_simulation(state: &AppState, simulation: &store::SimulationResult) -> String {
+fn decision_source_for_simulation(
+    state: &AppState,
+    simulation: &store::SimulationResult,
+) -> String {
     let taxonomy_disabled = simulation
         .decision
         .verdict

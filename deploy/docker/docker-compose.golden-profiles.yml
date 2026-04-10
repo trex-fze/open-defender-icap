@@ -1,0 +1,47 @@
+version: "3.9"
+
+services:
+  redis:
+    profiles: ["golden-local", "golden-prodlike"]
+  postgres:
+    profiles: ["golden-local", "golden-prodlike"]
+  icap-adaptor:
+    profiles: ["golden-local", "golden-prodlike"]
+  policy-engine:
+    profiles: ["golden-local", "golden-prodlike"]
+  admin-api:
+    profiles: ["golden-local", "golden-prodlike"]
+  llm-worker:
+    profiles: ["golden-local", "golden-prodlike"]
+  crawl4ai:
+    profiles: ["golden-local", "golden-prodlike"]
+  page-fetcher:
+    profiles: ["golden-local", "golden-prodlike"]
+  reclass-worker:
+    profiles: ["golden-local", "golden-prodlike"]
+  squid:
+    profiles: ["golden-local", "golden-prodlike"]
+  haproxy:
+    profiles: ["golden-local", "golden-prodlike"]
+  odctl-runner:
+    profiles: ["golden-local", "golden-prodlike"]
+
+  web-admin:
+    profiles: ["golden-local"]
+  mock-openai:
+    profiles: ["golden-local"]
+  smoke-origin:
+    profiles: ["golden-local"]
+
+  event-ingester:
+    profiles: ["golden-prodlike"]
+  elasticsearch:
+    profiles: ["golden-prodlike"]
+  kibana:
+    profiles: ["golden-prodlike"]
+  prometheus:
+    profiles: ["golden-prodlike"]
+  logstash:
+    profiles: ["golden-prodlike"]
+  filebeat:
+    profiles: ["golden-prodlike"]

@@ -25,9 +25,40 @@ struct AppState {
     page_fetch: Option<PageFetchPublisher>,
 }
 
+fn check_config_mode_enabled() -> bool {
+    std::env::args().any(|arg| arg == "--check-config")
+}
+
+fn validate_config(config: &IngestConfig) -> anyhow::Result<()> {
+    let mut validator = config_core::ConfigValidator::new("event-ingester");
+    validator.require_non_empty(
+        "OD_INGEST_BIND",
+        Some(config.bind_addr.as_str()),
+        "set OD_INGEST_BIND to a valid host:port value",
+    );
+    validator.require_non_empty(
+        "OD_ELASTIC_URL",
+        Some(config.elastic_url.as_str()),
+        "set OD_ELASTIC_URL before starting event-ingester",
+    );
+    if config.page_fetch_redis_url.is_some() {
+        validator.require_non_empty(
+            "OD_PAGE_FETCH_STREAM",
+            Some(config.page_fetch_stream.as_str()),
+            "set OD_PAGE_FETCH_STREAM when OD_PAGE_FETCH_REDIS_URL is configured",
+        );
+    }
+    validator.finish()
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = IngestConfig::from_env()?;
+    validate_config(&config)?;
+    if check_config_mode_enabled() {
+        println!("event-ingester config check passed");
+        return Ok(());
+    }
     init_tracing(&config.log_level);
     let writer = ElasticWriter::new(
         &config.elastic_url,
@@ -180,6 +211,9 @@ fn build_page_fetch_job(event: &Value) -> Option<PageFetchJob> {
     let trace_id = pointer_str(event, "/od/trace_id")
         .or_else(|| pointer_str(event, "/trace_id"))
         .map(|s| s.to_string());
+    let idempotency_key = trace_id
+        .as_ref()
+        .map(|trace| format!("page:{}:{}", normalized.normalized_key, trace));
     let ttl_override = event
         .pointer("/od/page_fetch_ttl_seconds")
         .and_then(Value::as_i64)
@@ -191,6 +225,7 @@ fn build_page_fetch_job(event: &Value) -> Option<PageFetchJob> {
         hostname: normalized.hostname,
         candidate_urls: Vec::new(),
         trace_id,
+        idempotency_key,
         ttl_seconds: ttl_override,
     })
 }

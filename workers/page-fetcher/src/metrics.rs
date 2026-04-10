@@ -1,7 +1,7 @@
 use anyhow::Result;
 use axum::{routing::get, Router};
 use once_cell::sync::Lazy;
-use prometheus::{Encoder, Histogram, HistogramOpts, IntCounter, TextEncoder};
+use prometheus::{Encoder, Histogram, HistogramOpts, IntCounter, IntCounterVec, TextEncoder};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing::info;
@@ -34,6 +34,23 @@ static JOBS_SKIPPED: Lazy<IntCounter> = Lazy::new(|| {
     prometheus::register_int_counter!(
         "page_fetch_jobs_skipped_total",
         "Jobs skipped because cached content is still fresh"
+    )
+    .unwrap()
+});
+
+static JOBS_DUPLICATE_SKIPPED: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_fetch_jobs_duplicate_skipped_total",
+        "Number of page fetch jobs skipped by idempotency dedupe"
+    )
+    .unwrap()
+});
+
+static DLQ_PUBLISHED: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "page_fetch_dlq_published_total",
+        "Number of page-fetch stream entries published to dead-letter queue",
+        &["reason"]
     )
     .unwrap()
 });
@@ -127,6 +144,10 @@ impl MetricsServer {
         JOBS_SKIPPED.inc();
     }
 
+    pub fn record_job_duplicate(&self) {
+        JOBS_DUPLICATE_SKIPPED.inc();
+    }
+
     pub fn record_crawl_failure(&self) {
         CRAWL_FAILURES.inc();
     }
@@ -172,6 +193,10 @@ impl MetricsServer {
         axum::serve(listener, router).await?;
         Ok(())
     }
+}
+
+pub fn record_dlq_published(reason: &str) {
+    DLQ_PUBLISHED.with_label_values(&[reason]).inc();
 }
 
 async fn metrics_handler() -> String {

@@ -194,7 +194,8 @@ async fn handle_connection(
         &decision.action,
         decision.verdict.as_ref(),
     );
-    let requires_pending = classification_required || matches!(decision.action, PolicyAction::ContentPending);
+    let requires_pending =
+        classification_required || matches!(decision.action, PolicyAction::ContentPending);
     let fetch_candidates = build_fetch_candidates(&classification_key, &normalized);
     let base_url = fetch_candidates
         .first()
@@ -238,6 +239,10 @@ async fn handle_connection(
             }
         }
         if let Some(publisher) = &page_fetch_publisher {
+            let page_fetch_idempotency_key = icap_req
+                .trace_id
+                .as_ref()
+                .map(|trace| format!("page:{}:{}", classification_key, trace));
             let job = PageFetchJob {
                 normalized_key: classification_key.clone(),
                 url: base_url
@@ -246,6 +251,7 @@ async fn handle_connection(
                 hostname: normalized.hostname.clone(),
                 candidate_urls: fetch_candidates.clone(),
                 trace_id: icap_req.trace_id.clone(),
+                idempotency_key: page_fetch_idempotency_key,
                 ttl_seconds: None,
             };
             if let Err(err) = publisher.publish(job).await {
@@ -267,6 +273,10 @@ async fn handle_connection(
         let enqueue = requires_pending
             || action_requires_follow_up(&decision.action, decision.verdict.is_none());
         if enqueue {
+            let classification_idempotency_key = icap_req
+                .trace_id
+                .as_ref()
+                .map(|trace| format!("cls:{}:{}", classification_key, trace));
             if let Err(err) = publisher
                 .publish(&ClassificationJob {
                     normalized_key: &classification_key,
@@ -274,6 +284,7 @@ async fn handle_connection(
                     hostname: &normalized.hostname,
                     full_url: &normalized.full_url,
                     trace_id: icap_req.trace_id.as_deref().unwrap_or(""),
+                    idempotency_key: classification_idempotency_key.as_deref(),
                     requires_content: requires_pending,
                     base_url: base_url.as_deref(),
                     content_excerpt: None,
@@ -666,7 +677,10 @@ mod icap_response_tests {
 
     #[test]
     fn explicit_content_pending_requires_follow_up() {
-        assert!(action_requires_follow_up(&PolicyAction::ContentPending, false));
+        assert!(action_requires_follow_up(
+            &PolicyAction::ContentPending,
+            false
+        ));
     }
 
     #[test]

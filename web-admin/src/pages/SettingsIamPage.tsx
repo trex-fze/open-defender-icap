@@ -1225,7 +1225,12 @@ const IamServiceAccountsPanel = () => {
   const [lastToken, setLastToken] = useState<ServiceAccountWithToken>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', roles: [] as string[] });
+  const [form, setForm] = useState({
+    name: '',
+    description: '',
+    roles: [] as string[],
+    expiresAt: '',
+  });
 
   const loadAccounts = useCallback(async () => {
     if (!api.canCallApi) return;
@@ -1274,10 +1279,11 @@ const IamServiceAccountsPanel = () => {
           name: form.name.trim(),
           description: form.description.trim() || undefined,
           roles: form.roles,
+          expires_at: form.expiresAt ? new Date(form.expiresAt).toISOString() : undefined,
         },
       );
       setLastToken(result);
-      setForm({ name: '', description: '', roles: [] });
+      setForm({ name: '', description: '', roles: [], expiresAt: '' });
       loadAccounts();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create service account');
@@ -1291,6 +1297,7 @@ const IamServiceAccountsPanel = () => {
         `/api/v1/iam/service-accounts/${id}/rotate`,
         {
           roles,
+          expires_at: undefined,
         },
       );
       setLastToken(result);
@@ -1334,6 +1341,14 @@ const IamServiceAccountsPanel = () => {
               value={form.description}
               onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
               placeholder="CI/CD deploy pipeline"
+            />
+          </label>
+          <label>
+            <span>Expires At</span>
+            <input
+              type="datetime-local"
+              value={form.expiresAt}
+              onChange={(e) => setForm((prev) => ({ ...prev, expiresAt: e.target.value }))}
             />
           </label>
         </div>
@@ -1396,6 +1411,7 @@ const IamServiceAccountsPanel = () => {
                 <th>Account</th>
                 <th>Roles</th>
                 <th>Token hint</th>
+                <th>Expires</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -1416,6 +1432,7 @@ const IamServiceAccountsPanel = () => {
                     </div>
                   </td>
                   <td>{entry.account.token_hint || '—'}</td>
+                  <td>{entry.account.expires_at ? new Date(entry.account.expires_at).toLocaleString() : '—'}</td>
                   <td>
                     <div className="button-stack">
                       <button

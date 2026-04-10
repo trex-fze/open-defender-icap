@@ -17,7 +17,8 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `OD_ADMIN_URL`, `OD_POLICY_URL`, `OD_POLICY_ENGINE_URL` | Internal service URLs used by tooling and service-to-service calls. |
 | `OD_AUTH_MODE` | Admin auth mode (`local`, `hybrid`, `oidc`). |
 | `OD_LOCAL_AUTH_JWT_SECRET`, `OD_DEFAULT_ADMIN_PASSWORD` | Local auth bootstrap secrets. |
-| `OD_LOCAL_AUTH_TTL_SECONDS`, `OD_LOCAL_AUTH_MAX_FAILED_ATTEMPTS`, `OD_LOCAL_AUTH_LOCKOUT_SECONDS` | Local auth token + lockout controls. |
+| `OD_LOCAL_AUTH_TTL_SECONDS`, `OD_LOCAL_AUTH_MAX_FAILED_ATTEMPTS`, `OD_LOCAL_AUTH_LOCKOUT_SECONDS`, `OD_LOCAL_AUTH_REFRESH_TTL_SECONDS`, `OD_LOCAL_AUTH_REFRESH_MAX_SESSIONS` | Local auth access-token/refresh-token and lockout controls. |
+| `OD_IAM_SERVICE_TOKEN_TTL_DAYS` | Default service-account token expiry window in days (used when `expires_at` is omitted on create/rotate). |
 | `OD_OIDC_ISSUER`, `OD_OIDC_AUDIENCE`, `OD_OIDC_HS256_SECRET` | OIDC/JWT validation parameters. |
 | `OD_ADMIN_CORS_ALLOW_ORIGIN` | Browser origin allowed by Admin API CORS middleware. |
 

@@ -49,6 +49,7 @@ export type ServiceAccountRecord = {
   token_hint?: string | null;
   created_at: string;
   last_rotated_at?: string | null;
+  expires_at?: string | null;
 };
 
 export type ServiceAccountDetails = {

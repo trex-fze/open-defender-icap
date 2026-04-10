@@ -13,6 +13,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use common_types::PolicyAction;
 use dirs::config_dir;
 use policy_dsl::{Conditions as RuleConditions, PolicyDocument, PolicyRule as DslPolicyRule};
+use redis::streams::StreamRangeReply;
 use reqwest::{header, Client};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
@@ -59,6 +60,8 @@ enum Commands {
         url: Option<String>,
     },
     #[clap(subcommand)]
+    Doctor(DoctorCmd),
+    #[clap(subcommand)]
     Policy(PolicyCmd),
     #[clap(subcommand)]
     Override(OverrideCmd),
@@ -77,11 +80,78 @@ enum Commands {
     #[clap(subcommand)]
     Llm(LlmCmd),
     #[clap(subcommand)]
+    Queue(QueueCmd),
+    #[clap(subcommand)]
     Iam(IamCmd),
     Smoke {
         #[clap(long, default_value = "staging")]
         profile: String,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum QueueCmd {
+    #[clap(subcommand)]
+    Dlq(DlqCmd),
+}
+
+#[derive(Subcommand, Debug)]
+enum DlqCmd {
+    List {
+        #[clap(
+            long,
+            env = "OD_CACHE_REDIS_URL",
+            default_value = "redis://localhost:6379"
+        )]
+        redis_url: String,
+        #[clap(long, default_value = "classification-jobs-dlq")]
+        stream: String,
+        #[clap(long, default_value_t = 50)]
+        count: usize,
+    },
+    Replay {
+        #[clap(
+            long,
+            env = "OD_CACHE_REDIS_URL",
+            default_value = "redis://localhost:6379"
+        )]
+        redis_url: String,
+        #[clap(long, default_value = "classification-jobs-dlq")]
+        stream: String,
+        #[clap(long, default_value = "classification-jobs")]
+        target_stream: String,
+        #[clap(long)]
+        reason: Option<String>,
+        #[clap(long)]
+        source_stream: Option<String>,
+        #[clap(long, default_value_t = 50)]
+        count: usize,
+        #[clap(long)]
+        execute: bool,
+    },
+    Drop {
+        #[clap(
+            long,
+            env = "OD_CACHE_REDIS_URL",
+            default_value = "redis://localhost:6379"
+        )]
+        redis_url: String,
+        #[clap(long, default_value = "classification-jobs-dlq")]
+        stream: String,
+        #[clap(long)]
+        reason: Option<String>,
+        #[clap(long)]
+        source_stream: Option<String>,
+        #[clap(long, default_value_t = 50)]
+        count: usize,
+        #[clap(long)]
+        execute: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DoctorCmd {
+    Config,
 }
 
 #[derive(Subcommand, Debug)]
@@ -688,6 +758,8 @@ async fn main() -> Result<()> {
     let bypass_api_client = matches!(
         &cli.command,
         Commands::Iam(IamCmd::RecoverAdminPassword { .. })
+            | Commands::Doctor(_)
+            | Commands::Queue(_)
     );
     let client = if bypass_api_client {
         None
@@ -698,6 +770,7 @@ async fn main() -> Result<()> {
 
     match &cli.command {
         Commands::Env { url } => handle_env(url.as_deref().unwrap_or(&cli.base_url)).await?,
+        Commands::Doctor(DoctorCmd::Config) => handle_doctor_config().await?,
         Commands::Policy(cmd) => {
             handle_policy(
                 cmd,
@@ -756,6 +829,7 @@ async fn main() -> Result<()> {
             .await?
         }
         Commands::Llm(cmd) => handle_llm(cmd, cli.json).await?,
+        Commands::Queue(cmd) => handle_queue(cmd, cli.json).await?,
         Commands::Iam(cmd) => {
             if matches!(cmd, IamCmd::RecoverAdminPassword { .. }) {
                 let local_client = ApiClient::new(&cli.base_url, None)?;
@@ -911,6 +985,389 @@ async fn handle_env(url: &str) -> Result<()> {
     } else {
         Err(anyhow!("Health check failed: {}", resp.status()))
     }
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct DoctorAdminApiConfig {
+    database_url: Option<String>,
+    #[serde(default)]
+    auth: DoctorAdminAuthConfig,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct DoctorAdminAuthConfig {
+    mode: Option<String>,
+    local_jwt_secret: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct DoctorPolicyConfig {
+    policy_file: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct DoctorLlmConfig {
+    redis_url: String,
+    database_url: String,
+    #[serde(default)]
+    providers: Vec<DoctorLlmProvider>,
+    llm_endpoint: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct DoctorLlmProvider {
+    endpoint: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct DoctorPageFetcherConfig {
+    redis_url: String,
+    crawl_service_url: String,
+    database_url: String,
+}
+
+async fn handle_doctor_config() -> Result<()> {
+    let admin_cfg: DoctorAdminApiConfig = config_core::load_config("config/admin-api.json")?;
+    let policy_cfg: DoctorPolicyConfig = config_core::load_config("config/policy-engine.json")?;
+    let llm_cfg: DoctorLlmConfig = config_core::load_config("config/llm-worker.json")?;
+    let page_fetch_cfg: DoctorPageFetcherConfig =
+        config_core::load_config("config/page-fetcher.json")?;
+
+    let mut validator = config_core::ConfigValidator::new("odctl doctor config");
+    let mut warnings = Vec::new();
+
+    let admin_db_lookup = config_core::lookup_env("OD_ADMIN_DATABASE_URL", &["DATABASE_URL"]);
+    let env_admin_db_url = admin_db_lookup.value.clone();
+    if let Some(alias) = admin_db_lookup.deprecated_alias {
+        warnings.push(format!(
+            "deprecated env alias in use: {} -> OD_ADMIN_DATABASE_URL",
+            alias
+        ));
+    }
+    let env_database_url = env::var("DATABASE_URL").ok();
+    let admin_db_url = admin_cfg
+        .database_url
+        .as_deref()
+        .or(env_admin_db_url.as_deref())
+        .or(env_database_url.as_deref());
+    validator.require_non_empty(
+        "admin-api.database_url",
+        admin_db_url,
+        "set config/admin-api.json.database_url or OD_ADMIN_DATABASE_URL (fallback DATABASE_URL)",
+    );
+
+    let auth_mode = env::var("OD_AUTH_MODE")
+        .ok()
+        .or(admin_cfg.auth.mode.clone())
+        .unwrap_or_else(|| "local".to_string())
+        .to_ascii_lowercase();
+    if matches!(auth_mode.as_str(), "local" | "hybrid") {
+        let local_secret = env::var("OD_LOCAL_AUTH_JWT_SECRET")
+            .ok()
+            .or(admin_cfg.auth.local_jwt_secret.clone());
+        validator.require_non_empty(
+            "OD_LOCAL_AUTH_JWT_SECRET",
+            local_secret.as_deref(),
+            "set OD_LOCAL_AUTH_JWT_SECRET for local/hybrid auth mode",
+        );
+        validator.require_min_len(
+            "OD_LOCAL_AUTH_JWT_SECRET",
+            local_secret.as_deref(),
+            32,
+            "use a strong random secret with at least 32 characters",
+        );
+        validator.forbid_substrings_ci(
+            "OD_LOCAL_AUTH_JWT_SECRET",
+            local_secret.as_deref(),
+            &[
+                "changeme",
+                "od-local-dev-secret-change-me",
+                "changeme-local-jwt-secret",
+                "local-jwt-secret",
+            ],
+            "replace default/test secret with a strong random value",
+        );
+    }
+
+    validator.require_non_empty(
+        "policy-engine.policy_file",
+        Some(policy_cfg.policy_file.as_str()),
+        "set config/policy-engine.json.policy_file",
+    );
+    if !policy_cfg.policy_file.trim().is_empty() {
+        let path = PathBuf::from(&policy_cfg.policy_file);
+        if !path.exists() {
+            validator.require_non_empty(
+                "policy-engine.policy_file_exists",
+                None,
+                "create the configured policy file or update policy_file path",
+            );
+        }
+    }
+
+    validator.require_non_empty(
+        "llm-worker.redis_url",
+        Some(llm_cfg.redis_url.as_str()),
+        "set config/llm-worker.json.redis_url",
+    );
+    validator.require_non_empty(
+        "llm-worker.database_url",
+        Some(llm_cfg.database_url.as_str()),
+        "set config/llm-worker.json.database_url",
+    );
+    let has_provider = llm_cfg
+        .providers
+        .iter()
+        .any(|provider| !provider.endpoint.trim().is_empty())
+        || llm_cfg
+            .llm_endpoint
+            .as_deref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+    if !has_provider {
+        validator.require_non_empty(
+            "llm-worker.providers",
+            None,
+            "configure at least one provider endpoint in config/llm-worker.json",
+        );
+    }
+
+    validator.require_non_empty(
+        "page-fetcher.redis_url",
+        Some(page_fetch_cfg.redis_url.as_str()),
+        "set config/page-fetcher.json.redis_url",
+    );
+    validator.require_non_empty(
+        "page-fetcher.crawl_service_url",
+        Some(page_fetch_cfg.crawl_service_url.as_str()),
+        "set config/page-fetcher.json.crawl_service_url",
+    );
+    validator.require_non_empty(
+        "page-fetcher.database_url",
+        Some(page_fetch_cfg.database_url.as_str()),
+        "set config/page-fetcher.json.database_url",
+    );
+
+    let ingest_elastic_url = env::var("OD_ELASTIC_URL").ok();
+    validator.require_non_empty(
+        "OD_ELASTIC_URL",
+        ingest_elastic_url.as_deref(),
+        "set OD_ELASTIC_URL for event-ingester startup",
+    );
+
+    validator.finish()?;
+    for warning in warnings {
+        eprintln!("warning: {warning}");
+    }
+    println!("Config doctor passed: required startup configuration is present");
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct DlqEntry {
+    id: String,
+    source_stream: String,
+    reason: String,
+    trace_id: Option<String>,
+    payload: Option<String>,
+}
+
+async fn handle_queue(cmd: &QueueCmd, json: bool) -> Result<()> {
+    match cmd {
+        QueueCmd::Dlq(dlq) => match dlq {
+            DlqCmd::List {
+                redis_url,
+                stream,
+                count,
+            } => {
+                let entries = fetch_dlq_entries(redis_url, stream, *count).await?;
+                if json {
+                    print_json(&entries)?;
+                } else {
+                    if entries.is_empty() {
+                        println!("No DLQ entries found in {stream}");
+                    } else {
+                        let rows = entries
+                            .iter()
+                            .map(|entry| {
+                                vec![
+                                    entry.id.clone(),
+                                    entry.source_stream.clone(),
+                                    entry.reason.clone(),
+                                    entry.trace_id.clone().unwrap_or_else(|| "-".into()),
+                                ]
+                            })
+                            .collect();
+                        print_table(&["ID", "Source", "Reason", "Trace"], rows);
+                    }
+                }
+            }
+            DlqCmd::Replay {
+                redis_url,
+                stream,
+                target_stream,
+                reason,
+                source_stream,
+                count,
+                execute,
+            } => {
+                ensure_explicit_scope(reason, source_stream)?;
+                let entries = fetch_dlq_entries(redis_url, stream, *count).await?;
+                let filtered =
+                    filter_dlq_entries(entries, reason.as_deref(), source_stream.as_deref());
+                if !execute {
+                    println!(
+                        "dry-run: {} DLQ entries match replay scope to stream {} (pass --execute to apply)",
+                        filtered.len(), target_stream
+                    );
+                    return Ok(());
+                }
+                let replayed =
+                    replay_dlq_entries(redis_url, stream, target_stream, &filtered).await?;
+                println!("replayed {} DLQ entries to {}", replayed, target_stream);
+            }
+            DlqCmd::Drop {
+                redis_url,
+                stream,
+                reason,
+                source_stream,
+                count,
+                execute,
+            } => {
+                ensure_explicit_scope(reason, source_stream)?;
+                let entries = fetch_dlq_entries(redis_url, stream, *count).await?;
+                let filtered =
+                    filter_dlq_entries(entries, reason.as_deref(), source_stream.as_deref());
+                if !execute {
+                    println!(
+                        "dry-run: {} DLQ entries match drop scope in {} (pass --execute to apply)",
+                        filtered.len(),
+                        stream
+                    );
+                    return Ok(());
+                }
+                let dropped = drop_dlq_entries(redis_url, stream, &filtered).await?;
+                println!("dropped {} DLQ entries from {}", dropped, stream);
+            }
+        },
+    }
+    Ok(())
+}
+
+fn ensure_explicit_scope(reason: &Option<String>, source_stream: &Option<String>) -> Result<()> {
+    if reason.is_none() && source_stream.is_none() {
+        return Err(anyhow!(
+            "explicit scope required: pass --reason and/or --source-stream"
+        ));
+    }
+    Ok(())
+}
+
+fn filter_dlq_entries(
+    entries: Vec<DlqEntry>,
+    reason: Option<&str>,
+    source_stream: Option<&str>,
+) -> Vec<DlqEntry> {
+    entries
+        .into_iter()
+        .filter(|entry| {
+            let reason_ok = reason
+                .map(|value| entry.reason.eq_ignore_ascii_case(value))
+                .unwrap_or(true);
+            let source_ok = source_stream
+                .map(|value| entry.source_stream.eq_ignore_ascii_case(value))
+                .unwrap_or(true);
+            reason_ok && source_ok
+        })
+        .collect()
+}
+
+async fn fetch_dlq_entries(redis_url: &str, stream: &str, count: usize) -> Result<Vec<DlqEntry>> {
+    let client = redis::Client::open(redis_url)?;
+    let mut conn = client.get_async_connection().await?;
+    let reply: StreamRangeReply = redis::cmd("XREVRANGE")
+        .arg(stream)
+        .arg("+")
+        .arg("-")
+        .arg("COUNT")
+        .arg(count.max(1) as i64)
+        .query_async(&mut conn)
+        .await?;
+
+    let mut entries = Vec::new();
+    for id in reply.ids {
+        let entry_id = id.id.clone();
+        entries.push(DlqEntry {
+            id: entry_id,
+            source_stream: id
+                .get::<String>("source_stream")
+                .unwrap_or_else(|| "unknown".to_string()),
+            reason: id
+                .get::<String>("reason")
+                .unwrap_or_else(|| "unknown".to_string()),
+            trace_id: id.get::<String>("trace_id").and_then(|value| {
+                if value.trim().is_empty() {
+                    None
+                } else {
+                    Some(value)
+                }
+            }),
+            payload: id.get::<String>("payload").and_then(|value| {
+                if value.trim().is_empty() {
+                    None
+                } else {
+                    Some(value)
+                }
+            }),
+        });
+    }
+    Ok(entries)
+}
+
+async fn replay_dlq_entries(
+    redis_url: &str,
+    stream: &str,
+    target_stream: &str,
+    entries: &[DlqEntry],
+) -> Result<usize> {
+    let client = redis::Client::open(redis_url)?;
+    let mut conn = client.get_async_connection().await?;
+    let mut replayed = 0usize;
+    for entry in entries {
+        if let Some(payload) = entry.payload.as_deref() {
+            redis::cmd("XADD")
+                .arg(target_stream)
+                .arg("*")
+                .arg("payload")
+                .arg(payload)
+                .query_async::<_, ()>(&mut conn)
+                .await?;
+            redis::cmd("XDEL")
+                .arg(stream)
+                .arg(&entry.id)
+                .query_async::<_, i64>(&mut conn)
+                .await?;
+            replayed = replayed.saturating_add(1);
+        }
+    }
+    Ok(replayed)
+}
+
+async fn drop_dlq_entries(redis_url: &str, stream: &str, entries: &[DlqEntry]) -> Result<usize> {
+    let client = redis::Client::open(redis_url)?;
+    let mut conn = client.get_async_connection().await?;
+    let mut dropped = 0usize;
+    for entry in entries {
+        let removed = redis::cmd("XDEL")
+            .arg(stream)
+            .arg(&entry.id)
+            .query_async::<_, i64>(&mut conn)
+            .await?;
+        if removed > 0 {
+            dropped = dropped.saturating_add(1);
+        }
+    }
+    Ok(dropped)
 }
 
 async fn handle_policy(cmd: &PolicyCmd, client: &ApiClient, json: bool) -> Result<()> {

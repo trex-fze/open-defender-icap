@@ -16,6 +16,8 @@ pub struct ClassificationJob<'a> {
     pub hostname: &'a str,
     pub full_url: &'a str,
     pub trace_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<&'a str>,
     #[serde(default)]
     pub requires_content: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

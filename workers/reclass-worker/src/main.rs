@@ -188,6 +188,8 @@ struct ClassificationJobMessage {
     hostname: String,
     full_url: String,
     trace_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    idempotency_key: Option<String>,
     requires_content: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     base_url: Option<String>,
@@ -486,6 +488,7 @@ impl Dispatcher {
                         hostname: target.hostname.clone(),
                         full_url: target.full_url.clone(),
                         trace_id: trace_id.clone(),
+                        idempotency_key: Some(format!("cls:{}:{}", normalized_key, trace_id)),
                         requires_content: true,
                         base_url: Some(base_url.clone()),
                         content_excerpt: page_content
@@ -516,6 +519,10 @@ impl Dispatcher {
                                     hostname: target.hostname.clone(),
                                     candidate_urls: vec![base_url.clone()],
                                     trace_id: Some(trace_id.clone()),
+                                    idempotency_key: Some(format!(
+                                        "page:{}:{}",
+                                        normalized_key, trace_id
+                                    )),
                                     ttl_seconds: None,
                                 };
                                 match fetcher.publish(fetch_job).await {

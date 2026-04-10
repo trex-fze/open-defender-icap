@@ -8,7 +8,8 @@ Canonical env policy:
 - For the complete variable catalog (runtime + frontend + test controls), see `docs/env-vars-reference.md`.
 
 ## Compose files
-- `docker-compose.yml`: full developer stack (Redis, Postgres, ICAP adaptor, Policy Engine, Admin API, Squid, Kibana, Elasticsearch, Prometheus, workers, web-admin, odctl runner, **Filebeat + event-ingester** for Stage 6 telemetry). Prometheus loads custom Stage 6 alert rules from `prometheus-rules.yml` (cache hit ratio, ICAP latency, ingestion failures, review SLA breaches).
+- `docker-compose.yml`: full developer stack (Redis, Postgres, ICAP adaptor, Policy Engine, Admin API, Squid, Kibana, Elasticsearch, Prometheus, workers, web-admin, odctl runner, **Filebeat + event-ingester** for Stage 6 telemetry). Prometheus loads `prometheus-rules.yml`, including Stage 6 service health alerts plus Stage 24 queue reliability and auth-hardening alerts (pending age, processing stall, DLQ growth, login/refresh failure spikes, lockouts).
+- `docker-compose.golden-profiles.yml`: Stage 24 profile overlay defining `golden-local` and `golden-prodlike` service sets.
 - `docker-compose.test.yml`: extends the base stack and adds a `smoke-tests` service that runs `odctl smoke` plus basic override listing; also marks heavy services with the `dev` profile so they can be skipped in CI.
 - `docker-compose.smoke.yml`: minimal stack (Redis, Postgres, Policy Engine, Admin API, ICAP adaptor, odctl runner, smoke tests) for quick validation.
 - **Auth note**: Keep `OD_ADMIN_TOKEN` in `.env` for static token flows, or set `OD_OIDC_ISSUER` / `OD_OIDC_AUDIENCE` / `OD_OIDC_HS256_SECRET` to exercise the OIDC/RBAC guard (ensure issued tokens contain roles such as `policy-admin`, `policy-editor`).
@@ -28,6 +29,10 @@ docker compose --env-file ../../.env -f docker-compose.smoke.yml up --build --ab
 
 # Execute odctl commands inside the runner container
 docker compose --env-file ../../.env run --rm odctl-runner odctl override list
+
+# Stage 24 golden profile verify
+PROFILE=golden-local bash ../../tests/ops/golden-profile.sh verify
+PROFILE=golden-prodlike bash ../../tests/ops/golden-profile.sh verify
 ```
 
 ### Helper targets
@@ -40,6 +45,9 @@ make compose-down         # Stops the stack
 make compose-smoke        # Runs the minimal smoke stack (abort on completion)
 make compose-test         # Runs the CI/test stack (docker-compose.yml + test overlay)
 make compose-logs SERVICE=admin-api   # Tail logs for a specific service
+make compose-golden-local # Stage 24 golden-local bootstrap + verify
+make compose-golden-prodlike # Stage 24 golden-prodlike bootstrap + verify
+make compose-golden-down  # Teardown golden profile stacks
 ```
 
 Run `make gen-certs` once before the first `compose-up`; import `deploy/docker/squid/certs/ca.pem` into any client trust store hitting the Squid proxy.

@@ -17,8 +17,8 @@ mod taxonomy;
 use anyhow::{anyhow, Context, Result};
 use audit::{AuditEvent, AuditLogger, ElasticExporter};
 use auth::{
-    enforce_admin, require_roles, AdminAuth, AuthMode, AuthSettings, UserContext,
-    ROLE_OVERRIDES_DELETE, ROLE_OVERRIDES_VIEW, ROLE_OVERRIDES_WRITE,
+    enforce_admin, require_roles, validate_settings_for_startup, AdminAuth, AuthMode, AuthSettings,
+    UserContext, ROLE_OVERRIDES_DELETE, ROLE_OVERRIDES_VIEW, ROLE_OVERRIDES_WRITE,
 };
 use axum::{
     extract::{Path, Query, State},
@@ -46,6 +46,48 @@ use cache::CacheInvalidator;
 use metrics::ReviewMetrics;
 use pagination::{cursor_limit, decode_cursor, encode_cursor, CursorPaged};
 use reporting_es::{ElasticReportingClient, ReportingConfig};
+
+fn check_config_mode_enabled() -> bool {
+    std::env::args().any(|arg| arg == "--check-config")
+}
+
+fn resolve_admin_db_url(cfg: &AdminApiConfig) -> Option<String> {
+    if let Some(url) = cfg.database_url.clone() {
+        return Some(url);
+    }
+    config_core::lookup_env("OD_ADMIN_DATABASE_URL", &["DATABASE_URL"]).value
+}
+
+fn emit_env_alias_warnings(cfg: &AdminApiConfig) {
+    if cfg.database_url.is_none() {
+        if let Some(alias) =
+            config_core::lookup_env("OD_ADMIN_DATABASE_URL", &["DATABASE_URL"]).deprecated_alias
+        {
+            eprintln!(
+                "warning: admin-api deprecated env alias in use: {} -> OD_ADMIN_DATABASE_URL",
+                alias
+            );
+        }
+    }
+}
+
+fn validate_config(cfg: &AdminApiConfig) -> Result<()> {
+    let mut validator = config_core::ConfigValidator::new("admin-api");
+    validator.require_non_empty(
+        "host",
+        Some(cfg.host.as_str()),
+        "set host in config/admin-api.json",
+    );
+    let db_url = resolve_admin_db_url(cfg);
+    validator.require_non_empty(
+        "database_url",
+        db_url.as_deref(),
+        "set config/admin-api.json.database_url or OD_ADMIN_DATABASE_URL (fallback: DATABASE_URL)",
+    );
+    validator.finish()?;
+    validate_settings_for_startup(cfg.auth.clone())?;
+    Ok(())
+}
 
 #[derive(Debug, Clone, Deserialize)]
 struct AdminApiConfig {
@@ -374,12 +416,15 @@ async fn main() -> Result<()> {
         .init();
 
     let cfg: AdminApiConfig = config_core::load_config("config/admin-api.json")?;
-    let db_url = cfg
-        .database_url
-        .clone()
-        .or_else(|| env::var("OD_ADMIN_DATABASE_URL").ok())
-        .or_else(|| env::var("DATABASE_URL").ok())
-        .context("database_url required: set config/admin-api.json or OD_ADMIN_DATABASE_URL / DATABASE_URL")?;
+    validate_config(&cfg)?;
+    emit_env_alias_warnings(&cfg);
+    if check_config_mode_enabled() {
+        println!("admin-api config check passed");
+        return Ok(());
+    }
+    let db_url = resolve_admin_db_url(&cfg).context(
+        "database_url required: set config/admin-api.json or OD_ADMIN_DATABASE_URL / DATABASE_URL",
+    )?;
     let admin_token = cfg
         .admin_token
         .clone()
@@ -715,6 +760,8 @@ async fn main() -> Result<()> {
         .route("/health/live", get(health))
         .route("/metrics", get(metrics_endpoint))
         .route("/api/v1/auth/login", post(auth::login_route))
+        .route("/api/v1/auth/refresh", post(auth::refresh_route))
+        .route("/api/v1/auth/logout", post(auth::logout_route))
         .route("/api/v1/auth/mode", get(auth::auth_mode_route))
         .with_state(state)
         .merge(admin_routes)

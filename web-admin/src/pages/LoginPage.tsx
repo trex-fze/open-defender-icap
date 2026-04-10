@@ -4,7 +4,9 @@ import { useAuth } from '../context/AuthContext';
 
 type LoginResponse = {
   access_token: string;
+  refresh_token: string;
   expires_in: number;
+  refresh_expires_in?: number;
   user: {
     username?: string | null;
     email: string;
@@ -73,6 +75,7 @@ export const LoginPage = () => {
         {
           tokens: {
             accessToken: payload.access_token,
+            refreshToken: payload.refresh_token,
             expiresAt: Date.now() + payload.expires_in * 1000,
           },
         },

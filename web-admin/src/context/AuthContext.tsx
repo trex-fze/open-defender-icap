@@ -145,6 +145,39 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setAuthNotice(notice);
   }, []);
 
+  const refreshSession = useCallback(async () => {
+    if (!tokens?.refreshToken) {
+      expireSession();
+      return;
+    }
+    try {
+      const response = await fetch(new URL('/api/v1/auth/refresh', resolveAdminApiBase()).toString(), {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh_token: tokens.refreshToken }),
+      });
+      if (!response.ok) {
+        throw new Error(`refresh failed (${response.status})`);
+      }
+      const payload = (await response.json()) as {
+        access_token: string;
+        refresh_token: string;
+        expires_in: number;
+      };
+      setTokens({
+        accessToken: payload.access_token,
+        refreshToken: payload.refresh_token,
+        expiresAt: Date.now() + payload.expires_in * 1000,
+      });
+      setAuthNotice(undefined);
+    } catch {
+      expireSession();
+    }
+  }, [expireSession, tokens?.refreshToken]);
+
   useEffect(() => {
     if (!tokens?.accessToken || !tokens.expiresAt) return;
     if (isExpired(tokens)) {
@@ -152,13 +185,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    const timeoutMs = tokens.expiresAt - Date.now();
+    const hasRefresh = Boolean(tokens.refreshToken);
+    const leadMs = hasRefresh ? 60_000 : 0;
+    const timeoutMs = Math.max(tokens.expiresAt - Date.now() - leadMs, 1_000);
     const timer = window.setTimeout(() => {
-      expireSession();
+      if (hasRefresh) {
+        void refreshSession();
+      } else {
+        expireSession();
+      }
     }, timeoutMs);
 
     return () => window.clearTimeout(timer);
-  }, [expireSession, tokens]);
+  }, [expireSession, refreshSession, tokens]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -257,6 +296,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
       },
       logout: () => {
+        if (tokens?.refreshToken) {
+          void fetch(new URL('/api/v1/auth/logout', resolveAdminApiBase()).toString(), {
+            method: 'POST',
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ refresh_token: tokens.refreshToken }),
+          }).catch(() => undefined);
+        }
         setUser(null);
         setTokens(null);
         setAuthNotice(undefined);

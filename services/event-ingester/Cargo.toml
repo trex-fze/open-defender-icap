@@ -19,3 +19,4 @@ prometheus = { workspace = true }
 redis = { workspace = true }
 common-types = { path = "../../crates/common-types" }
 url = { workspace = true }
+config-core = { path = "../../crates/config-core" }

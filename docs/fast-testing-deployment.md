@@ -162,9 +162,9 @@ LLM failover safety controls (env overrides for `config/llm-worker.json` routing
 - `OD_PENDING_RECONCILE_INTERVAL_SECS`: reconcile loop interval in seconds (default `60`)
 - `OD_PENDING_RECONCILE_STALE_MINUTES`: age threshold for reconciling stale pending rows (default `10`)
 - `OD_PENDING_RECONCILE_BATCH`: max pending rows reconciled per cycle (default `100`)
-- `OD_LLM_STREAM_GROUP`, `OD_LLM_STREAM_CONSUMER`, `OD_LLM_STREAM_DEAD_LETTER`: LLM worker stream-group names and DLQ stream
-- `OD_LLM_STREAM_CLAIM_IDLE_MS`, `OD_LLM_STREAM_CLAIM_BATCH`, `OD_LLM_JOB_REQUEUE_MAX`: LLM pending-claim and requeue tuning
-- `OD_PAGE_FETCH_STREAM_GROUP`, `OD_PAGE_FETCH_STREAM_CONSUMER`, `OD_PAGE_FETCH_STREAM_DEAD_LETTER`: page-fetcher stream-group names and DLQ stream
+- `OD_LLM_STREAM_GROUP`, `OD_LLM_STREAM_CONSUMER`, `OD_LLM_STREAM_DEAD_LETTER`: LLM worker stream-group names and DLQ stream (`OD_LLM_STREAM_CONSUMER` now defaults to unique `llm-worker-<hostname>-<pid>` if unset)
+- `OD_LLM_STREAM_CLAIM_IDLE_MS`, `OD_LLM_STREAM_CLAIM_BATCH`, `OD_LLM_JOB_REQUEUE_MAX`, `OD_LLM_IDEMPOTENCY_TTL_SECONDS`: LLM pending-claim, requeue, and idempotency marker TTL tuning
+- `OD_PAGE_FETCH_STREAM_GROUP`, `OD_PAGE_FETCH_STREAM_CONSUMER`, `OD_PAGE_FETCH_STREAM_DEAD_LETTER`: page-fetcher stream-group names and DLQ stream (`OD_PAGE_FETCH_STREAM_CONSUMER` now defaults to unique `<queue_name>-<hostname>-<pid>` if unset)
 - `OD_PAGE_FETCH_STREAM_CLAIM_IDLE_MS`, `OD_PAGE_FETCH_STREAM_CLAIM_BATCH`: page-fetch pending-claim tuning
 - `config/page-fetcher.json.terminal_retry_cooldown_seconds`: cooldown for retrying recently failed keys (default `1200`)
 - `config/page-fetcher.json.blocked_retry_cooldown_seconds`: cooldown for retrying recently blocked keys (default `14400`)
@@ -362,6 +362,7 @@ Use `down -v` only when you explicitly need a clean local data state.
 ## 9) Additional relevant information
 
 - Keep failure artifacts from `tests/artifacts/content-pending/` when debugging classification timing or queue behavior.
+- Collect full platform triage bundle with redaction enabled: `HOST_TAG=local REDACT=1 bash tests/ops/platform-diagnostics.sh`.
 - When changing `deploy/docker/squid/squid.conf`, apply safely with:
   1. `docker compose --env-file .env -f deploy/docker/docker-compose.yml down`
   2. `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --build`
@@ -375,3 +376,4 @@ Use `down -v` only when you explicitly need a clean local data state.
   - `docs/architecture.md`
   - `docs/user-guide.md`
   - `docs/testing/integration-plan.md`
+  - `docs/deployment/golden-profiles.md`

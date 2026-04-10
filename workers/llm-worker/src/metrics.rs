@@ -41,6 +41,23 @@ static JOBS_REQUEUED: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+static JOBS_DUPLICATE_SKIPPED: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "llm_jobs_duplicate_skipped_total",
+        "Number of classification jobs skipped by idempotency dedupe"
+    )
+    .unwrap()
+});
+
+static DLQ_PUBLISHED: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_dlq_published_total",
+        "Number of LLM stream entries published to dead-letter queue",
+        &["reason"]
+    )
+    .unwrap()
+});
+
 static JOBS_TERMINALIZED: Lazy<IntCounterVec> = Lazy::new(|| {
     prometheus::register_int_counter_vec!(
         "llm_jobs_terminalized_total",
@@ -319,6 +336,14 @@ pub fn record_job_failed() {
 
 pub fn record_job_requeued() {
     JOBS_REQUEUED.inc();
+}
+
+pub fn record_job_duplicate() {
+    JOBS_DUPLICATE_SKIPPED.inc();
+}
+
+pub fn record_dlq_published(reason: &str) {
+    DLQ_PUBLISHED.with_label_values(&[reason]).inc();
 }
 
 pub fn record_job_terminalized(reason: &str) {

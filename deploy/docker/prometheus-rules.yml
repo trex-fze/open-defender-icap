@@ -65,3 +65,79 @@ groups:
         annotations:
           summary: "LLM provider {{ $labels.provider }} latency p95 > 4s"
           description: "Monitor or failover to maintain SLA"
+
+  - name: stage24-queue-alerts
+    rules:
+      - alert: LlmQueuePendingAgeHigh
+        expr: histogram_quantile(0.95, sum(rate(llm_pending_age_seconds_bucket[10m])) by (le)) > 600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM pending age p95 above 10 minutes"
+          description: "Classification pending requests are aging beyond queue SLO"
+
+      - alert: LlmQueueProcessingStalled
+        expr: rate(llm_jobs_started_total[10m]) > 0.1 and rate(llm_jobs_completed_total[10m]) < 0.01
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM queue processing appears stalled"
+          description: "Jobs are being consumed but completions are near zero"
+
+      - alert: PageFetchQueueProcessingStalled
+        expr: rate(page_fetch_jobs_started_total[10m]) > 0.1 and rate(page_fetch_jobs_completed_total[10m]) < 0.01
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Page-fetch queue processing appears stalled"
+          description: "Page-fetch jobs are being consumed but completions are near zero"
+
+      - alert: LlmDlqGrowthDetected
+        expr: increase(llm_dlq_published_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM DLQ growth detected"
+          description: "Dead-letter entries are increasing for llm-worker"
+
+      - alert: PageFetchDlqGrowthDetected
+        expr: increase(page_fetch_dlq_published_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Page-fetch DLQ growth detected"
+          description: "Dead-letter entries are increasing for page-fetcher"
+
+  - name: stage24-auth-alerts
+    rules:
+      - alert: AdminAuthLoginFailuresHigh
+        expr: increase(admin_auth_login_failure_total[10m]) > 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Admin auth login failures are elevated"
+          description: "High failed login volume in the last 10 minutes"
+
+      - alert: AdminAuthLockoutDetected
+        expr: increase(admin_auth_lockout_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Admin auth lockout triggered"
+          description: "At least one account lockout was triggered recently"
+
+      - alert: AdminAuthRefreshFailuresHigh
+        expr: increase(admin_auth_refresh_failure_total[10m]) > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Admin auth refresh failures are elevated"
+          description: "Refresh token exchanges are failing at elevated rate"
