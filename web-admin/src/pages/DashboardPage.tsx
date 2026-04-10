@@ -266,9 +266,9 @@ export const DashboardPage = () => {
       </div>
 
       <div className="layout-grid" style={{ marginTop: '1.2rem' }}>
-        <div className="glass-panel">
+        <div className="glass-panel dashboard-domain-panel">
           <p className="section-title">Frequently Accessed Domains</p>
-          <div style={{ width: '100%', height: 300 }}>
+          <div className="dashboard-domain-chart">
             <ResponsiveContainer>
               <BarChart data={domainChart} margin={{ left: 16, right: 16 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
@@ -279,7 +279,7 @@ export const DashboardPage = () => {
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Top frequently accessed domains">
+          <div className="table-wrapper dashboard-domain-table" role="region" tabIndex={0} aria-label="Top frequently accessed domains">
             <table>
               <thead>
                 <tr>
@@ -299,9 +299,9 @@ export const DashboardPage = () => {
           </div>
         </div>
 
-        <div className="glass-panel">
+        <div className="glass-panel dashboard-domain-panel">
           <p className="section-title">Blocked Domains</p>
-          <div style={{ width: '100%', height: 300 }}>
+          <div className="dashboard-domain-chart">
             <ResponsiveContainer>
               <BarChart data={blockedDomainChart} margin={{ left: 16, right: 16 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
@@ -312,7 +312,7 @@ export const DashboardPage = () => {
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Top blocked domains">
+          <div className="table-wrapper dashboard-domain-table" role="region" tabIndex={0} aria-label="Top blocked domains">
             <table>
               <thead>
                 <tr>
@@ -334,9 +334,9 @@ export const DashboardPage = () => {
       </div>
 
       <div className="layout-grid" style={{ marginTop: '1.2rem' }}>
-        <div className="glass-panel">
+        <div className="glass-panel dashboard-domain-panel dashboard-domain-panel--compact">
           <p className="section-title">Top Requesters of Blocked Domains (client.ip)</p>
-          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Top blocked requesters by client ip">
+          <div className="table-wrapper dashboard-domain-table" role="region" tabIndex={0} aria-label="Top blocked requesters by client ip">
             <table>
               <thead>
                 <tr>
@@ -356,9 +356,9 @@ export const DashboardPage = () => {
           </div>
         </div>
 
-        <div className="glass-panel">
+        <div className="glass-panel dashboard-domain-panel dashboard-domain-panel--compact">
           <p className="section-title">Top Clients by Bandwidth</p>
-          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Top clients by bandwidth table">
+          <div className="table-wrapper dashboard-domain-table" role="region" tabIndex={0} aria-label="Top clients by bandwidth table">
             <table>
               <thead>
                 <tr>

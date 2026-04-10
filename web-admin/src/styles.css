@@ -611,6 +611,35 @@ tr:hover td {
   grid-column: 1 / -1;
 }
 
+.dashboard-domain-panel {
+  height: 660px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-domain-panel--compact {
+  height: 600px;
+}
+
+.dashboard-domain-chart {
+  width: 100%;
+  height: 300px;
+  flex: 0 0 auto;
+}
+
+.dashboard-domain-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.dashboard-domain-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(10, 17, 33, 0.94);
+}
+
 .pagination-controls {
   display: flex;
   align-items: end;
@@ -712,5 +741,17 @@ tr:hover td {
 
   .main-panel {
     padding-top: 4rem;
+  }
+
+  .dashboard-domain-panel {
+    height: 560px;
+  }
+
+  .dashboard-domain-panel--compact {
+    height: 520px;
+  }
+
+  .dashboard-domain-chart {
+    height: 240px;
   }
 }
