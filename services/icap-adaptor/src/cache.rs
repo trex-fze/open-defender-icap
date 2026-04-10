@@ -274,13 +274,13 @@ fn key_matches_domain_scope(key: &str, scope_value: &str, wildcard: bool) -> boo
     }
 
     if let Some(host) = key.strip_prefix("subdomain:") {
+        let suffix = format!(".{}", scope_value);
         if wildcard {
-            return host == scope_value || host.ends_with(scope_value);
+            return host == scope_value || host.ends_with(&suffix);
         }
         if host == scope_value {
             return true;
         }
-        let suffix = format!(".{}", scope_value);
         if host.ends_with(&suffix) {
             return true;
         }
@@ -398,5 +398,19 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn wildcard_scope_match_honors_label_boundary() {
+        assert!(key_matches_domain_scope(
+            "subdomain:foo.mozilla.org",
+            "mozilla.org",
+            true
+        ));
+        assert!(!key_matches_domain_scope(
+            "subdomain:evilmozilla.org",
+            "mozilla.org",
+            true
+        ));
     }
 }

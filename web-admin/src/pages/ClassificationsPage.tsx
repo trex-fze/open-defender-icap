@@ -211,7 +211,7 @@ export const ClassificationsPage = () => {
         </div>
       ) : null}
 
-      <div className="glass-panel">
+      <div className="glass-panel scroll-table-panel">
         {loading ? (
           <div>
             {Array.from({ length: 5 }).map((_, idx) => (
@@ -219,7 +219,7 @@ export const ClassificationsPage = () => {
             ))}
           </div>
         ) : (
-          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Classifications table">
+          <div className="table-wrapper scroll-table-region" role="region" tabIndex={0} aria-label="Classifications table">
             <table>
               <thead>
                 <tr>

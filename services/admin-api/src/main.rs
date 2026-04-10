@@ -1124,6 +1124,37 @@ async fn update_override(
         status,
     } = validated;
 
+    let existing = sqlx::query("SELECT scope_type, scope_value FROM overrides WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("DB_ERROR", err.to_string())),
+            )
+        })?;
+
+    let Some(existing_row) = existing else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ApiError::new("NOT_FOUND", "override not found")),
+        ));
+    };
+
+    let previous_scope_type: String = existing_row.try_get("scope_type").map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("DB_ERROR", err.to_string())),
+        )
+    })?;
+    let previous_scope_value: String = existing_row.try_get("scope_value").map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("DB_ERROR", err.to_string())),
+        )
+    })?;
+
     let row = sqlx::query(
         r#"UPDATE overrides
             SET scope_type = $1,
@@ -1166,9 +1197,16 @@ async fn update_override(
         )
     })?;
 
-    state
-        .invalidate_override(&mapped.scope_type, &mapped.scope_value)
-        .await;
+    for (invalidate_scope_type, invalidate_scope_value) in override_invalidation_scopes(
+        &previous_scope_type,
+        &previous_scope_value,
+        &mapped.scope_type,
+        &mapped.scope_value,
+    ) {
+        state
+            .invalidate_override(&invalidate_scope_type, &invalidate_scope_value)
+            .await;
+    }
     state
         .log_override_event(
             "override.update",
@@ -1383,6 +1421,26 @@ fn normalize_optional_field(value: Option<String>) -> Option<String> {
     })
 }
 
+fn override_invalidation_scopes(
+    previous_scope_type: &str,
+    previous_scope_value: &str,
+    updated_scope_type: &str,
+    updated_scope_value: &str,
+) -> Vec<(String, String)> {
+    let mut scopes = Vec::with_capacity(2);
+    scopes.push((
+        previous_scope_type.to_string(),
+        previous_scope_value.to_string(),
+    ));
+    if previous_scope_type != updated_scope_type || previous_scope_value != updated_scope_value {
+        scopes.push((
+            updated_scope_type.to_string(),
+            updated_scope_value.to_string(),
+        ));
+    }
+    scopes
+}
+
 pub fn validation_error(message: &str) -> (StatusCode, Json<ApiError>) {
     (
         StatusCode::BAD_REQUEST,
@@ -1430,6 +1488,43 @@ mod tests {
         payload.scope_value = "*.Example.com".into();
         let result = validate_override_payload(payload).unwrap();
         assert_eq!(result.scope_value, "*.example.com");
+    }
+
+    #[test]
+    fn invalidates_both_previous_and_updated_scope_on_change() {
+        let scopes = override_invalidation_scopes(
+            "domain",
+            "mozilla.org",
+            "domain",
+            "incoming.telemetry.mozilla.org",
+        );
+        assert_eq!(
+            scopes,
+            vec![
+                ("domain".to_string(), "mozilla.org".to_string()),
+                (
+                    "domain".to_string(),
+                    "incoming.telemetry.mozilla.org".to_string()
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn invalidates_scope_once_when_scope_unchanged() {
+        let scopes = override_invalidation_scopes(
+            "domain",
+            "incoming.telemetry.mozilla.org",
+            "domain",
+            "incoming.telemetry.mozilla.org",
+        );
+        assert_eq!(
+            scopes,
+            vec![(
+                "domain".to_string(),
+                "incoming.telemetry.mozilla.org".to_string()
+            )]
+        );
     }
 }
 

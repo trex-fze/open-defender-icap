@@ -640,6 +640,25 @@ tr:hover td {
   background: rgba(10, 17, 33, 0.94);
 }
 
+.scroll-table-panel {
+  height: 620px;
+  display: flex;
+  flex-direction: column;
+}
+
+.scroll-table-region {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.scroll-table-region thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(10, 17, 33, 0.94);
+}
+
 .pagination-controls {
   display: flex;
   align-items: end;
@@ -753,5 +772,9 @@ tr:hover td {
 
   .dashboard-domain-chart {
     height: 240px;
+  }
+
+  .scroll-table-panel {
+    height: 520px;
   }
 }

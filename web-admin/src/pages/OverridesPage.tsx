@@ -141,6 +141,9 @@ export const OverridesPage = () => {
               onChange={(event) => setScopeValue(event.target.value)}
               placeholder="example.com"
             />
+            <span style={{ display: 'block', marginTop: '0.35rem', color: 'var(--muted)', fontSize: '0.82rem' }}>
+              Applies to this host and subdomains. Example: <code>incoming.telemetry.mozilla.org</code>
+            </span>
           </label>
           <label>
             <span style={{ display: 'block', marginBottom: '0.3rem' }}>Decision</span>
@@ -201,7 +204,7 @@ export const OverridesPage = () => {
         </div>
       </form>
 
-      <div className="glass-panel">
+      <div className="glass-panel scroll-table-panel">
         <PaginationControls
           limit={limit}
           loading={loading}
@@ -234,7 +237,7 @@ export const OverridesPage = () => {
             ))}
           </div>
         ) : (
-          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Overrides table">
+          <div className="table-wrapper scroll-table-region" role="region" tabIndex={0} aria-label="Overrides table">
             <table>
               <thead>
                 <tr>

@@ -240,7 +240,7 @@ export const PendingClassificationsPage = () => {
         </div>
       ) : null}
 
-      <div className="glass-panel">
+      <div className="glass-panel scroll-table-panel">
         <PaginationControls
           limit={limit}
           loading={loading}
@@ -269,7 +269,7 @@ export const PendingClassificationsPage = () => {
             ))}
           </div>
         ) : (
-          <div className="table-wrapper" role="region" tabIndex={0} aria-label="Pending classifications table">
+          <div className="table-wrapper scroll-table-region" role="region" tabIndex={0} aria-label="Pending classifications table">
             <table>
               <thead>
                 <tr>
