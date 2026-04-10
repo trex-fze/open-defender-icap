@@ -31,7 +31,7 @@ export const useOpsStatus = (refreshIntervalMs = 0) => {
   const enabled = Boolean(baseUrl && canCallApi);
 
   const query = useQuery({
-    queryKey: queryKeys.opsStatus(baseUrl, PROVIDERS_URL || 'none'),
+    queryKey: queryKeys.opsStatus(baseUrl, PROVIDERS_URL || 'admin-api'),
     enabled,
     refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : false,
     refetchIntervalInBackground: false,
@@ -42,15 +42,19 @@ export const useOpsStatus = (refreshIntervalMs = 0) => {
         { limit: 500 },
       );
 
-      if (!PROVIDERS_URL) {
-        return {
-          pendingCount: pending.data.length,
-          llmProviderNames: [],
-          source: 'partial',
-        };
-      }
-
       try {
+        if (!PROVIDERS_URL) {
+          const providers = await adminGetJson<ProviderSummary[]>(
+            { baseUrl, canCallApi, headers } as AdminApiContext,
+            '/api/v1/ops/llm/providers',
+          );
+          return {
+            pendingCount: pending.data.length,
+            llmProviderNames: providers.map((item) => item.name),
+            source: 'live',
+          };
+        }
+
         const resp = await fetch(PROVIDERS_URL);
         if (!resp.ok) {
           return {

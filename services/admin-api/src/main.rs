@@ -174,7 +174,19 @@ pub struct AppState {
     taxonomy_mutation_enabled: bool,
     policy_engine_url: String,
     policy_engine_admin_token: Option<String>,
+    llm_providers_url: String,
     http_client: reqwest::Client,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LlmProviderSummary {
+    name: String,
+    #[serde(default)]
+    provider_type: String,
+    #[serde(default)]
+    endpoint: String,
+    #[serde(default)]
+    role: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -447,6 +459,8 @@ async fn main() -> Result<()> {
         .clone()
         .or_else(|| env::var("OD_POLICY_ADMIN_TOKEN").ok())
         .or_else(|| admin_token.clone());
+    let llm_providers_url = env::var("OD_LLM_PROVIDERS_URL")
+        .unwrap_or_else(|_| "http://llm-worker:19015/providers".to_string());
     let cache_invalidator = redis_url
         .as_ref()
         .map(|url| CacheInvalidator::new(url.clone(), cache_channel.clone()))
@@ -544,6 +558,7 @@ async fn main() -> Result<()> {
         taxonomy_mutation_enabled,
         policy_engine_url,
         policy_engine_admin_token,
+        llm_providers_url,
         http_client: reqwest::Client::new(),
     };
 
@@ -752,6 +767,7 @@ async fn main() -> Result<()> {
             "/api/v1/page-contents/:normalized_key/history",
             get(page_contents::list_page_content_history),
         )
+        .route("/api/v1/ops/llm/providers", get(list_llm_providers))
         .with_state(state.clone())
         .layer(auth_layer);
 
@@ -827,6 +843,50 @@ fn apply_cors_headers(
 
 async fn health() -> &'static str {
     "OK"
+}
+
+async fn list_llm_providers(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<LlmProviderSummary>>, StatusCode> {
+    let response = state
+        .http_client
+        .get(&state.llm_providers_url)
+        .send()
+        .await
+        .map_err(|err| {
+            warn!(
+                target = "svc-admin",
+                %err,
+                url = %state.llm_providers_url,
+                "failed to fetch llm providers"
+            );
+            StatusCode::BAD_GATEWAY
+        })?;
+
+    if !response.status().is_success() {
+        warn!(
+            target = "svc-admin",
+            status = %response.status(),
+            url = %state.llm_providers_url,
+            "llm providers endpoint returned non-success status"
+        );
+        return Err(StatusCode::BAD_GATEWAY);
+    }
+
+    let providers = response
+        .json::<Vec<LlmProviderSummary>>()
+        .await
+        .map_err(|err| {
+            warn!(
+                target = "svc-admin",
+                %err,
+                url = %state.llm_providers_url,
+                "failed to decode llm providers response"
+            );
+            StatusCode::BAD_GATEWAY
+        })?;
+
+    Ok(Json(providers))
 }
 
 async fn metrics_endpoint(
