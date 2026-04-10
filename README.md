@@ -164,10 +164,11 @@ flowchart LR
 | `OD_LLM_FAILOVER_POLICY` | Provider failover policy override: `safe`, `aggressive`, or `disabled` (default runtime fallback is `aggressive`; config can set `safe`). |
 | `OD_LLM_PRIMARY_RETRY_MAX` / `OD_LLM_PRIMARY_RETRY_BACKOFF_MS` / `OD_LLM_PRIMARY_RETRY_MAX_BACKOFF_MS` | Primary-provider retry budget and backoff controls. |
 | `OD_LLM_RETRYABLE_STATUS_CODES` / `OD_LLM_FALLBACK_COOLDOWN_SECS` / `OD_LLM_FALLBACK_MAX_PER_MIN` | Retry classification + fallback cooldown/rate limiting. |
+| `OD_LLM_PROVIDERS_URL` | Admin API upstream provider-catalog URL for dashboard ops status proxy (`/api/v1/ops/llm/providers`); defaults to `http://llm-worker:19015/providers`. |
 | `OPENAI_API_KEY` | API key for OpenAI-compatible providers (used when `type=openai/openai_compatible`). |
 | `LLM_API_KEY` | Legacy fallback for single-endpoint deployments. |
 | `VITE_ADMIN_API_URL` / `VITE_ADMIN_API_FALLBACK` / `VITE_ADMIN_TOKEN_MODE` | Standalone frontend API target + auth header mode from `web-admin/.env`. |
-| `VITE_LLM_PROVIDERS_URL` | Optional explicit dashboard provider-status endpoint. |
+| `VITE_LLM_PROVIDERS_URL` | Optional frontend override for direct dashboard provider-status fetch; leave unset to use Admin API proxy by default. |
 | `INGEST_URL`, `ELASTIC_URL`, `ADMIN_URL` | Overrides used by Stage 6/7 smoke scripts. |
 
 ### Proxy ACL deployment profiles

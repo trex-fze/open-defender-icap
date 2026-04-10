@@ -55,6 +55,7 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `OD_LOG_DIR` | Shared log root for worker and crawl logs. |
 | `OD_LLM_FAILOVER_POLICY`, `OD_LLM_PRIMARY_RETRY_MAX`, `OD_LLM_PRIMARY_RETRY_BACKOFF_MS`, `OD_LLM_PRIMARY_RETRY_MAX_BACKOFF_MS` | Primary retry/failover behavior. |
 | `OD_LLM_RETRYABLE_STATUS_CODES`, `OD_LLM_FALLBACK_COOLDOWN_SECS`, `OD_LLM_FALLBACK_MAX_PER_MIN` | Retryable classes and fallback budgeting. |
+| `OD_LLM_PROVIDERS_URL` | Admin API upstream URL for LLM provider catalog proxy (`/api/v1/ops/llm/providers`), defaults to `http://llm-worker:19015/providers`. |
 | `OD_LLM_STALE_PENDING_MINUTES`, `OD_LLM_STALE_PENDING_ONLINE_PROVIDER`, `OD_LLM_STALE_PENDING_HEALTH_TTL_SECS`, `OD_LLM_STALE_PENDING_MAX_PER_MIN` | Stale-pending online diversion controls. |
 | `OD_LLM_ONLINE_CONTEXT_MODE`, `OD_LLM_CONTENT_REQUIRED_MODE`, `OD_LLM_METADATA_ONLY_ALLOWED_FOR` | Context and content-gating modes. |
 | `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD`, `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES` | Metadata-only fallback trigger tuning. |
@@ -83,7 +84,7 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `VITE_ADMIN_API_URL` | Primary Admin API base URL for browser calls. |
 | `VITE_ADMIN_API_FALLBACK` | Optional fallback Admin API URL when primary is empty. |
 | `VITE_ADMIN_TOKEN_MODE` | Auth header mode (`auto`, `bearer`, `token`) for browser calls. |
-| `VITE_LLM_PROVIDERS_URL` | Optional explicit providers endpoint for dashboard ops status. |
+| `VITE_LLM_PROVIDERS_URL` | Optional frontend override for direct provider fetch; when unset, dashboard uses Admin API proxy endpoint (`/api/v1/ops/llm/providers`). |
 
 ## Advanced config overrides
 
