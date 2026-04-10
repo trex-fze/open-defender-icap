@@ -3,13 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import {
   ResponsiveContainer,
   Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Legend,
   Line,
-  LineChart,
   Tooltip,
   XAxis,
   YAxis,
@@ -40,6 +39,11 @@ const formatCompact = (input: number) => {
 const pct = (num: number, den: number) => {
   if (!den) return '0.0%';
   return `${((num / den) * 100).toFixed(1)}%`;
+};
+
+const formatMiB = (input: number) => {
+  if (!Number.isFinite(input) || input <= 0) return '0.000 MiB';
+  return `${input.toFixed(3)} MiB`;
 };
 
 export const DashboardPage = () => {
@@ -92,6 +96,17 @@ export const DashboardPage = () => {
   );
 
   const lastUpdated = Math.max(dashboard.updatedAt ?? 0, opsUpdatedAt ?? 0);
+  const topClientsBandwidthBytes = useMemo(
+    () => (dashboard.data?.top_clients_by_bandwidth ?? []).reduce((sum, row) => sum + row.bandwidth_bytes, 0),
+    [dashboard.data?.top_clients_by_bandwidth],
+  );
+  const hourlyBandwidthBytes = useMemo(
+    () => (dashboard.data?.hourly_usage ?? []).reduce((sum, row) => sum + row.bandwidth_bytes, 0),
+    [dashboard.data?.hourly_usage],
+  );
+  const bandwidthCoverageGap =
+    coverage && coverage.total_docs > 0 && coverage.network_bytes_docs < coverage.total_docs;
+  const clientCoverageGap = coverage && coverage.total_docs > 0 && coverage.client_ip_docs < coverage.total_docs;
 
   return (
     <div>
@@ -158,6 +173,14 @@ export const DashboardPage = () => {
             {overview ? formatBytes(overview.total_bandwidth_bytes) : '—'}
           </h3>
           <span className="chip chip--amber">aggregated bytes ({range})</span>
+          <p style={{ margin: '0.55rem 0 0', color: 'var(--muted)', fontSize: '0.82rem' }}>
+            Summed proxy payload bytes (`network.bytes`) for selected range.
+          </p>
+          {overview ? (
+            <p style={{ margin: '0.45rem 0 0', color: 'var(--muted)', fontSize: '0.82rem' }}>
+              Top {topN} clients shown: {formatBytes(topClientsBandwidthBytes)} ({pct(topClientsBandwidthBytes, overview.total_bandwidth_bytes)} of total)
+            </p>
+          ) : null}
         </div>
         <div className="kpi-card">
           <p className="section-title" style={{ color: 'rgba(255,255,255,0.7)' }}>Blocked Requests</p>
@@ -200,21 +223,45 @@ export const DashboardPage = () => {
       <div className="layout-grid" style={{ marginTop: '2rem' }}>
         <div className="glass-panel panel--full">
           <p className="section-title">Hourly Usage (Requests + Bandwidth)</p>
+          {bandwidthCoverageGap ? (
+            <p style={{ margin: '0 0 0.8rem', color: 'var(--muted)', fontSize: '0.82rem' }}>
+              Some records in this range do not include `network.bytes`, so bandwidth totals may appear lower than request volume.
+            </p>
+          ) : null}
           <div style={{ width: '100%', height: 320 }}>
             <ResponsiveContainer>
-              <LineChart data={hourlyChart}>
+              <ComposedChart data={hourlyChart}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
                 <XAxis dataKey="label" stroke="rgba(255,255,255,0.8)" />
                 <YAxis yAxisId="req" stroke="rgba(255,255,255,0.8)" />
                 <YAxis yAxisId="bw" orientation="right" stroke="rgba(255,255,255,0.8)" />
-                <Tooltip />
+                <Tooltip
+                  formatter={(value, name) => {
+                    if (name === 'Bandwidth (MiB)') {
+                      return [formatMiB(Number(value)), name];
+                    }
+                    return [formatCompact(Number(value)), name];
+                  }}
+                />
                 <Legend />
-                <Line yAxisId="req" type="monotone" dataKey="requests" stroke="#7dd3fc" dot={false} />
-                <Line yAxisId="req" type="monotone" dataKey="blocked" stroke="#f87171" dot={false} />
-                <Area yAxisId="bw" type="monotone" dataKey="bandwidthMiB" stroke="#34d399" fill="#34d39933" />
-              </LineChart>
+                <Line name="Requests" yAxisId="req" type="monotone" dataKey="requests" stroke="#7dd3fc" dot={false} />
+                <Line name="Blocked" yAxisId="req" type="monotone" dataKey="blocked" stroke="#f87171" dot={false} />
+                <Area
+                  name="Bandwidth (MiB)"
+                  yAxisId="bw"
+                  type="monotone"
+                  dataKey="bandwidthMiB"
+                  stroke="#34d399"
+                  fill="#34d39933"
+                />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
+          {overview ? (
+            <p style={{ margin: '0.8rem 0 0', color: 'var(--muted)', fontSize: '0.82rem' }}>
+              Hourly bucket sum: {formatBytes(hourlyBandwidthBytes)} (overview total: {formatBytes(overview.total_bandwidth_bytes)})
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -336,6 +383,11 @@ export const DashboardPage = () => {
 
       <div className="glass-panel" style={{ marginTop: '1.2rem' }}>
         <p className="section-title">Data Quality and Coverage</p>
+        {clientCoverageGap ? (
+          <p style={{ margin: '0 0 0.7rem', color: 'var(--muted)', fontSize: '0.82rem' }}>
+            Not all events include `client.ip`; top-clients bandwidth can be lower than total bandwidth.
+          </p>
+        ) : null}
         {coverage ? (
           <div className="chip-row">
             <span className="chip chip--green">Client IP coverage: {pct(coverage.client_ip_docs, coverage.total_docs)}</span>

@@ -82,6 +82,8 @@ describe('Dashboard analytics', () => {
   it('renders rich dashboard analytics panels', () => {
     cy.contains('Trust & Safety Pulse').should('be.visible');
     cy.contains('Unique Clients').should('be.visible');
+    cy.contains('Summed proxy payload bytes').should('be.visible');
+    cy.contains('Top 10 clients shown').should('be.visible');
     cy.contains('Blocked Domains').should('be.visible');
     cy.contains('Top Requesters of Blocked Domains').should('be.visible');
     cy.contains('192.168.1.253').should('be.visible');
