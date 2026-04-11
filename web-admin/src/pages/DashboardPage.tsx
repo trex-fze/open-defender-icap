@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   ResponsiveContainer,
   Area,
@@ -83,7 +82,6 @@ const providerHealthChipClass = (provider: OpsProviderStatus) => {
 };
 
 export const DashboardPage = () => {
-  const navigate = useNavigate();
   const [range, setRange] = useState('1h');
   const [topN, setTopN] = useState(20);
   const [refreshIntervalMs, setRefreshIntervalMs] = useState<number>(() => {
@@ -131,6 +129,13 @@ export const DashboardPage = () => {
     [dashboard.data?.top_blocked_domains],
   );
 
+  const topDomains = dashboard.data?.top_domains ?? [];
+  const topBlockedDomains = dashboard.data?.top_blocked_domains ?? [];
+  const topBlockedRequesters = dashboard.data?.top_blocked_requesters ?? [];
+  const topClientsByBandwidth = dashboard.data?.top_clients_by_bandwidth ?? [];
+  const topCategories = dashboard.data?.top_categories ?? [];
+  const topCategoriesEvent = dashboard.data?.top_categories_event ?? [];
+
   const lastUpdated = Math.max(dashboard.updatedAt ?? 0, opsUpdatedAt ?? 0);
   const topClientsBandwidthBytes = useMemo(
     () => (dashboard.data?.top_clients_by_bandwidth ?? []).reduce((sum, row) => sum + row.bandwidth_bytes, 0),
@@ -143,6 +148,9 @@ export const DashboardPage = () => {
   const bandwidthCoverageGap =
     coverage && coverage.total_docs > 0 && coverage.network_bytes_docs < coverage.total_docs;
   const clientCoverageGap = coverage && coverage.total_docs > 0 && coverage.client_ip_docs < coverage.total_docs;
+  const categoryCoverageGap = coverage && coverage.total_docs > 0 && coverage.category_docs < coverage.total_docs;
+  const categoryMappedCoverageGap =
+    coverage && coverage.total_docs > 0 && coverage.category_mapped_domain_docs < coverage.total_docs;
   const healthyProviders = useMemo(
     () => ops.llmProviders.filter((provider) => provider.healthStatus === 'healthy').length,
     [ops.llmProviders],
@@ -192,7 +200,6 @@ export const DashboardPage = () => {
           <button className="cta-button" onClick={() => dashboard.refresh()} disabled={dashboard.loading}>
             {dashboard.loading ? 'Refreshing...' : 'Refresh'}
           </button>
-          <button className="cta-button" onClick={() => navigate('/reports')}>Open Reports</button>
         </div>
       </div>
 
@@ -339,6 +346,9 @@ export const DashboardPage = () => {
       <div className="layout-grid" style={{ marginTop: '1.2rem' }}>
         <div className="glass-panel dashboard-domain-panel">
           <p className="section-title">Frequently Accessed Domains</p>
+          <p style={{ margin: '0 0 0.45rem', color: 'var(--muted)', fontSize: '0.78rem' }}>
+            Showing {formatCompact(topDomains.length)} of requested Top {formatCompact(topN)}.
+          </p>
           <div className="dashboard-domain-chart">
             <ResponsiveContainer>
               <BarChart data={domainChart} margin={{ left: 16, right: 16 }}>
@@ -359,7 +369,7 @@ export const DashboardPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {(dashboard.data?.top_domains ?? []).map((row) => (
+                {topDomains.map((row) => (
                   <tr key={row.key}>
                     <td>{row.key}</td>
                     <td>{formatCompact(row.doc_count)}</td>
@@ -372,6 +382,9 @@ export const DashboardPage = () => {
 
         <div className="glass-panel dashboard-domain-panel">
           <p className="section-title">Blocked Domains</p>
+          <p style={{ margin: '0 0 0.45rem', color: 'var(--muted)', fontSize: '0.78rem' }}>
+            Showing {formatCompact(topBlockedDomains.length)} of requested Top {formatCompact(topN)}.
+          </p>
           <div className="dashboard-domain-chart">
             <ResponsiveContainer>
               <BarChart data={blockedDomainChart} margin={{ left: 16, right: 16 }}>
@@ -392,7 +405,7 @@ export const DashboardPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {(dashboard.data?.top_blocked_domains ?? []).map((row) => (
+                {topBlockedDomains.map((row) => (
                   <tr key={row.key}>
                     <td>{row.key}</td>
                     <td>{formatCompact(row.doc_count)}</td>
@@ -406,7 +419,54 @@ export const DashboardPage = () => {
 
       <div className="layout-grid" style={{ marginTop: '1.2rem' }}>
         <div className="glass-panel dashboard-domain-panel dashboard-domain-panel--compact">
+          <p className="section-title">Top Categories</p>
+          <p style={{ margin: '0 0 0.45rem', color: 'var(--muted)', fontSize: '0.78rem' }}>
+            Showing {formatCompact(topCategories.length)} of requested Top {formatCompact(topN)}.
+          </p>
+          <p style={{ margin: '0 0 0.6rem', color: 'var(--muted)', fontSize: '0.78rem' }}>
+            Source: classification-mapped categories from top domains.
+          </p>
+          {coverage && coverage.total_docs > 0 && coverage.category_mapped_domain_docs === 0 ? (
+            <p style={{ margin: '0 0 0.6rem', color: 'var(--muted)', fontSize: '0.78rem' }}>
+              No mapped classifications found for top domains in selected range; values fall back to <code>unknown-unclassified</code>.
+            </p>
+          ) : null}
+          {coverage && coverage.total_docs > 0 && coverage.category_docs === 0 && topCategoriesEvent.length > 0 ? (
+            <p style={{ margin: '0 0 0.6rem', color: 'var(--muted)', fontSize: '0.78rem' }}>
+              Event stream category field is currently absent; mapped classifications are used for category visibility.
+            </p>
+          ) : null}
+          <div className="table-wrapper dashboard-domain-table" role="region" tabIndex={0} aria-label="Top categories table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Hits</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topCategories.length > 0 ? topCategories.map((row) => (
+                  <tr key={row.key}>
+                    <td>{row.key}</td>
+                    <td>{formatCompact(row.doc_count)}</td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan={2} style={{ color: 'var(--muted)' }}>
+                      No category data for selected range.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="glass-panel dashboard-domain-panel dashboard-domain-panel--compact">
           <p className="section-title">Top Requesters of Blocked Domains (client.ip)</p>
+          <p style={{ margin: '0 0 0.45rem', color: 'var(--muted)', fontSize: '0.78rem' }}>
+            Showing {formatCompact(topBlockedRequesters.length)} of requested Top {formatCompact(topN)}.
+          </p>
           <div className="table-wrapper dashboard-domain-table" role="region" tabIndex={0} aria-label="Top blocked requesters by client ip">
             <table>
               <thead>
@@ -416,7 +476,7 @@ export const DashboardPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {(dashboard.data?.top_blocked_requesters ?? []).map((row) => (
+                {topBlockedRequesters.map((row) => (
                   <tr key={row.key}>
                     <td>{row.key}</td>
                     <td>{formatCompact(row.doc_count)}</td>
@@ -429,6 +489,9 @@ export const DashboardPage = () => {
 
         <div className="glass-panel dashboard-domain-panel dashboard-domain-panel--compact">
           <p className="section-title">Top Clients by Bandwidth</p>
+          <p style={{ margin: '0 0 0.45rem', color: 'var(--muted)', fontSize: '0.78rem' }}>
+            Showing {formatCompact(topClientsByBandwidth.length)} of requested Top {formatCompact(topN)}.
+          </p>
           <div className="table-wrapper dashboard-domain-table" role="region" tabIndex={0} aria-label="Top clients by bandwidth table">
             <table>
               <thead>
@@ -439,7 +502,7 @@ export const DashboardPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {(dashboard.data?.top_clients_by_bandwidth ?? []).map((row) => (
+                {topClientsByBandwidth.map((row) => (
                   <tr key={row.key}>
                     <td>{row.key}</td>
                     <td>{formatCompact(row.doc_count)}</td>
@@ -459,10 +522,22 @@ export const DashboardPage = () => {
             Not all events include `client.ip`; top-clients bandwidth can be lower than total bandwidth.
           </p>
         ) : null}
+        {categoryCoverageGap ? (
+          <p style={{ margin: '0 0 0.7rem', color: 'var(--muted)', fontSize: '0.82rem' }}>
+            Not all events include `category`; event-derived categories may collapse into fallback values.
+          </p>
+        ) : null}
+        {categoryMappedCoverageGap ? (
+          <p style={{ margin: '0 0 0.7rem', color: 'var(--muted)', fontSize: '0.82rem' }}>
+            Not all events map to active classifications; mapped top-categories include fallback for unmatched domains.
+          </p>
+        ) : null}
         {coverage ? (
           <div className="chip-row">
             <span className="chip chip--green">Client IP coverage: {pct(coverage.client_ip_docs, coverage.total_docs)}</span>
             <span className="chip chip--amber">Domain coverage: {pct(coverage.domain_docs, coverage.total_docs)}</span>
+            <span className="chip chip--amber">Event category coverage: {pct(coverage.category_docs, coverage.total_docs)}</span>
+            <span className="chip chip--amber">Mapped category coverage: {pct(coverage.category_mapped_domain_docs, coverage.total_docs)}</span>
             <span className="chip chip--amber">Bandwidth coverage: {pct(coverage.network_bytes_docs, coverage.total_docs)}</span>
             <span className="chip chip--amber">Total docs: {formatCompact(coverage.total_docs)}</span>
           </div>

@@ -9,7 +9,6 @@ import { PolicyCreatePage } from './pages/PolicyCreatePage';
 import { PolicyDetailPage } from './pages/PolicyDetailPage';
 import { OverridesPage } from './pages/OverridesPage';
 import { TaxonomyPage } from './pages/TaxonomyPage';
-import { ReportsPage } from './pages/ReportsPage';
 import { SettingsIamPage } from './pages/SettingsIamPage';
 import { SettingsClassificationsPage } from './pages/SettingsClassificationsPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
@@ -23,7 +22,6 @@ const guard = {
   viewer: ['policy-viewer'] as Role[],
   viewEdit: ['policy-viewer', 'policy-editor', 'policy-admin'] as Role[],
   editOnly: ['policy-editor', 'policy-admin'] as Role[],
-  reports: ['auditor', 'policy-admin', 'policy-viewer'] as Role[],
   admin: ['policy-admin'] as Role[],
 };
 
@@ -46,7 +44,6 @@ const App = () => {
             <Route path="/classifications/pending" element={<ProtectedRoute roles={guard.viewEdit}><PendingClassificationsPage /></ProtectedRoute>} />
             <Route path="/classifications" element={<ProtectedRoute roles={guard.viewEdit}><ClassificationsPage /></ProtectedRoute>} />
             <Route path="/taxonomy" element={<ProtectedRoute roles={guard.editOnly}><TaxonomyPage /></ProtectedRoute>} />
-            <Route path="/reports" element={<ProtectedRoute roles={guard.reports}><ReportsPage /></ProtectedRoute>} />
             <Route path="/diagnostics/cache" element={<ProtectedRoute roles={guard.admin}><DiagnosticsCachePage /></ProtectedRoute>} />
             <Route path="/diagnostics/page-content" element={<ProtectedRoute roles={guard.viewEdit}><DiagnosticsPageContentPage /></ProtectedRoute>} />
             <Route path="/settings/iam/*" element={<ProtectedRoute roles={guard.admin}><SettingsIamPage /></ProtectedRoute>} />

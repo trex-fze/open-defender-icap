@@ -129,7 +129,7 @@ capture_psql "$OUT_DIR/db-recent-failures.txt" "SELECT normalized_key, status, l
 if [[ -n "$ADMIN_TOKEN" ]]; then
   capture_curl "$OUT_DIR/auth-whoami.txt" "$ADMIN_API_URL/api/v1/iam/whoami" -H "X-Admin-Token: ${ADMIN_TOKEN}"
   capture_curl "$OUT_DIR/reporting-dashboard-24h.txt" "$ADMIN_API_URL/api/v1/reporting/dashboard?range=24h" -H "X-Admin-Token: ${ADMIN_TOKEN}"
-  capture_curl "$OUT_DIR/reporting-traffic-summary-24h.txt" "$ADMIN_API_URL/api/v1/reporting/traffic-summary?range=24h" -H "X-Admin-Token: ${ADMIN_TOKEN}"
+  capture_curl "$OUT_DIR/reporting-traffic-summary-24h.txt" "$ADMIN_API_URL/api/v1/reporting/traffic?range=24h" -H "X-Admin-Token: ${ADMIN_TOKEN}"
 else
   printf 'ADMIN_TOKEN not provided; auth/reporting snapshots skipped\n' >"$OUT_DIR/auth-reporting-skipped.txt"
 fi

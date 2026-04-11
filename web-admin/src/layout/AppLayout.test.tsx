@@ -23,7 +23,7 @@ const renderLayout = (initialPath = '/dashboard') =>
         <Routes>
           <Route element={<AppLayout />}>
             <Route path="/dashboard" element={<div>Dashboard content</div>} />
-            <Route path="/reports" element={<div>Reports content</div>} />
+            <Route path="/policies" element={<div>Policies content</div>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -52,8 +52,8 @@ describe('AppLayout sidebar', () => {
 
     expect(container.querySelector('.app-shell')?.className).toContain('sidebar-collapsed');
 
-    fireEvent.click(screen.getByLabelText('Reports'));
-    expect(await screen.findByText('Reports content')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Policies'));
+    expect(await screen.findByText('Policies content')).toBeInTheDocument();
   });
 
   it('opens and closes mobile drawer', () => {

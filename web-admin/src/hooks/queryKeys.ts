@@ -22,10 +22,7 @@ export const queryKeys = {
     cursor: string,
     limit: number,
   ) => ['classifications', baseUrl, state, q, cursor, limit] as const,
-  reportingTraffic: (baseUrl: string, range: string, topN: number, bucket?: string) =>
-    ['reporting-traffic', baseUrl, range, topN, bucket ?? 'auto'] as const,
   reportingDashboard: (baseUrl: string, range: string, topN: number, bucket?: string) =>
     ['reporting-dashboard', baseUrl, range, topN, bucket ?? 'auto'] as const,
-  reportingStatus: (baseUrl: string, range: string) => ['reporting-status', baseUrl, range] as const,
   opsStatus: (baseUrl: string, providersUrl: string) => ['ops-status', baseUrl, providersUrl] as const,
 };

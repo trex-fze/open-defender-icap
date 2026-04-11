@@ -228,6 +228,12 @@ impl ElasticReportingClient {
                     "script": {
                         "source": EFFECTIVE_DOMAIN_SCRIPT
                     }
+                },
+                "effective_category": {
+                    "type": "keyword",
+                    "script": {
+                        "source": "if (doc.containsKey('category.keyword') && !doc['category.keyword'].empty) { emit(doc['category.keyword'].value); } else { emit('unknown-unclassified'); }"
+                    }
                 }
             },
             "query": {
@@ -269,6 +275,9 @@ impl ElasticReportingClient {
                 "top_domains": {
                     "terms": { "field": "effective_domain", "size": size }
                 },
+                "top_categories": {
+                    "terms": { "field": "effective_category", "size": size }
+                },
                 "top_blocked": {
                     "filter": { "term": { "effective_action": "block" } },
                     "aggs": {
@@ -300,6 +309,7 @@ impl ElasticReportingClient {
                         }
                     }
                 },
+                "has_category": { "filter": { "exists": { "field": "category" } } },
                 "has_network_bytes": { "filter": { "exists": { "field": "network.bytes" } } }
             }
         });
@@ -329,6 +339,7 @@ impl ElasticReportingClient {
 
         let hourly_usage = parse_hourly_usage(aggregations);
         let top_domains = parse_top_entries(aggregations, &["top_domains"]);
+        let top_categories = parse_top_entries(aggregations, &["top_categories"]);
         let top_blocked_domains = parse_top_entries(aggregations, &["top_blocked", "domains"]);
         let top_blocked_requesters =
             parse_top_entries(aggregations, &["top_blocked", "requesters"]);
@@ -339,6 +350,9 @@ impl ElasticReportingClient {
             total_docs: total_requests,
             client_ip_docs: agg_doc_count(aggregations, "has_client_ip"),
             domain_docs: agg_doc_count(aggregations, "has_domain"),
+            category_docs: agg_doc_count(aggregations, "has_category"),
+            category_mapped_domain_docs: 0,
+            category_mapped_ratio: 0.0,
             network_bytes_docs: agg_doc_count(aggregations, "has_network_bytes"),
         };
 
@@ -355,6 +369,8 @@ impl ElasticReportingClient {
             },
             hourly_usage,
             top_domains,
+            top_categories,
+            top_categories_event: Vec::new(),
             top_blocked_domains,
             top_blocked_requesters,
             top_clients_by_bandwidth,
@@ -657,6 +673,9 @@ pub struct DashboardReportResponse {
     pub overview: DashboardOverview,
     pub hourly_usage: Vec<HourlyUsageBucket>,
     pub top_domains: Vec<TopEntry>,
+    pub top_categories: Vec<TopEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_categories_event: Vec<TopEntry>,
     pub top_blocked_domains: Vec<TopEntry>,
     pub top_blocked_requesters: Vec<TopEntry>,
     pub top_clients_by_bandwidth: Vec<TopBandwidthEntry>,
@@ -693,6 +712,9 @@ pub struct FieldCoverage {
     pub total_docs: i64,
     pub client_ip_docs: i64,
     pub domain_docs: i64,
+    pub category_docs: i64,
+    pub category_mapped_domain_docs: i64,
+    pub category_mapped_ratio: f64,
     pub network_bytes_docs: i64,
 }
 
@@ -708,7 +730,7 @@ pub struct TimeBucket {
     pub doc_count: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct TopEntry {
     pub key: String,
     pub doc_count: i64,

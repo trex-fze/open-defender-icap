@@ -55,7 +55,7 @@ npx start-server-and-test "npm run dev" http://127.0.0.1:19001 "npx cypress run 
    - `/diagnostics/cache`: lookup key and evict cache entry
 6. **Audit and reporting**
    - `/settings/rbac`: load CLI logs (optional operator filter)
-   - `/reports`: change dimension/range/top filters, verify traffic summary, export CSV
+   - `/dashboard`: change range/top filters and verify analytics tables
 7. **Ops status**
    - `/dashboard`: verify pending count and ops source badge (`live`, `partial`, or `mock`)
 
@@ -104,7 +104,7 @@ Capture one screenshot for each of the following and attach to release evidence:
 - Page content diagnostics with history table
 - Cache diagnostics lookup + evict confirmation
 - Settings CLI audit logs table
-- Reports traffic summary cards and top tables
+- Dashboard analytics tables
 - Dashboard analytics panel (unique clients, bandwidth, hourly trend, blocked domains/requesters)
 
 Store screenshots under `docs/evidence/stage10-web-admin/` using this naming convention:
@@ -116,7 +116,7 @@ Store screenshots under `docs/evidence/stage10-web-admin/` using this naming con
 - `05-page-content-diagnostics.png`
 - `06-cache-diagnostics.png`
 - `07-cli-logs.png`
-- `08-reports-traffic.png`
+- `08-dashboard-reporting.png`
 - `09-dashboard-ops.png`
 
 ## Troubleshooting

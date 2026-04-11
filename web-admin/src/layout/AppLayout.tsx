@@ -32,7 +32,6 @@ const navItems: NavItem[] = [
   },
   { label: 'Allow / Deny', path: '/overrides', glyph: 'AD', roles: ['policy-editor', 'policy-admin'] as Role[] },
   { label: 'Taxonomy', path: '/taxonomy', glyph: 'TX', roles: ['policy-editor', 'policy-admin'] as Role[] },
-  { label: 'Reports', path: '/reports', glyph: 'RP', roles: ['auditor', 'policy-admin', 'policy-viewer'] as Role[] },
   { label: 'Page Content', path: '/diagnostics/page-content', glyph: 'PC', roles: ['policy-editor', 'policy-admin', 'policy-viewer'] as Role[] },
   { label: 'Cache', path: '/diagnostics/cache', glyph: 'CH', roles: ['policy-admin'] as Role[] },
   { label: 'Settings', path: '/settings/rbac', glyph: 'ST', roles: ['policy-admin'] as Role[] },
