@@ -395,6 +395,27 @@ impl ProviderRouter {
     fn catalog(&self) -> Arc<Vec<metrics::ProviderSummary>> {
         Arc::clone(&self.catalog)
     }
+
+    fn probe_catalog(&self) -> Arc<Vec<metrics::ProviderProbeConfig>> {
+        let mut catalog = Vec::with_capacity(2);
+        catalog.push(metrics::ProviderProbeConfig {
+            name: self.primary.name.clone(),
+            provider_type: self.primary.kind.label().to_string(),
+            endpoint: self.primary.endpoint.clone(),
+            headers: self.primary.headers.clone(),
+            api_key: self.primary.api_key.clone(),
+        });
+        if let Some(fallback) = self.fallback.as_ref() {
+            catalog.push(metrics::ProviderProbeConfig {
+                name: fallback.name.clone(),
+                provider_type: fallback.kind.label().to_string(),
+                endpoint: fallback.endpoint.clone(),
+                headers: fallback.headers.clone(),
+                api_key: fallback.api_key.clone(),
+            });
+        }
+        Arc::new(catalog)
+    }
 }
 
 impl ResolvedProvider {
@@ -967,13 +988,28 @@ async fn main() -> Result<()> {
     };
 
     let provider_catalog = router.catalog();
+    let provider_probe_catalog = router.probe_catalog();
+    let provider_health_ttl_secs = env_u64("OD_LLM_PROVIDER_HEALTH_TTL_SECS")
+        .unwrap_or(20)
+        .max(1);
+    let provider_health_timeout_ms = env_u64("OD_LLM_PROVIDER_HEALTH_TIMEOUT_MS")
+        .unwrap_or(2_000)
+        .max(200);
 
     let metrics_host = cfg.metrics_host.clone();
     let metrics_port = cfg.metrics_port;
     let catalog_for_metrics = provider_catalog.clone();
+    let probe_catalog_for_metrics = provider_probe_catalog.clone();
     tokio::spawn(async move {
-        if let Err(err) =
-            metrics::serve_metrics(&metrics_host, metrics_port, catalog_for_metrics).await
+        if let Err(err) = metrics::serve_metrics(
+            &metrics_host,
+            metrics_port,
+            catalog_for_metrics,
+            probe_catalog_for_metrics,
+            Duration::from_secs(provider_health_ttl_secs),
+            Duration::from_millis(provider_health_timeout_ms),
+        )
+        .await
         {
             error!(target = "svc-llm-worker", %err, "metrics server exited");
         }

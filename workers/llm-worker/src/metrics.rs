@@ -5,8 +5,14 @@ use prometheus::{
     self, Encoder, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, TextEncoder,
 };
 use serde::Serialize;
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use tracing::info;
 
 static JOBS_STARTED: Lazy<IntCounter> = Lazy::new(|| {
@@ -514,15 +520,81 @@ pub struct ProviderSummary {
     pub role: ProviderRole,
 }
 
+#[derive(Debug, Clone)]
+pub struct ProviderProbeConfig {
+    pub name: String,
+    pub provider_type: String,
+    pub endpoint: String,
+    pub headers: HashMap<String, String>,
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderHealthStatus {
+    Healthy,
+    Degraded,
+    Unreachable,
+    Misconfigured,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderStatusSummary {
+    pub name: String,
+    pub provider_type: String,
+    pub endpoint: String,
+    pub role: ProviderRole,
+    pub health_status: ProviderHealthStatus,
+    pub health_checked_at_ms: u64,
+    pub health_latency_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health_http_status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health_detail: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedProviderHealth {
+    checked_at: Instant,
+    snapshot: ProviderStatusSummary,
+}
+
+#[derive(Clone)]
+struct ProvidersState {
+    providers: Arc<Vec<ProviderSummary>>,
+    probe_configs: Arc<HashMap<String, ProviderProbeConfig>>,
+    health_cache: Arc<Mutex<HashMap<String, CachedProviderHealth>>>,
+    client: reqwest::Client,
+    ttl: Duration,
+    timeout: Duration,
+}
+
 pub async fn serve_metrics(
     host: &str,
     port: u16,
     providers: Arc<Vec<ProviderSummary>>,
+    probe_configs: Arc<Vec<ProviderProbeConfig>>,
+    health_ttl: Duration,
+    health_timeout: Duration,
 ) -> Result<()> {
+    let mut probe_map = HashMap::with_capacity(probe_configs.len());
+    for cfg in probe_configs.iter() {
+        probe_map.insert(cfg.name.clone(), cfg.clone());
+    }
+    let state = ProvidersState {
+        providers,
+        probe_configs: Arc::new(probe_map),
+        health_cache: Arc::new(Mutex::new(HashMap::new())),
+        client: reqwest::Client::new(),
+        ttl: health_ttl,
+        timeout: health_timeout,
+    };
+
     let router = Router::new()
         .route("/metrics", get(|| async { metrics_handler().await }))
         .route("/providers", get(providers_handler))
-        .with_state(providers);
+        .with_state(state);
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
     let listener = TcpListener::bind(addr).await?;
     info!(
@@ -536,7 +608,164 @@ pub async fn serve_metrics(
 }
 
 async fn providers_handler(
-    State(providers): State<Arc<Vec<ProviderSummary>>>,
-) -> Json<Vec<ProviderSummary>> {
-    Json((*providers).clone())
+    State(state): State<ProvidersState>,
+) -> Json<Vec<ProviderStatusSummary>> {
+    let mut snapshots = Vec::with_capacity(state.providers.len());
+    for provider in state.providers.iter() {
+        snapshots.push(provider_health_snapshot(&state, provider).await);
+    }
+    Json(snapshots)
+}
+
+async fn provider_health_snapshot(
+    state: &ProvidersState,
+    provider: &ProviderSummary,
+) -> ProviderStatusSummary {
+    {
+        let cache = state.health_cache.lock().await;
+        if let Some(entry) = cache.get(&provider.name) {
+            if entry.checked_at.elapsed() < state.ttl {
+                return entry.snapshot.clone();
+            }
+        }
+    }
+
+    let snapshot = probe_provider_health(state, provider).await;
+    let mut cache = state.health_cache.lock().await;
+    cache.insert(
+        provider.name.clone(),
+        CachedProviderHealth {
+            checked_at: Instant::now(),
+            snapshot: snapshot.clone(),
+        },
+    );
+    snapshot
+}
+
+async fn probe_provider_health(
+    state: &ProvidersState,
+    provider: &ProviderSummary,
+) -> ProviderStatusSummary {
+    let checked_at_ms = unix_timestamp_ms();
+    let start = Instant::now();
+    let Some(probe_cfg) = state.probe_configs.get(&provider.name) else {
+        return ProviderStatusSummary {
+            name: provider.name.clone(),
+            provider_type: provider.provider_type.clone(),
+            endpoint: provider.endpoint.clone(),
+            role: provider.role.clone(),
+            health_status: ProviderHealthStatus::Unknown,
+            health_checked_at_ms: checked_at_ms,
+            health_latency_ms: 0,
+            health_http_status: None,
+            health_detail: Some("provider probe configuration unavailable".to_string()),
+        };
+    };
+
+    let probe_url = derive_probe_url(probe_cfg);
+    let mut request = state.client.get(probe_url).timeout(state.timeout);
+    for (header_name, header_value) in probe_cfg.headers.iter() {
+        request = request.header(header_name, header_value);
+    }
+    if !probe_cfg.api_key.trim().is_empty() {
+        if probe_cfg.provider_type.eq_ignore_ascii_case("anthropic") {
+            request = request
+                .header("x-api-key", probe_cfg.api_key.as_str())
+                .header("anthropic-version", "2023-06-01");
+        } else {
+            request = request.bearer_auth(probe_cfg.api_key.as_str());
+        }
+    }
+
+    match request.send().await {
+        Ok(response) => {
+            let http_status = response.status().as_u16();
+            let health_status = if response.status().is_success() {
+                ProviderHealthStatus::Healthy
+            } else if http_status == 401 || http_status == 403 {
+                ProviderHealthStatus::Misconfigured
+            } else if http_status == 408 || http_status == 429 || http_status >= 500 {
+                ProviderHealthStatus::Degraded
+            } else {
+                ProviderHealthStatus::Unknown
+            };
+            ProviderStatusSummary {
+                name: provider.name.clone(),
+                provider_type: provider.provider_type.clone(),
+                endpoint: provider.endpoint.clone(),
+                role: provider.role.clone(),
+                health_status,
+                health_checked_at_ms: checked_at_ms,
+                health_latency_ms: start.elapsed().as_millis() as u64,
+                health_http_status: Some(http_status),
+                health_detail: if response.status().is_success() {
+                    None
+                } else {
+                    Some(format!("probe returned HTTP {}", http_status))
+                },
+            }
+        }
+        Err(err) => {
+            let health_status = if err.is_connect() || err.is_timeout() {
+                ProviderHealthStatus::Unreachable
+            } else {
+                ProviderHealthStatus::Degraded
+            };
+            ProviderStatusSummary {
+                name: provider.name.clone(),
+                provider_type: provider.provider_type.clone(),
+                endpoint: provider.endpoint.clone(),
+                role: provider.role.clone(),
+                health_status,
+                health_checked_at_ms: checked_at_ms,
+                health_latency_ms: start.elapsed().as_millis() as u64,
+                health_http_status: None,
+                health_detail: Some(err.to_string()),
+            }
+        }
+    }
+}
+
+fn derive_probe_url(config: &ProviderProbeConfig) -> String {
+    let endpoint = config.endpoint.trim();
+    let Ok(mut url) = reqwest::Url::parse(endpoint) else {
+        return endpoint.to_string();
+    };
+
+    let provider_type = config.provider_type.to_ascii_lowercase();
+    let path = url.path().to_string();
+    if provider_type == "ollama" {
+        url.set_path("/api/tags");
+        return url.to_string();
+    }
+
+    if provider_type == "anthropic" {
+        url.set_path("/v1/models");
+        return url.to_string();
+    }
+
+    if provider_type == "openai"
+        || provider_type == "openai-compatible"
+        || provider_type == "openai_compatible"
+        || provider_type == "vllm"
+        || provider_type == "lmstudio"
+    {
+        if let Some(prefix) = path.strip_suffix("/chat/completions") {
+            url.set_path(&format!("{}/models", prefix));
+        } else if let Some(prefix) = path.strip_suffix("/messages") {
+            url.set_path(&format!("{}/models", prefix));
+        } else {
+            url.set_path("/v1/models");
+        }
+        return url.to_string();
+    }
+
+    endpoint.to_string()
+}
+
+fn unix_timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }

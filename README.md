@@ -165,6 +165,7 @@ flowchart LR
 | `OD_LLM_PRIMARY_RETRY_MAX` / `OD_LLM_PRIMARY_RETRY_BACKOFF_MS` / `OD_LLM_PRIMARY_RETRY_MAX_BACKOFF_MS` | Primary-provider retry budget and backoff controls. |
 | `OD_LLM_RETRYABLE_STATUS_CODES` / `OD_LLM_FALLBACK_COOLDOWN_SECS` / `OD_LLM_FALLBACK_MAX_PER_MIN` | Retry classification + fallback cooldown/rate limiting. |
 | `OD_LLM_PROVIDERS_URL` | Admin API upstream provider-catalog URL for dashboard ops status proxy (`/api/v1/ops/llm/providers`); defaults to `http://llm-worker:19015/providers`. |
+| `OD_LLM_PROVIDER_HEALTH_TTL_SECS` / `OD_LLM_PROVIDER_HEALTH_TIMEOUT_MS` | LLM worker provider-health probe cache TTL and HTTP probe timeout for `/providers` status fields. |
 | `OPENAI_API_KEY` | API key for OpenAI-compatible providers (used when `type=openai/openai_compatible`). |
 | `LLM_API_KEY` | Legacy fallback for single-endpoint deployments. |
 | `VITE_ADMIN_API_URL` / `VITE_ADMIN_API_FALLBACK` / `VITE_ADMIN_TOKEN_MODE` | Standalone frontend API target + auth header mode from `web-admin/.env`. |

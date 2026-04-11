@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { useOpsStatus } from '../hooks/useOpsStatus';
+import { useOpsStatus, type OpsProviderStatus } from '../hooks/useOpsStatus';
 import { useDashboardReportData } from '../hooks/useDashboardReportData';
 
 const formatBytes = (input: number) => {
@@ -65,6 +65,21 @@ const renderDomainTooltip = (valueLabel: string) => ({ active, payload }: { acti
       </p>
     </div>
   );
+};
+
+const providerHealthChipClass = (provider: OpsProviderStatus) => {
+  switch (provider.healthStatus) {
+    case 'healthy':
+      return 'chip--green';
+    case 'degraded':
+    case 'unknown':
+      return 'chip--amber';
+    case 'unreachable':
+    case 'misconfigured':
+      return 'chip--red';
+    default:
+      return 'chip--amber';
+  }
 };
 
 export const DashboardPage = () => {
@@ -128,6 +143,14 @@ export const DashboardPage = () => {
   const bandwidthCoverageGap =
     coverage && coverage.total_docs > 0 && coverage.network_bytes_docs < coverage.total_docs;
   const clientCoverageGap = coverage && coverage.total_docs > 0 && coverage.client_ip_docs < coverage.total_docs;
+  const healthyProviders = useMemo(
+    () => ops.llmProviders.filter((provider) => provider.healthStatus === 'healthy').length,
+    [ops.llmProviders],
+  );
+  const unhealthyProviders = useMemo(
+    () => ops.llmProviders.filter((provider) => provider.healthStatus !== 'healthy').length,
+    [ops.llmProviders],
+  );
 
   return (
     <div>
@@ -222,16 +245,40 @@ export const DashboardPage = () => {
           <h3 style={{ margin: '0 0 0.4rem', fontSize: '2rem' }}>
             {opsLoading ? '…' : formatCompact(ops.pendingCount)}
           </h3>
-          <span className="chip chip--amber">
-            providers {opsLoading ? '…' : formatCompact(ops.llmProviderNames.length)}
+          <span className={`chip ${opsLoading || healthyProviders === ops.llmProviders.length ? 'chip--green' : 'chip--amber'}`}>
+            healthy {opsLoading ? '…' : `${formatCompact(healthyProviders)}/${formatCompact(ops.llmProviders.length)}`}
           </span>
+          {!opsLoading && unhealthyProviders > 0 ? (
+            <span className="chip chip--red" style={{ marginLeft: '0.4rem' }}>
+              unhealthy {formatCompact(unhealthyProviders)}
+            </span>
+          ) : null}
           <p style={{ margin: '0.55rem 0 0', color: 'var(--muted)', fontSize: '0.82rem' }}>
             {opsLoading
               ? 'Loading worker snapshot…'
-              : ops.llmProviderNames.length > 0
-                ? ops.llmProviderNames.join(', ')
+              : ops.llmProviders.length > 0
+                ? 'Live provider health from llm-worker probe cache.'
                 : 'No provider metadata'}
           </p>
+          {!opsLoading && ops.llmProviders.length > 0 ? (
+            <div style={{ marginTop: '0.45rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              {ops.llmProviders.map((provider) => (
+                <div key={provider.name} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  <span className={`chip ${providerHealthChipClass(provider)}`}>
+                    {provider.name} ({provider.healthStatus})
+                  </span>
+                  <span style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
+                    {provider.role} · {provider.providerType}
+                    {provider.healthLatencyMs !== undefined ? ` · ${provider.healthLatencyMs}ms` : ''}
+                    {provider.healthHttpStatus !== undefined ? ` · HTTP ${provider.healthHttpStatus}` : ''}
+                  </span>
+                  {provider.healthDetail ? (
+                    <span style={{ color: '#ffcf7f', fontSize: '0.74rem' }}>{provider.healthDetail}</span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
           {opsError ? <p style={{ color: '#ff9b9b', margin: '0.45rem 0 0', fontSize: '0.8rem' }}>{opsError}</p> : null}
           {!opsLoading ? (
             <p style={{ margin: '0.45rem 0 0' }}>

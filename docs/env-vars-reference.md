@@ -56,6 +56,7 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `OD_LLM_FAILOVER_POLICY`, `OD_LLM_PRIMARY_RETRY_MAX`, `OD_LLM_PRIMARY_RETRY_BACKOFF_MS`, `OD_LLM_PRIMARY_RETRY_MAX_BACKOFF_MS` | Primary retry/failover behavior. |
 | `OD_LLM_RETRYABLE_STATUS_CODES`, `OD_LLM_FALLBACK_COOLDOWN_SECS`, `OD_LLM_FALLBACK_MAX_PER_MIN` | Retryable classes and fallback budgeting. |
 | `OD_LLM_PROVIDERS_URL` | Admin API upstream URL for LLM provider catalog proxy (`/api/v1/ops/llm/providers`), defaults to `http://llm-worker:19015/providers`. |
+| `OD_LLM_PROVIDER_HEALTH_TTL_SECS`, `OD_LLM_PROVIDER_HEALTH_TIMEOUT_MS` | LLM worker `/providers` health-probe cache TTL and probe timeout used for dashboard provider status. |
 | `OD_LLM_STALE_PENDING_MINUTES`, `OD_LLM_STALE_PENDING_ONLINE_PROVIDER`, `OD_LLM_STALE_PENDING_HEALTH_TTL_SECS`, `OD_LLM_STALE_PENDING_MAX_PER_MIN` | Stale-pending online diversion controls. |
 | `OD_LLM_ONLINE_CONTEXT_MODE`, `OD_LLM_CONTENT_REQUIRED_MODE`, `OD_LLM_METADATA_ONLY_ALLOWED_FOR` | Context and content-gating modes. |
 | `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD`, `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES` | Metadata-only fallback trigger tuning. |

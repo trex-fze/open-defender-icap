@@ -187,6 +187,16 @@ struct LlmProviderSummary {
     endpoint: String,
     #[serde(default)]
     role: String,
+    #[serde(default)]
+    health_status: Option<String>,
+    #[serde(default)]
+    health_checked_at_ms: Option<u64>,
+    #[serde(default)]
+    health_latency_ms: Option<u64>,
+    #[serde(default)]
+    health_http_status: Option<u16>,
+    #[serde(default)]
+    health_detail: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

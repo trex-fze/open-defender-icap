@@ -556,22 +556,23 @@ const IamUsersPanel = () => {
           setCursorStack([]);
         }}
       />
-      <div className="table-wrapper" role="region" tabIndex={0} aria-label="Users table">
-        {loading ? (
-          <p className="muted">Loading users…</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>User</th>
-                <th>Roles</th>
-                <th>Groups</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((entry) => (
-                <tr key={entry.user.id}>
+      <div className="scroll-table-panel">
+        <div className="table-wrapper scroll-table-region" role="region" tabIndex={0} aria-label="Users table">
+          {loading ? (
+            <p className="muted">Loading users…</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Roles</th>
+                  <th>Groups</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((entry) => (
+                  <tr key={entry.user.id}>
                   <td>
                     <strong>{entry.user.display_name || entry.user.username || entry.user.email || 'Unnamed user'}</strong>
                     {entry.user.is_protected ? (
@@ -697,11 +698,12 @@ const IamUsersPanel = () => {
                       </button>
                     </div>
                   </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
       {passwordEditor && (
         <div className="glass-panel" style={{ marginTop: '1rem' }}>
@@ -1051,22 +1053,23 @@ const IamGroupsPanel = () => {
           setCursorStack([]);
         }}
       />
-      <div className="table-wrapper" role="region" tabIndex={0} aria-label="Groups table">
-        {loading ? (
-          <p className="muted">Loading groups…</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Group</th>
-                <th>Members</th>
-                <th>Roles</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {groups.map((entry) => (
-                <tr key={entry.group.id}>
+      <div className="scroll-table-panel">
+        <div className="table-wrapper scroll-table-region" role="region" tabIndex={0} aria-label="Groups table">
+          {loading ? (
+            <p className="muted">Loading groups…</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Group</th>
+                  <th>Members</th>
+                  <th>Roles</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((entry) => (
+                  <tr key={entry.group.id}>
                   <td>
                     <strong>{entry.group.name}</strong>
                     <div className="muted">{entry.group.description || 'No description'}</div>
@@ -1154,11 +1157,12 @@ const IamGroupsPanel = () => {
                       Delete
                     </button>
                   </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -1401,23 +1405,24 @@ const IamServiceAccountsPanel = () => {
           setCursorStack([]);
         }}
       />
-      <div className="table-wrapper" role="region" tabIndex={0} aria-label="Service accounts table">
-        {loading ? (
-          <p className="muted">Loading service accounts…</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th>Roles</th>
-                <th>Token hint</th>
-                <th>Expires</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((entry) => (
-                <tr key={entry.account.id}>
+      <div className="scroll-table-panel">
+        <div className="table-wrapper scroll-table-region" role="region" tabIndex={0} aria-label="Service accounts table">
+          {loading ? (
+            <p className="muted">Loading service accounts…</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Roles</th>
+                  <th>Token hint</th>
+                  <th>Expires</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accounts.map((entry) => (
+                  <tr key={entry.account.id}>
                   <td>
                     <strong>{entry.account.name}</strong>
                     <div className="muted">{entry.account.description || 'No description'}</div>
@@ -1449,11 +1454,12 @@ const IamServiceAccountsPanel = () => {
                       </button>
                     </div>
                   </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -1528,39 +1534,41 @@ const IamAuditPanel = () => {
           setCursorStack([]);
         }}
       />
-      <div className="table-wrapper" role="region" tabIndex={0} aria-label="Audit log table">
-        {loading ? (
-          <p className="muted">Loading events…</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Actor</th>
-                <th>Action</th>
-                <th>Target</th>
-                <th>Payload</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((event) => (
-                <tr key={event.id}>
-                  <td>{new Date(event.created_at).toLocaleString()}</td>
-                  <td>{event.actor || 'system'}</td>
-                  <td>{event.action}</td>
-                  <td>
-                    {event.target_type ? `${event.target_type} · ${event.target_id ?? '—'}` : '—'}
-                  </td>
-                  <td>
-                    <code className="payload-snippet">
-                      {JSON.stringify(event.payload ?? {}, null, 2)}
-                    </code>
-                  </td>
+      <div className="glass-panel scroll-table-panel">
+        <div className="table-wrapper scroll-table-region" role="region" tabIndex={0} aria-label="Audit log table">
+          {loading ? (
+            <p className="muted">Loading events…</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Actor</th>
+                  <th>Action</th>
+                  <th>Target</th>
+                  <th>Payload</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {events.map((event) => (
+                  <tr key={event.id}>
+                    <td>{new Date(event.created_at).toLocaleString()}</td>
+                    <td>{event.actor || 'system'}</td>
+                    <td>{event.action}</td>
+                    <td>
+                      {event.target_type ? `${event.target_type} · ${event.target_id ?? '—'}` : '—'}
+                    </td>
+                    <td>
+                      <code className="payload-snippet">
+                        {JSON.stringify(event.payload ?? {}, null, 2)}
+                      </code>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </section>
   );
