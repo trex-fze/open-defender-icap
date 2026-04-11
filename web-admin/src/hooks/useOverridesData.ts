@@ -52,7 +52,10 @@ const mapOverride = (record: ApiOverrideRecord): OverrideRow => ({
   id: record.id,
   scopeType: record.scope_type,
   scopeValue: record.scope_value,
-  scope: `${record.scope_type}:${record.scope_value}`,
+  scope:
+    record.scope_type === 'domain'
+      ? record.scope_value
+      : `${record.scope_type}:${record.scope_value}`,
   action: record.action ?? 'unknown',
   status: record.status,
   reason: record.reason,

@@ -277,6 +277,18 @@ a {
   padding-right: 2rem;
 }
 
+.dashboard-refresh-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.dashboard-refresh-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -405,6 +417,14 @@ a {
   .dashboard-header-select {
     width: 100%;
     max-width: none;
+  }
+
+  .dashboard-refresh-control {
+    width: 100%;
+  }
+
+  .dashboard-refresh-label {
+    min-width: 100px;
   }
 
   .exchange-action-button {

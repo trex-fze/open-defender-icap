@@ -175,17 +175,20 @@ export const DashboardPage = () => {
             <option value={10}>Top 10</option>
             <option value={20}>Top 20</option>
           </select>
-          <select
-            className="search-input dashboard-header-select"
-            value={refreshIntervalMs}
-            onChange={(event) => setRefreshIntervalMs(Number(event.target.value))}
-            title="Auto refresh interval"
-          >
-            <option value={0}>Auto Refresh: Off</option>
-            <option value={15000}>Auto Refresh: 15s</option>
-            <option value={30000}>Auto Refresh: 30s</option>
-            <option value={60000}>Auto Refresh: 60s</option>
-          </select>
+          <div className="dashboard-refresh-control">
+            <span className="dashboard-refresh-label">Auto Refresh:</span>
+            <select
+              className="search-input dashboard-header-select"
+              value={refreshIntervalMs}
+              onChange={(event) => setRefreshIntervalMs(Number(event.target.value))}
+              title="Auto refresh interval"
+            >
+              <option value={0}>Off</option>
+              <option value={15000}>15s</option>
+              <option value={30000}>30s</option>
+              <option value={60000}>60s</option>
+            </select>
+          </div>
           <button className="cta-button" onClick={() => dashboard.refresh()} disabled={dashboard.loading}>
             {dashboard.loading ? 'Refreshing...' : 'Refresh'}
           </button>
