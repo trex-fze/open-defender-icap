@@ -84,8 +84,8 @@ const providerHealthChipClass = (provider: OpsProviderStatus) => {
 
 export const DashboardPage = () => {
   const navigate = useNavigate();
-  const [range, setRange] = useState('24h');
-  const [topN, setTopN] = useState(10);
+  const [range, setRange] = useState('1h');
+  const [topN, setTopN] = useState(20);
   const [refreshIntervalMs, setRefreshIntervalMs] = useState<number>(() => {
     if (typeof window === 'undefined') return 30_000;
     const raw = window.localStorage.getItem('od.dashboard.refresh.ms');
