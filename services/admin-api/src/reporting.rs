@@ -5,6 +5,7 @@ use axum::{
 };
 use common_types::normalizer::canonical_classification_key;
 use serde::Deserialize;
+use serde::Serialize;
 use sqlx::Row;
 use std::collections::HashMap;
 use tracing::error;
@@ -23,6 +24,57 @@ pub struct TrafficReportQuery {
 }
 
 const DEFAULT_TOP_N: u32 = 10;
+
+#[derive(Debug, Serialize)]
+pub struct OpsSummaryResponse {
+    pub range: String,
+    pub source: String,
+    pub queue: OpsQueueMetrics,
+    pub auth: OpsAuthMetrics,
+    pub providers: Vec<OpsProviderMetric>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct OpsQueueMetrics {
+    pub pending_age_p95_seconds: Option<f64>,
+    pub llm_jobs_started_per_sec_10m: Option<f64>,
+    pub llm_jobs_completed_per_sec_10m: Option<f64>,
+    pub llm_dlq_growth_10m: Option<f64>,
+    pub page_fetch_dlq_growth_10m: Option<f64>,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct OpsAuthMetrics {
+    pub login_failures_10m: Option<f64>,
+    pub lockouts_10m: Option<f64>,
+    pub refresh_failures_10m: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpsProviderMetric {
+    pub provider: String,
+    pub failures_5m: f64,
+    pub timeouts_5m: f64,
+    pub latency_p95_seconds: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrometheusResponse {
+    status: String,
+    data: PrometheusData,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrometheusData {
+    result: Vec<PrometheusVectorSample>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrometheusVectorSample {
+    metric: HashMap<String, String>,
+    value: (f64, String),
+}
 
 pub async fn traffic_summary(
     Extension(user): Extension<UserContext>,
@@ -107,6 +159,268 @@ pub async fn dashboard_summary(
     Ok(Json(report))
 }
 
+pub async fn ops_summary(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Query(query): Query<TrafficReportQuery>,
+) -> Result<Json<OpsSummaryResponse>, StatusCode> {
+    require_roles(&user, ROLE_REPORTING_VIEW)?;
+    let range = query
+        .range
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("24h")
+        .to_string();
+
+    let Some(prometheus_base) = state.prometheus_url() else {
+        return Ok(Json(OpsSummaryResponse {
+            range,
+            source: "unavailable".to_string(),
+            queue: OpsQueueMetrics::default(),
+            auth: OpsAuthMetrics::default(),
+            providers: Vec::new(),
+            errors: vec!["prometheus endpoint is not configured".to_string()],
+        }));
+    };
+
+    let mut errors = Vec::new();
+    let mut queue = OpsQueueMetrics::default();
+    let mut auth = OpsAuthMetrics::default();
+
+    queue.pending_age_p95_seconds = query_prometheus_scalar(
+        &state,
+        prometheus_base,
+        "histogram_quantile(0.95, sum(rate(llm_pending_age_seconds_bucket[10m])) by (le))",
+        "pending_age_p95_seconds",
+        &mut errors,
+    )
+    .await;
+    queue.llm_jobs_started_per_sec_10m = query_prometheus_scalar(
+        &state,
+        prometheus_base,
+        "rate(llm_jobs_started_total[10m])",
+        "llm_jobs_started_per_sec_10m",
+        &mut errors,
+    )
+    .await;
+    queue.llm_jobs_completed_per_sec_10m = query_prometheus_scalar(
+        &state,
+        prometheus_base,
+        "rate(llm_jobs_completed_total[10m])",
+        "llm_jobs_completed_per_sec_10m",
+        &mut errors,
+    )
+    .await;
+    queue.llm_dlq_growth_10m = query_prometheus_scalar(
+        &state,
+        prometheus_base,
+        "increase(llm_dlq_published_total[10m])",
+        "llm_dlq_growth_10m",
+        &mut errors,
+    )
+    .await;
+    queue.page_fetch_dlq_growth_10m = query_prometheus_scalar(
+        &state,
+        prometheus_base,
+        "increase(page_fetch_dlq_published_total[10m])",
+        "page_fetch_dlq_growth_10m",
+        &mut errors,
+    )
+    .await;
+
+    auth.login_failures_10m = query_prometheus_scalar(
+        &state,
+        prometheus_base,
+        "increase(admin_auth_login_failure_total[10m])",
+        "login_failures_10m",
+        &mut errors,
+    )
+    .await;
+    auth.lockouts_10m = query_prometheus_scalar(
+        &state,
+        prometheus_base,
+        "increase(admin_auth_lockout_total[10m])",
+        "lockouts_10m",
+        &mut errors,
+    )
+    .await;
+    auth.refresh_failures_10m = query_prometheus_scalar(
+        &state,
+        prometheus_base,
+        "increase(admin_auth_refresh_failure_total[10m])",
+        "refresh_failures_10m",
+        &mut errors,
+    )
+    .await;
+
+    let failure_rows = query_prometheus_vector(
+        &state,
+        prometheus_base,
+        "sum by (provider) (increase(llm_provider_failures_total[5m]))",
+        "llm_provider_failures_5m",
+        &mut errors,
+    )
+    .await
+    .unwrap_or_default();
+    let timeout_rows = query_prometheus_vector(
+        &state,
+        prometheus_base,
+        "sum by (provider) (increase(llm_provider_timeouts_total[5m]))",
+        "llm_provider_timeouts_5m",
+        &mut errors,
+    )
+    .await
+    .unwrap_or_default();
+    let latency_rows = query_prometheus_vector(
+        &state,
+        prometheus_base,
+        "histogram_quantile(0.95, sum(rate(llm_provider_request_duration_seconds_bucket[5m])) by (provider, le))",
+        "llm_provider_latency_p95_seconds",
+        &mut errors,
+    )
+    .await
+    .unwrap_or_default();
+
+    let mut providers_by_name: HashMap<String, OpsProviderMetric> = HashMap::new();
+    for sample in &failure_rows {
+        if let Some(name) = sample.metric.get("provider") {
+            providers_by_name
+                .entry(name.clone())
+                .or_insert(OpsProviderMetric {
+                    provider: name.clone(),
+                    failures_5m: 0.0,
+                    timeouts_5m: 0.0,
+                    latency_p95_seconds: None,
+                });
+            if let Some(item) = providers_by_name.get_mut(name) {
+                item.failures_5m = parse_sample_value(sample);
+            }
+        }
+    }
+    for sample in &timeout_rows {
+        if let Some(name) = sample.metric.get("provider") {
+            providers_by_name
+                .entry(name.clone())
+                .or_insert(OpsProviderMetric {
+                    provider: name.clone(),
+                    failures_5m: 0.0,
+                    timeouts_5m: 0.0,
+                    latency_p95_seconds: None,
+                });
+            if let Some(item) = providers_by_name.get_mut(name) {
+                item.timeouts_5m = parse_sample_value(sample);
+            }
+        }
+    }
+    for sample in &latency_rows {
+        if let Some(name) = sample.metric.get("provider") {
+            providers_by_name
+                .entry(name.clone())
+                .or_insert(OpsProviderMetric {
+                    provider: name.clone(),
+                    failures_5m: 0.0,
+                    timeouts_5m: 0.0,
+                    latency_p95_seconds: None,
+                });
+            if let Some(item) = providers_by_name.get_mut(name) {
+                item.latency_p95_seconds = Some(parse_sample_value(sample));
+            }
+        }
+    }
+    let mut providers = providers_by_name.into_values().collect::<Vec<_>>();
+    providers.sort_by(|a, b| a.provider.cmp(&b.provider));
+
+    let source = if errors.is_empty() {
+        "live"
+    } else if queue.pending_age_p95_seconds.is_some()
+        || queue.llm_jobs_started_per_sec_10m.is_some()
+        || queue.llm_jobs_completed_per_sec_10m.is_some()
+        || auth.login_failures_10m.is_some()
+        || !providers.is_empty()
+    {
+        "partial"
+    } else {
+        "unavailable"
+    };
+
+    Ok(Json(OpsSummaryResponse {
+        range,
+        source: source.to_string(),
+        queue,
+        auth,
+        providers,
+        errors,
+    }))
+}
+
+fn parse_sample_value(sample: &PrometheusVectorSample) -> f64 {
+    sample.value.1.parse::<f64>().unwrap_or(0.0)
+}
+
+async fn query_prometheus_scalar(
+    state: &AppState,
+    base: &str,
+    query: &str,
+    metric_name: &str,
+    errors: &mut Vec<String>,
+) -> Option<f64> {
+    match query_prometheus_vector(state, base, query, metric_name, errors).await {
+        Some(rows) => rows.first().map(parse_sample_value),
+        None => None,
+    }
+}
+
+async fn query_prometheus_vector(
+    state: &AppState,
+    base: &str,
+    query: &str,
+    metric_name: &str,
+    errors: &mut Vec<String>,
+) -> Option<Vec<PrometheusVectorSample>> {
+    let url = format!("{}/api/v1/query", base.trim_end_matches('/'));
+    let response = state
+        .http_client
+        .get(&url)
+        .query(&[("query", query)])
+        .send()
+        .await;
+    let response = match response {
+        Ok(resp) => resp,
+        Err(err) => {
+            errors.push(format!("{} query failed: {}", metric_name, err));
+            return None;
+        }
+    };
+
+    if !response.status().is_success() {
+        errors.push(format!(
+            "{} query returned {}",
+            metric_name,
+            response.status()
+        ));
+        return None;
+    }
+
+    let payload = response.json::<PrometheusResponse>().await;
+    match payload {
+        Ok(body) => {
+            if body.status != "success" {
+                errors.push(format!(
+                    "{} query response status was {}",
+                    metric_name, body.status
+                ));
+                None
+            } else {
+                Some(body.data.result)
+            }
+        }
+        Err(err) => {
+            errors.push(format!("{} query decode failed: {}", metric_name, err));
+            None
+        }
+    }
+}
+
 async fn hydrate_mapped_categories(
     state: &AppState,
     top_domains: &[crate::reporting_es::TopEntry],
@@ -184,7 +498,11 @@ fn build_mapped_categories(
         .into_iter()
         .map(|(key, doc_count)| crate::reporting_es::TopEntry { key, doc_count })
         .collect::<Vec<_>>();
-    top_categories.sort_by(|a, b| b.doc_count.cmp(&a.doc_count).then_with(|| a.key.cmp(&b.key)));
+    top_categories.sort_by(|a, b| {
+        b.doc_count
+            .cmp(&a.doc_count)
+            .then_with(|| a.key.cmp(&b.key))
+    });
     top_categories.truncate(top_n.clamp(1, 50) as usize);
 
     (top_categories, mapped_domain_docs)
@@ -225,10 +543,8 @@ mod tests {
                 "domain:unknown.test".to_string(),
             ),
         ]);
-        let category_by_key = HashMap::from([(
-            "domain:example.com".to_string(),
-            "news-media".to_string(),
-        )]);
+        let category_by_key =
+            HashMap::from([("domain:example.com".to_string(), "news-media".to_string())]);
 
         let (categories, mapped_docs) =
             build_mapped_categories(&top_domains, &canonical_by_domain, &category_by_key, 20);

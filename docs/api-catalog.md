@@ -97,6 +97,7 @@ Policy history note: `GET /api/v1/policies/:id/versions` is served from immutabl
 | `GET` | `/api/v1/reporting/traffic` | Elastic-powered traffic summary with inferred-action/domain/category fallbacks when structured fields are sparse. | `range`, `top_n`, `bucket`. |
 | `GET` | `/api/v1/reporting/status` | Reporting data-quality coverage counters for the selected time range. | `range`; response includes `total_docs`, `action_docs`, `category_docs`, `domain_docs`. |
 | `GET` | `/api/v1/reporting/dashboard` | Rich dashboard analytics with client count, bandwidth, hourly usage, top domains/categories, blocked domains, blocked requesters (`client.ip`), and coverage metrics. | `range`, `top_n`, `bucket`; returns `overview`, `hourly_usage`, `top_domains`, mapped `top_categories` (plus optional `top_categories_event`), `top_blocked_domains`, `top_blocked_requesters`, `top_clients_by_bandwidth`, and `coverage` (`total_docs`, `client_ip_docs`, `domain_docs`, `category_docs`, `category_mapped_domain_docs`, `category_mapped_ratio`, `network_bytes_docs`). |
+| `GET` | `/api/v1/reporting/ops-summary` | Prometheus-powered operational telemetry rollup for dashboard overlays (queue age/rates, DLQ growth, auth failure counters, provider failure/timeout/latency vectors). | `range` (display metadata); returns `{ source, queue, auth, providers, errors }` and gracefully degrades to `partial`/`unavailable` when Prometheus queries fail. |
 
 ### Cache & Diagnostics
 

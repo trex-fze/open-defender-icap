@@ -24,6 +24,7 @@ export const queryKeys = {
   ) => ['classifications', baseUrl, state, q, cursor, limit] as const,
   reportingDashboard: (baseUrl: string, range: string, topN: number, bucket?: string) =>
     ['reporting-dashboard', baseUrl, range, topN, bucket ?? 'auto'] as const,
+  reportingOpsSummary: (baseUrl: string, range: string) => ['reporting-ops-summary', baseUrl, range] as const,
   opsStatus: (baseUrl: string, providersUrl: string) => ['ops-status', baseUrl, providersUrl] as const,
   llmProviders: (baseUrl: string) => ['llm-providers', baseUrl] as const,
 };

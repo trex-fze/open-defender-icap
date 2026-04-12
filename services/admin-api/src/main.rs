@@ -179,6 +179,7 @@ pub struct AppState {
     policy_engine_url: String,
     policy_engine_admin_token: Option<String>,
     llm_providers_url: String,
+    prometheus_url: Option<String>,
     http_client: reqwest::Client,
     classification_job_publisher: Option<Arc<ClassificationJobPublisher>>,
 }
@@ -466,6 +467,10 @@ impl AppState {
         Ok(providers.iter().any(|item| item.name == provider_name))
     }
 
+    pub fn prometheus_url(&self) -> Option<&str> {
+        self.prometheus_url.as_deref()
+    }
+
     pub fn cache_invalidator(&self) -> Option<&CacheInvalidator> {
         self.cache_invalidator.as_deref()
     }
@@ -544,6 +549,11 @@ async fn main() -> Result<()> {
         .or_else(|| admin_token.clone());
     let llm_providers_url = env::var("OD_LLM_PROVIDERS_URL")
         .unwrap_or_else(|_| "http://llm-worker:19015/providers".to_string());
+    let prometheus_url = env::var("OD_PROMETHEUS_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| Some("http://prometheus:9090".to_string()));
     let classification_job_stream =
         env::var("OD_CLASSIFICATION_STREAM").unwrap_or_else(|_| "classification-jobs".to_string());
     let cache_invalidator = redis_url
@@ -650,6 +660,7 @@ async fn main() -> Result<()> {
         policy_engine_url,
         policy_engine_admin_token,
         llm_providers_url,
+        prometheus_url,
         http_client: reqwest::Client::new(),
         classification_job_publisher,
     };
@@ -733,6 +744,7 @@ async fn main() -> Result<()> {
             "/api/v1/reporting/dashboard",
             get(reporting::dashboard_summary),
         )
+        .route("/api/v1/reporting/ops-summary", get(reporting::ops_summary))
         .route(
             "/api/v1/cache-entries/:cache_key",
             get(cache_entries_api::get_entry).delete(cache_entries_api::delete_entry),

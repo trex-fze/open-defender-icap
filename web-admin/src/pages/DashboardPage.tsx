@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { useOpsStatus, type OpsProviderStatus } from '../hooks/useOpsStatus';
 import { useDashboardReportData } from '../hooks/useDashboardReportData';
+import { useDashboardOpsSummary } from '../hooks/useDashboardOpsSummary';
 import { useTheme } from '../context/ThemeContext';
 
 const formatBytes = (input: number) => {
@@ -44,6 +45,11 @@ const pct = (num: number, den: number) => {
 const formatMiB = (input: number) => {
   if (!Number.isFinite(input) || input <= 0) return '0.000 MiB';
   return `${input.toFixed(3)} MiB`;
+};
+
+const formatRate = (value?: number) => {
+  if (value === undefined || !Number.isFinite(value)) return '—';
+  return `${value.toFixed(3)}/s`;
 };
 
 type ChartPalette = {
@@ -133,6 +139,7 @@ export const DashboardPage = () => {
   });
   const { data: ops, loading: opsLoading, error: opsError, updatedAt: opsUpdatedAt } = useOpsStatus(refreshIntervalMs);
   const dashboard = useDashboardReportData(range, topN, undefined, refreshIntervalMs);
+  const opsSummary = useDashboardOpsSummary(range, refreshIntervalMs);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -181,7 +188,7 @@ export const DashboardPage = () => {
   const topCategories = dashboard.data?.top_categories ?? [];
   const topCategoriesEvent = dashboard.data?.top_categories_event ?? [];
 
-  const lastUpdated = Math.max(dashboard.updatedAt ?? 0, opsUpdatedAt ?? 0);
+  const lastUpdated = Math.max(dashboard.updatedAt ?? 0, opsUpdatedAt ?? 0, opsSummary.updatedAt ?? 0);
   const topClientsBandwidthBytes = useMemo(
     () => (dashboard.data?.top_clients_by_bandwidth ?? []).reduce((sum, row) => sum + row.bandwidth_bytes, 0),
     [dashboard.data?.top_clients_by_bandwidth],
@@ -254,6 +261,13 @@ export const DashboardPage = () => {
       {dashboard.error ? (
         <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load dashboard analytics: {dashboard.error}</p>
+        </div>
+      ) : null}
+      {opsSummary.error ? (
+        <div className="glass-panel glass-panel--error" style={{ marginTop: '0.9rem' }}>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>
+            Failed to load Prometheus operations telemetry: {opsSummary.error}
+          </p>
         </div>
       ) : null}
 
@@ -413,6 +427,72 @@ export const DashboardPage = () => {
             </p>
           ) : null}
         </div>
+      </div>
+
+      <div className="glass-panel" style={{ marginTop: '1.2rem' }}>
+        <p className="section-title">Operations Telemetry (Prometheus)</p>
+        {opsSummary.loading ? (
+          <p style={{ margin: 0, color: 'var(--muted)' }}>Loading operations telemetry…</p>
+        ) : opsSummary.data ? (
+          <>
+            <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: '0.82rem' }}>
+              Runtime source: {opsSummary.data.source} · range: {opsSummary.data.range}
+            </p>
+            <div className="chip-row" style={{ marginBottom: '0.7rem' }}>
+              <span className="chip chip--amber">
+                Pending age p95: {opsSummary.data.queue.pending_age_p95_seconds !== undefined ? `${opsSummary.data.queue.pending_age_p95_seconds.toFixed(1)}s` : '—'}
+              </span>
+              <span className="chip chip--green">LLM started: {formatRate(opsSummary.data.queue.llm_jobs_started_per_sec_10m)}</span>
+              <span className="chip chip--green">LLM completed: {formatRate(opsSummary.data.queue.llm_jobs_completed_per_sec_10m)}</span>
+              <span className="chip chip--red">
+                LLM DLQ +10m: {opsSummary.data.queue.llm_dlq_growth_10m !== undefined ? formatCompact(opsSummary.data.queue.llm_dlq_growth_10m) : '—'}
+              </span>
+              <span className="chip chip--red">
+                Fetch DLQ +10m: {opsSummary.data.queue.page_fetch_dlq_growth_10m !== undefined ? formatCompact(opsSummary.data.queue.page_fetch_dlq_growth_10m) : '—'}
+              </span>
+              <span className="chip chip--red">
+                Login failures +10m: {opsSummary.data.auth.login_failures_10m !== undefined ? formatCompact(opsSummary.data.auth.login_failures_10m) : '—'}
+              </span>
+              <span className="chip chip--amber">
+                Lockouts +10m: {opsSummary.data.auth.lockouts_10m !== undefined ? formatCompact(opsSummary.data.auth.lockouts_10m) : '—'}
+              </span>
+              <span className="chip chip--amber">
+                Refresh failures +10m: {opsSummary.data.auth.refresh_failures_10m !== undefined ? formatCompact(opsSummary.data.auth.refresh_failures_10m) : '—'}
+              </span>
+            </div>
+            {opsSummary.data.providers.length > 0 ? (
+              <div className="table-wrapper dashboard-domain-table" role="region" tabIndex={0} aria-label="Prometheus provider telemetry">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Provider</th>
+                      <th>Failures (5m)</th>
+                      <th>Timeouts (5m)</th>
+                      <th>Latency p95</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {opsSummary.data.providers.map((item) => (
+                      <tr key={item.provider}>
+                        <td>{item.provider}</td>
+                        <td>{formatCompact(item.failures_5m)}</td>
+                        <td>{formatCompact(item.timeouts_5m)}</td>
+                        <td>{item.latency_p95_seconds !== undefined ? `${item.latency_p95_seconds.toFixed(2)}s` : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p style={{ margin: 0, color: 'var(--muted)' }}>No provider telemetry samples available for the selected range.</p>
+            )}
+            {opsSummary.data.errors.length > 0 ? (
+              <p style={{ marginTop: '0.65rem', color: 'var(--status-warning)', fontSize: '0.8rem' }}>
+                Partial telemetry: {opsSummary.data.errors[0]}
+              </p>
+            ) : null}
+          </>
+        ) : null}
       </div>
 
       <div className="layout-grid" style={{ marginTop: '1.2rem' }}>

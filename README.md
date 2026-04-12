@@ -168,6 +168,7 @@ flowchart LR
 | `OD_FILEBEAT_SECRET` | Shared secret between Filebeat and event-ingester. |
 | `OD_REPORTING_ELASTIC_URL` / `OD_REPORTING_INDEX_PATTERN` | Reporting backend used by `/api/v1/reporting/*`. |
 | `OD_REPORTING_ELASTIC_USERNAME` / `OD_REPORTING_ELASTIC_PASSWORD` / `OD_REPORTING_ELASTIC_API_KEY` | Reporting query auth (password defaults to `ELASTIC_PASSWORD` in compose). |
+| `OD_PROMETHEUS_URL` | Prometheus base URL used by Admin API operations telemetry rollups (`/api/v1/reporting/ops-summary`) shown in Dashboard. |
 | `OD_POLICY_ENGINE_URL` | Admin API -> Policy Engine URL override (default `http://policy-engine:19010`). |
 | `OD_HAPROXY_BIND_HOST` / `OD_HAPROXY_BIND_PORT` | External proxy listener published by HAProxy (default `0.0.0.0:3128`); clients connect to this endpoint. |
 | `OD_SQUID_ALLOWED_CLIENT_CIDRS` | Comma-separated client CIDRs allowed at the HAProxy edge before forwarding to Squid. On Docker Desktop/macOS, container-visible peer IP can be rewritten; in that dev profile use `0.0.0.0/0` with LAN firewall restrictions on port `3128`. |
