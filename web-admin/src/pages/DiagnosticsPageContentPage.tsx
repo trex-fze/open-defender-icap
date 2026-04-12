@@ -50,15 +50,9 @@ export const DiagnosticsPageContentPage = () => {
   };
 
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <p className="section-title">Diagnostics</p>
-          <h2 style={{ margin: 0 }}>Page Content Inspector (Markdown)</h2>
-        </div>
-      </div>
-
-      <form className="glass-panel" onSubmit={onLookup}>
+    <div className="diagnostics-tool">
+      <form className="diagnostics-section" onSubmit={onLookup}>
+        <p className="section-title">Page Content Inspector (Markdown)</p>
         <label>
           <span style={{ display: 'block', marginBottom: '0.35rem' }}>Normalized key</span>
           <input className="search-input" value={key} onChange={(event) => setKey(event.target.value)} />
@@ -74,13 +68,13 @@ export const DiagnosticsPageContentPage = () => {
       </form>
 
       {error ? (
-        <div className="glass-panel glass-panel--error">
+        <div className="diagnostics-section glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>{error}</p>
         </div>
       ) : null}
 
       {record ? (
-        <div className="glass-panel">
+        <div className="diagnostics-section">
           <p className="section-title">Latest Content</p>
           <p style={{ margin: '0.3rem 0' }}>
             <strong>Version:</strong> {record.fetch_version}
@@ -148,7 +142,7 @@ export const DiagnosticsPageContentPage = () => {
       ) : null}
 
       {history.length > 0 ? (
-        <div className="glass-panel">
+        <div className="diagnostics-section">
           <p className="section-title">Version History</p>
           <div className="table-wrapper" role="region" tabIndex={0} aria-label="Page content history table">
             <table>

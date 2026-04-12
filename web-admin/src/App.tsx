@@ -17,6 +17,7 @@ import { PendingClassificationsPage } from './pages/PendingClassificationsPage';
 import { ClassificationsPage } from './pages/ClassificationsPage';
 import { DiagnosticsCachePage } from './pages/DiagnosticsCachePage';
 import { DiagnosticsPageContentPage } from './pages/DiagnosticsPageContentPage';
+import { DiagnosticsPage } from './pages/DiagnosticsPage';
 import { ThemeProvider } from './context/ThemeContext';
 
 const guard = {
@@ -46,8 +47,11 @@ const App = () => {
               <Route path="/classifications/pending" element={<ProtectedRoute roles={guard.viewEdit}><PendingClassificationsPage /></ProtectedRoute>} />
               <Route path="/classifications" element={<ProtectedRoute roles={guard.viewEdit}><ClassificationsPage /></ProtectedRoute>} />
               <Route path="/taxonomy" element={<ProtectedRoute roles={guard.editOnly}><TaxonomyPage /></ProtectedRoute>} />
-              <Route path="/diagnostics/cache" element={<ProtectedRoute roles={guard.admin}><DiagnosticsCachePage /></ProtectedRoute>} />
-              <Route path="/diagnostics/page-content" element={<ProtectedRoute roles={guard.viewEdit}><DiagnosticsPageContentPage /></ProtectedRoute>} />
+              <Route path="/diagnostics" element={<ProtectedRoute roles={guard.viewEdit}><DiagnosticsPage /></ProtectedRoute>}>
+                <Route index element={<DiagnosticsIndexRedirect />} />
+                <Route path="cache" element={<ProtectedRoute roles={guard.admin}><DiagnosticsCachePage /></ProtectedRoute>} />
+                <Route path="page-content" element={<ProtectedRoute roles={guard.viewEdit}><DiagnosticsPageContentPage /></ProtectedRoute>} />
+              </Route>
               <Route path="/settings/iam/*" element={<ProtectedRoute roles={guard.admin}><SettingsIamPage /></ProtectedRoute>} />
               <Route path="/settings/classifications" element={<ProtectedRoute roles={guard.admin}><SettingsClassificationsPage /></ProtectedRoute>} />
               <Route path="/settings/rbac" element={<Navigate to="/settings/iam" replace />} />
@@ -63,6 +67,14 @@ const App = () => {
 type GuardProps = {
   children: ReactElement;
   roles?: Role[];
+};
+
+const DiagnosticsIndexRedirect = () => {
+  const { hasAnyRole } = useAuth();
+  if (hasAnyRole(['policy-admin'])) {
+    return <Navigate to="/diagnostics/cache" replace />;
+  }
+  return <Navigate to="/diagnostics/page-content" replace />;
 };
 
 export const ProtectedRoute = ({ children, roles }: GuardProps) => {

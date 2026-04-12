@@ -488,6 +488,50 @@ a {
   padding-bottom: 0.5rem;
 }
 
+.diagnostics-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.diagnostics-tab {
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  font-weight: 500;
+  color: var(--muted);
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.diagnostics-tab--active {
+  border-color: var(--border-soft);
+  color: var(--text-primary);
+  background: var(--surface-active-nav);
+}
+
+.diagnostics-shell {
+  padding-bottom: 1.25rem;
+}
+
+.diagnostics-shell-body {
+  padding-top: 0.25rem;
+}
+
+.diagnostics-tool {
+  display: grid;
+  gap: 1rem;
+}
+
+.diagnostics-section {
+  border: 1px solid var(--border-subtle);
+  border-radius: 1rem;
+  background: var(--surface-panel);
+  padding: 1rem;
+}
+
 .iam-tab {
   padding: 0.5rem 1rem;
   border-radius: 999px;

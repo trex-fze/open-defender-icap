@@ -17,15 +17,9 @@ export const DiagnosticsCachePage = () => {
   };
 
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <p className="section-title">Diagnostics</p>
-          <h2 style={{ margin: 0 }}>Cache Entry Inspector</h2>
-        </div>
-      </div>
-
-      <form className="glass-panel" onSubmit={onLookup}>
+    <div className="diagnostics-tool">
+      <form className="diagnostics-section" onSubmit={onLookup}>
+        <p className="section-title">Cache Entry Inspector</p>
         <label>
           <span style={{ display: 'block', marginBottom: '0.35rem' }}>Cache key</span>
           <input className="search-input" value={key} onChange={(event) => setKey(event.target.value)} />
@@ -49,19 +43,19 @@ export const DiagnosticsCachePage = () => {
       </form>
 
       {error ? (
-        <div className="glass-panel glass-panel--error">
+        <div className="diagnostics-section glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>{error}</p>
         </div>
       ) : null}
 
       {message ? (
-        <div className="glass-panel glass-panel--success">
+        <div className="diagnostics-section glass-panel--success">
           <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
 
       {entry ? (
-        <div className="glass-panel">
+        <div className="diagnostics-section">
           <p className="section-title">Result</p>
           <p style={{ margin: '0.3rem 0' }}>
             <strong>Key:</strong> {entry.cache_key}
