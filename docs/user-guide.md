@@ -69,30 +69,47 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 | `odctl policy pull <policy-id> --file policy.json` | Export current policy detail to DSL file | Writes rules + version to local JSON file. |
 | `odctl policy push <policy-id> --file policy.json [--notes ...]` | Update policy draft from DSL file | Validates then `PUT /api/v1/policies/:id`; publish remains separate. |
 | `odctl policy publish <policy-id> [--version release-...]` | Promote draft to active policy | Calls `POST /api/v1/policies/:id/publish`; requires `policy-admin` role. |
+| `odctl policy delete <policy-id> --yes` | Delete policy (irreversible) | Calls `DELETE /api/v1/policies/:id`; requires explicit confirmation. |
 | `odctl policy validate --file policy.json` | Validate policy DSL payload without persisting | Calls `POST /api/v1/policies/validate`. |
-| `odctl cache lookup/invalidate` | Inspect redis entries (future) | Tied to Stage 3 cache enhancements. |
+| `odctl cache get/delete <normalized_key>` | Inspect or evict cache entries | Calls `GET`/`DELETE /api/v1/cache-entries/:cache_key`. |
 | `odctl migrate run [admin|policy|all]` | Apply Postgres migrations for admin/policy services | Reads `OD_ADMIN_DATABASE_URL` / `OD_POLICY_DATABASE_URL` unless `--admin-url/--policy-url` provided; runs both when target omitted. |
-| `odctl seed policies [file] [name] [created_by]` | Load policy DSL file via Policy API | Defaults to `config/policies.json`, `name=default`; requires admin auth token. |
-| `odctl override update <id> <file>` | PUT override definition | JSON matches Admin API payload; invalidates caches instantly. |
+| `odctl override export --action allow|block --file <path>` | Export Allow/Deny exchange text bundle | Calls `GET /api/v1/overrides/export?action=...`. |
+| `odctl override import --action allow|block --file <path> --mode merge|replace [--dry-run]` | Import Allow/Deny exchange entries | Calls `POST /api/v1/overrides/import`; `replace` apply requires `--yes`. |
 | `odctl page show --key <normalized>` | Inspect Crawl4AI excerpts and metadata | Useful when debugging LLM prompts; add `--json` for raw output. |
+| `odctl taxonomy show` | View taxonomy activation state | Calls `GET /api/v1/taxonomy`. |
+| `odctl taxonomy activation export --file activation.json` | Export editable activation payload | Converts live taxonomy state into activation update format. |
+| `odctl taxonomy activation apply --file activation.json --yes` | Apply taxonomy activation profile | Calls `PUT /api/v1/taxonomy/activation`; requires confirmation. |
+| `odctl classification list --state all|classified|unclassified` | List classified/unclassified keys | Calls `GET /api/v1/classifications` with cursor pagination. |
 | `odctl classification pending` | List sites blocked pending Crawl4AI + LLM verdict | Mirrors `/api/v1/classifications/pending`; shows latest status, base URL, timestamps. In domain-first mode, subdomain requests collapse into canonical `domain:<registered_domain>` pending rows. |
+| `odctl classification pending-delete <normalized_key>` | Remove one pending row | Calls `DELETE /api/v1/classifications/:key/pending`. |
+| `odctl classification pending-clear --yes` | Remove all pending rows | Calls `DELETE /api/v1/classifications/pending`; destructive. |
 | `odctl classification unblock --key <normalized> --action Allow ...` | Manually set a verdict to unblock/deny traffic (legacy/manual endpoint) | Sends `POST /api/v1/classifications/:key/unblock`; requires `policy-editor` role and records reason in audit log. |
+| `odctl classification manual-classify <key> --category ... --subcategory ...` | Manual taxonomy classify for pending workflows | Calls `POST /api/v1/classifications/:key/manual-classify`. |
+| `odctl classification metadata-classify <key> [--provider ...]` | Queue metadata-only classification with preferred provider | Calls `POST /api/v1/classifications/:key/metadata-classify`; fallback policy still applies. |
+| `odctl classification update <key> --category ... --subcategory ...` | Update persisted classification labels | Calls `PATCH /api/v1/classifications/:key`. |
+| `odctl classification delete <key> --yes` | Delete classification/pending/page-content state for key | Calls `DELETE /api/v1/classifications/:key`; destructive. |
 | `odctl classification export --file bundle.json` | Export domain classifications for backup/share | Calls `GET /api/v1/classifications/export` and writes bundle schema `od-classification-bundle.v1`. |
 | `odctl classification import --file bundle.json --dry-run --recompute` | Import a bundle with optional policy recompute | Calls `POST /api/v1/classifications/import`; use `--no-recompute` to trust imported risk/action/confidence values. Invalid rows are rejected and saved to JSONL error file. |
 | `odctl classification flush --all --dry-run` | Preview or apply bulk classification flush | Calls `POST /api/v1/classifications/flush`; supports `--all`, `--prefix`, or `--keys-file` scopes. |
+| `odctl report dashboard --range 24h --top 10` | Pull dashboard analytics payload | Calls `GET /api/v1/reporting/dashboard` for CLI automation/reporting. |
 
 Smoke verification: run `tests/policy-runtime-smoke.sh` to verify publish -> reload propagation, runtime sync, and decision-path behavior end-to-end in Docker.
 | `odctl iam users disable <id>` | Disable IAM user access | Calls `POST /api/v1/iam/users/:id/disable`; protected/last-admin guardrails may return `409`. |
 | `odctl iam users enable <id>` | Re-enable a disabled IAM user | Calls `POST /api/v1/iam/users/:id/enable`. |
 | `odctl iam users update <id> --username ...` | Edit IAM user identity fields/status | Calls `PUT /api/v1/iam/users/:id`; supports username/email/display/subject/status updates. |
 | `odctl iam users delete <id> --yes` | Hard delete IAM user (irreversible) | Calls `DELETE /api/v1/iam/users/:id?hard=true`; blocked for protected/last-admin cases. |
+| `odctl iam users set-password <id> --password ...` | Set or reset local user password | Calls `POST /api/v1/iam/users/:id/set-password`. |
+| `odctl iam users tokens list <user-id>` | List personal API keys for a user | Calls `GET /api/v1/iam/users/:id/tokens`. |
+| `odctl iam users tokens create <user-id> --name ...` | Create user API token (plaintext shown once) | Calls `POST /api/v1/iam/users/:id/tokens`. |
+| `odctl iam users tokens revoke <user-id> <token-id> --yes` | Revoke a user API token | Calls `DELETE /api/v1/iam/users/:id/tokens/:token_id`. |
+| `odctl iam audit list --limit 100` | Browse IAM audit trail | Calls `GET /api/v1/iam/audit` with cursor pagination. |
 | `odctl iam recover-admin-password --username admin --new-password ... --reason ... --yes` | Break-glass local admin password recovery | Uses direct DB access (`OD_ADMIN_DATABASE_URL` or `--admin-db-url`), writes audit event, sets `must_change_password=true`, and invalidates existing local JWT sessions. |
 
 Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 OD_ADMIN_TOKEN=secret odctl policy reload`, `OD_ADMIN_TOKEN=secret odctl policy simulate request.json`.
 
 ## 7. React Admin UI
 - Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
-- Routes: Dashboard, Investigations, Policies (+ draft create/publish), **Pending Sites** (manual classification with category/subcategory and policy-computed action; per-row metadata-only classify with preferred provider selection and fallback-aware queueing; per-row pending delete plus guarded delete-all queue cleanup; subdomain inputs auto-promote to canonical domain key), **Classifications** (classified/unclassified CRUD management with both `Effective Action` and `Recorded Action` columns), Allow / Deny list (domain + subdomain overrides), Taxonomy (read-only canonical listing with checkbox activation toggles), Diagnostics (Page Content + Cache tools), Settings (RBAC + CLI audit logs + Classification Exchange import/export/flush + Allow/Deny Exchange line-by-line import/export).
+- Routes: Dashboard, Investigations, Policies (+ draft create/publish), **Pending Sites** (manual classification with category/subcategory and policy-computed action; per-row metadata-only classify with preferred provider selection and fallback-aware queueing; per-row pending delete plus guarded delete-all queue cleanup; subdomain inputs auto-promote to canonical domain key), **Classifications** (classified/unclassified CRUD management with both `Effective Action` and `Recorded Action` columns), Allow / Deny list (domain + subdomain overrides), Taxonomy (canonical listing with activation toggles and save/reset), Diagnostics (Page Content + Cache tools), Settings (RBAC + CLI audit logs + Classification Exchange import/export/flush + Allow/Deny Exchange line-by-line import/export).
 - Dashboard analytics: live graphs for unique clients (`client.ip`), total bandwidth, hourly request/blocked/bandwidth trend, frequently accessed domains, blocked domains, and top blocked requesters by `client.ip`.
 - Authentication: local username/password login screen; RBAC controls navigation after token issuance.
 - Authentication gate: when `must_change_password=true`, UI redirects to password-change checkpoint before route access.
