@@ -50,6 +50,12 @@ export const SettingsIamPage = () => {
           >
             Classifications Exchange
           </NavLink>
+          <NavLink
+            to="/settings/allow-deny-exchange"
+            className={({ isActive }) => `iam-tab ${isActive ? 'iam-tab--active' : ''}`}
+          >
+            Allow / Deny Exchange
+          </NavLink>
         </nav>
         <nav className="iam-tabs">
           {tabs.map((tab) => (

@@ -11,6 +11,7 @@ import { OverridesPage } from './pages/OverridesPage';
 import { TaxonomyPage } from './pages/TaxonomyPage';
 import { SettingsIamPage } from './pages/SettingsIamPage';
 import { SettingsClassificationsPage } from './pages/SettingsClassificationsPage';
+import { SettingsOverridesExchangePage } from './pages/SettingsOverridesExchangePage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { LoginPage } from './pages/LoginPage';
 import { PendingClassificationsPage } from './pages/PendingClassificationsPage';
@@ -54,6 +55,7 @@ const App = () => {
               </Route>
               <Route path="/settings/iam/*" element={<ProtectedRoute roles={guard.admin}><SettingsIamPage /></ProtectedRoute>} />
               <Route path="/settings/classifications" element={<ProtectedRoute roles={guard.admin}><SettingsClassificationsPage /></ProtectedRoute>} />
+              <Route path="/settings/allow-deny-exchange" element={<ProtectedRoute roles={guard.admin}><SettingsOverridesExchangePage /></ProtectedRoute>} />
               <Route path="/settings/rbac" element={<Navigate to="/settings/iam" replace />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

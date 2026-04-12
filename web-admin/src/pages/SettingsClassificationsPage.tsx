@@ -263,6 +263,12 @@ export const SettingsClassificationsPage = () => {
           >
             Classifications Exchange
           </NavLink>
+          <NavLink
+            to="/settings/allow-deny-exchange"
+            className={({ isActive }) => `iam-tab ${isActive ? 'iam-tab--active' : ''}`}
+          >
+            Allow / Deny Exchange
+          </NavLink>
         </nav>
 
         <section className="iam-panel">

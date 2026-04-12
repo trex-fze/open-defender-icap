@@ -24,7 +24,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{header, HeaderValue, Method, Request, StatusCode},
     middleware,
-    response::Response,
+    response::{IntoResponse, Response},
     routing::{delete, get, post, put},
     Extension, Json, Router,
 };
@@ -36,7 +36,11 @@ use sqlx::{
     postgres::{PgPoolOptions, PgRow},
     PgPool, Row,
 };
-use std::{env, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+    sync::Arc,
+};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn, Level};
 use uuid::Uuid;
@@ -595,6 +599,8 @@ async fn main() -> Result<()> {
             "/api/v1/overrides",
             get(list_overrides).post(create_override),
         )
+        .route("/api/v1/overrides/export", get(export_overrides))
+        .route("/api/v1/overrides/import", post(import_overrides))
         .route(
             "/api/v1/overrides/:id",
             delete(delete_override).put(update_override),
@@ -978,6 +984,329 @@ async fn list_overrides(
     )))
 }
 
+async fn export_overrides(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Query(query): Query<OverrideExportQuery>,
+) -> Result<Response, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_OVERRIDES_VIEW)
+        .map_err(|status| (status, Json(ApiError::forbidden())))?;
+    let action = normalize_action(&query.action)?;
+
+    let rows = sqlx::query(
+        r#"SELECT scope_value
+           FROM overrides
+           WHERE scope_type = 'domain'
+             AND action = $1
+             AND status = 'active'
+           ORDER BY scope_value ASC"#,
+    )
+    .bind(&action)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("DB_ERROR", err.to_string())),
+        )
+    })?;
+
+    let mut lines = Vec::with_capacity(rows.len());
+    for row in rows {
+        let scope_value: String = row.try_get("scope_value").map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("DB_ERROR", err.to_string())),
+            )
+        })?;
+        lines.push(scope_value);
+    }
+    lines.sort();
+    lines.dedup();
+
+    let body = lines.join("\n");
+    let filename = format!("overrides-{}-exchange.txt", action);
+    let disposition = HeaderValue::from_str(&format!("attachment; filename=\"{}\"", filename))
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("EXPORT_ERROR", err.to_string())),
+            )
+        })?;
+
+    state
+        .log_override_event(
+            &format!("override.export.{}", action),
+            Some(user.actor.clone()),
+            action.clone(),
+            serde_json::json!({
+                "count": lines.len(),
+            }),
+        )
+        .await;
+
+    let response = (
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/plain; charset=utf-8"),
+            ),
+            (header::CONTENT_DISPOSITION, disposition),
+        ],
+        body,
+    )
+        .into_response();
+    Ok(response)
+}
+
+async fn import_overrides(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Json(payload): Json<OverrideImportRequest>,
+) -> Result<Json<OverrideImportResponse>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_OVERRIDES_WRITE)
+        .map_err(|status| (status, Json(ApiError::forbidden())))?;
+
+    let action = normalize_action(&payload.action)?;
+    let mode = normalize_override_import_mode(payload.mode.as_deref())?;
+    let dry_run = payload.dry_run.unwrap_or(true);
+    let parsed = parse_override_exchange_lines(&payload.content);
+
+    let existing_rows = sqlx::query(
+        r#"SELECT id, scope_value, status
+           FROM overrides
+           WHERE scope_type = 'domain'
+             AND action = $1
+           ORDER BY scope_value ASC, updated_at DESC"#,
+    )
+    .bind(&action)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("DB_ERROR", err.to_string())),
+        )
+    })?;
+
+    let mut existing_by_scope: HashMap<String, OverrideExistingMeta> = HashMap::new();
+    let mut active_scope_values: HashSet<String> = HashSet::new();
+    for row in existing_rows {
+        let id: Uuid = row.try_get("id").map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("DB_ERROR", err.to_string())),
+            )
+        })?;
+        let scope_value: String = row.try_get("scope_value").map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("DB_ERROR", err.to_string())),
+            )
+        })?;
+        let status: String = row.try_get("status").map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("DB_ERROR", err.to_string())),
+            )
+        })?;
+
+        let is_active = status.eq_ignore_ascii_case("active");
+        if is_active {
+            active_scope_values.insert(scope_value.clone());
+        }
+
+        existing_by_scope
+            .entry(scope_value)
+            .and_modify(|entry| {
+                entry.has_active = entry.has_active || is_active;
+            })
+            .or_insert(OverrideExistingMeta {
+                latest_id: id,
+                has_active: is_active,
+            });
+    }
+
+    let imported_would = parsed
+        .scopes
+        .iter()
+        .filter(|scope| !existing_by_scope.contains_key(*scope))
+        .count() as u32;
+    let updated_would = parsed
+        .scopes
+        .iter()
+        .filter(|scope| {
+            if let Some(meta) = existing_by_scope.get(*scope) {
+                !meta.has_active
+            } else {
+                false
+            }
+        })
+        .count() as u32;
+    let skipped_would = parsed.scopes.len() as u32 - imported_would - updated_would;
+    let imported_scope_set: HashSet<&str> =
+        parsed.scopes.iter().map(|scope| scope.as_str()).collect();
+    let deleted_would = if matches!(mode, OverrideImportMode::Replace) {
+        active_scope_values
+            .iter()
+            .filter(|scope| !imported_scope_set.contains(scope.as_str()))
+            .count() as u32
+    } else {
+        0
+    };
+
+    let mut imported = imported_would;
+    let mut updated = updated_would;
+    let mut skipped = skipped_would;
+    let mut deleted = deleted_would;
+
+    if !dry_run {
+        let mut tx = state.pool.begin().await.map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("DB_ERROR", err.to_string())),
+            )
+        })?;
+
+        imported = 0;
+        updated = 0;
+        skipped = 0;
+
+        for scope_value in &parsed.scopes {
+            if let Some(meta) = existing_by_scope.get(scope_value) {
+                if meta.has_active {
+                    skipped += 1;
+                    continue;
+                }
+                sqlx::query(
+                    r#"UPDATE overrides
+                       SET status = 'active',
+                           updated_at = NOW()
+                       WHERE id = $1"#,
+                )
+                .bind(meta.latest_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|err| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiError::new("DB_ERROR", err.to_string())),
+                    )
+                })?;
+                updated += 1;
+            } else {
+                sqlx::query(
+                    r#"INSERT INTO overrides (id, scope_type, scope_value, action, reason, created_by, status)
+                       VALUES ($1, 'domain', $2, $3, $4, $5, 'active')"#,
+                )
+                .bind(Uuid::new_v4())
+                .bind(scope_value)
+                .bind(&action)
+                .bind("Imported via Allow / Deny Exchange")
+                .bind(&user.actor)
+                .execute(&mut *tx)
+                .await
+                .map_err(|err| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiError::new("DB_ERROR", err.to_string())),
+                    )
+                })?;
+                imported += 1;
+            }
+
+            state.invalidate_override("domain", scope_value).await;
+        }
+
+        deleted = 0;
+        if matches!(mode, OverrideImportMode::Replace) {
+            let removed_rows = if parsed.scopes.is_empty() {
+                sqlx::query(
+                    r#"DELETE FROM overrides
+                       WHERE scope_type = 'domain'
+                         AND action = $1
+                         AND status = 'active'
+                       RETURNING scope_type, scope_value"#,
+                )
+                .bind(&action)
+                .fetch_all(&mut *tx)
+                .await
+            } else {
+                sqlx::query(
+                    r#"DELETE FROM overrides
+                       WHERE scope_type = 'domain'
+                         AND action = $1
+                         AND status = 'active'
+                         AND NOT (scope_value = ANY($2::text[]))
+                       RETURNING scope_type, scope_value"#,
+                )
+                .bind(&action)
+                .bind(&parsed.scopes)
+                .fetch_all(&mut *tx)
+                .await
+            }
+            .map_err(|err| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiError::new("DB_ERROR", err.to_string())),
+                )
+            })?;
+
+            deleted = removed_rows.len() as u32;
+            for row in removed_rows {
+                let removed_scope_type: String = row.try_get("scope_type").map_err(|err| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiError::new("DB_ERROR", err.to_string())),
+                    )
+                })?;
+                let removed_scope_value: String = row.try_get("scope_value").map_err(|err| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiError::new("DB_ERROR", err.to_string())),
+                    )
+                })?;
+                state
+                    .invalidate_override(&removed_scope_type, &removed_scope_value)
+                    .await;
+            }
+        }
+
+        tx.commit().await.map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("DB_ERROR", err.to_string())),
+            )
+        })?;
+    }
+
+    let response = OverrideImportResponse {
+        action: action.clone(),
+        mode: mode.as_str().to_string(),
+        dry_run,
+        total_lines: parsed.total_lines,
+        parsed: parsed.scopes.len() as u32,
+        duplicates: parsed.duplicates,
+        imported,
+        updated,
+        deleted,
+        skipped,
+        invalid: parsed.invalid_lines.len() as u32,
+        invalid_lines: parsed.invalid_lines.clone(),
+    };
+
+    state
+        .log_override_event(
+            &format!("override.import.{}", action),
+            Some(user.actor.clone()),
+            action.clone(),
+            &response,
+        )
+        .await;
+
+    Ok(Json(response))
+}
+
 async fn create_override(
     Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
@@ -1276,6 +1605,71 @@ struct OverrideListQuery {
     cursor: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct OverrideExportQuery {
+    action: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OverrideImportRequest {
+    action: String,
+    mode: Option<String>,
+    dry_run: Option<bool>,
+    content: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct OverrideImportInvalidLine {
+    line_number: u32,
+    value: String,
+    error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct OverrideImportResponse {
+    action: String,
+    mode: String,
+    dry_run: bool,
+    total_lines: u32,
+    parsed: u32,
+    duplicates: u32,
+    imported: u32,
+    updated: u32,
+    deleted: u32,
+    skipped: u32,
+    invalid: u32,
+    invalid_lines: Vec<OverrideImportInvalidLine>,
+}
+
+#[derive(Debug)]
+struct ParsedOverrideImport {
+    total_lines: u32,
+    scopes: Vec<String>,
+    duplicates: u32,
+    invalid_lines: Vec<OverrideImportInvalidLine>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum OverrideImportMode {
+    Merge,
+    Replace,
+}
+
+impl OverrideImportMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            OverrideImportMode::Merge => "merge",
+            OverrideImportMode::Replace => "replace",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OverrideExistingMeta {
+    latest_id: Uuid,
+    has_active: bool,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct OverrideCursor {
     created_at: DateTime<Utc>,
@@ -1420,6 +1814,57 @@ fn normalize_status(value: &str) -> Result<String, (StatusCode, Json<ApiError>)>
     }
 }
 
+fn normalize_override_import_mode(
+    value: Option<&str>,
+) -> Result<OverrideImportMode, (StatusCode, Json<ApiError>)> {
+    let normalized = value.unwrap_or("merge").trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "merge" => Ok(OverrideImportMode::Merge),
+        "replace" => Ok(OverrideImportMode::Replace),
+        _ => Err(validation_error("mode must be merge|replace")),
+    }
+}
+
+fn parse_override_exchange_lines(content: &str) -> ParsedOverrideImport {
+    let mut seen = HashSet::new();
+    let mut scopes = Vec::new();
+    let mut invalid_lines = Vec::new();
+    let mut duplicates = 0_u32;
+    let mut total_lines = 0_u32;
+
+    for (index, raw_line) in content.lines().enumerate() {
+        total_lines += 1;
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        match normalize_domain_scope(trimmed) {
+            Ok(scope_value) => {
+                if seen.insert(scope_value.clone()) {
+                    scopes.push(scope_value);
+                } else {
+                    duplicates += 1;
+                }
+            }
+            Err((_, err)) => {
+                invalid_lines.push(OverrideImportInvalidLine {
+                    line_number: (index + 1) as u32,
+                    value: trimmed.to_string(),
+                    error: err.0.message().to_string(),
+                });
+            }
+        }
+    }
+
+    ParsedOverrideImport {
+        total_lines,
+        scopes,
+        duplicates,
+        invalid_lines,
+    }
+}
+
 fn normalize_optional_field(value: Option<String>) -> Option<String> {
     value.and_then(|v| {
         let trimmed = v.trim().to_string();
@@ -1535,6 +1980,31 @@ mod tests {
                 "incoming.telemetry.mozilla.org".to_string()
             )]
         );
+    }
+
+    #[test]
+    fn parses_override_exchange_lines_with_comments_and_duplicates() {
+        let parsed = parse_override_exchange_lines(
+            "# allow list\nexample.com\n\n*.Example.org\nexample.com\ninvalid host\n",
+        );
+        assert_eq!(parsed.total_lines, 6);
+        assert_eq!(parsed.scopes, vec!["example.com", "*.example.org"]);
+        assert_eq!(parsed.duplicates, 1);
+        assert_eq!(parsed.invalid_lines.len(), 1);
+        assert_eq!(parsed.invalid_lines[0].line_number, 6);
+    }
+
+    #[test]
+    fn normalize_import_mode_defaults_to_merge() {
+        assert!(matches!(
+            normalize_override_import_mode(None).unwrap(),
+            OverrideImportMode::Merge
+        ));
+        assert!(matches!(
+            normalize_override_import_mode(Some("replace")).unwrap(),
+            OverrideImportMode::Replace
+        ));
+        assert!(normalize_override_import_mode(Some("all")).is_err());
     }
 }
 

@@ -43,8 +43,12 @@ All routes require `X-Admin-Token` or a JWT with the listed roles. High-volume l
 | `GET` | `/api/v1/overrides` | List override records. | `policy-viewer`. | Cursor pagination query: `limit`, `cursor`. | Cursor-paged list of `OverrideRecord`. |
 | `POST` | `/api/v1/overrides` | Create an override. | `policy-editor`. | `{ scope_type: "domain", scope_value, action: "allow"\|"block", reason?, created_by?, expires_at?, status? }`. | Newly created `OverrideRecord`. |
 | `PUT`/`DELETE` | `/api/v1/overrides/:id` | Update or delete an override. | `policy-editor`. | Same payload as create (for PUT). | Updated `OverrideRecord` or `204 No Content`. |
+| `GET` | `/api/v1/overrides/export` | Export active domain overrides for one action as line-by-line text. | `policy-viewer`. | Query: `action=allow|block`. | `text/plain` body (`scope_value` per line) with attachment filename. |
+| `POST` | `/api/v1/overrides/import` | Import line-by-line domain overrides for one action. | `policy-editor`. | `{ action: "allow"\|"block", mode: "merge"\|"replace", dry_run, content }` where `content` is plain text lines (blank lines and `#` comments ignored). | Summary JSON with imported/updated/deleted/skipped/invalid counts + invalid line details. |
 
 Override precedence note: policy-engine evaluates active domain overrides before classification/policy rules. A domain override applies to both apex + subdomains, and when multiple overrides match, the most-specific scope wins.
+
+Override exchange note: `mode=replace` is scoped to the selected action only (`allow` or `block`). Running replace for allow rules does not modify deny/block rules.
 
 ### Authentication
 

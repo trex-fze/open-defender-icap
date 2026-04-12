@@ -56,7 +56,10 @@ npx start-server-and-test "npm run dev" http://127.0.0.1:19001 "npx cypress run 
 6. **Audit and reporting**
    - `/settings/rbac`: load CLI logs (optional operator filter)
    - `/dashboard`: change range/top filters and verify analytics tables
-7. **Ops status**
+7. **Allow / Deny exchange**
+   - `/settings/allow-deny-exchange`: export Allow list and Deny list separately
+   - Import line-by-line text in dry-run, then apply merge/replace (replace is action-scoped)
+8. **Ops status**
    - `/dashboard`: verify pending count and ops source badge (`live`, `partial`, or `mock`)
 
 ## Taxonomy Lockdown Monitoring (Stage 12)
@@ -104,6 +107,7 @@ Capture one screenshot for each of the following and attach to release evidence:
 - Page content diagnostics with history table
 - Cache diagnostics lookup + evict confirmation
 - Settings CLI audit logs table
+- Settings Allow / Deny exchange (export + dry-run import summary)
 - Dashboard analytics tables
 - Dashboard analytics panel (unique clients, bandwidth, hourly trend, blocked domains/requesters)
 
@@ -116,8 +120,9 @@ Store screenshots under `docs/evidence/stage10-web-admin/` using this naming con
 - `05-page-content-diagnostics.png`
 - `06-cache-diagnostics.png`
 - `07-cli-logs.png`
-- `08-dashboard-reporting.png`
-- `09-dashboard-ops.png`
+- `08-allow-deny-exchange.png`
+- `09-dashboard-reporting.png`
+- `10-dashboard-ops.png`
 
 ## Troubleshooting
 
