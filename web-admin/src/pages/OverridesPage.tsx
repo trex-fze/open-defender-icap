@@ -108,24 +108,24 @@ export const OverridesPage = () => {
 
       {error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Failed to load overrides: {error}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load overrides: {error}</p>
         </div>
       ) : null}
 
       {actionError ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Override change failed: {actionError}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Override change failed: {actionError}</p>
         </div>
       ) : null}
 
       {message ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
-          <p style={{ margin: 0, color: '#9ef7eb' }}>{message}</p>
+          <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
 
       {isMock ? (
-        <p className="section-title" style={{ color: '#fdd744', marginTop: '0.5rem' }}>
+        <p className="section-title" style={{ color: 'var(--citrus)', marginTop: '0.5rem' }}>
           Mock stream (Admin API offline)
         </p>
       ) : null}
@@ -196,7 +196,7 @@ export const OverridesPage = () => {
           <button
             className="cta-button"
             type="button"
-            style={{ background: 'linear-gradient(120deg,#d6def6,#8ca0cb)', color: '#060b17' }}
+            style={{ background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
             onClick={resetForm}
           >
             Clear
@@ -274,8 +274,8 @@ export const OverridesPage = () => {
                           style={{
                             padding: '0.4rem 0.8rem',
                             fontSize: '0.75rem',
-                            background: 'linear-gradient(120deg,#ff9b9b,#fdd744)',
-                            color: '#060b17',
+                            background: 'var(--button-danger-bg)',
+                            color: 'var(--button-contrast-text)',
                           }}
                           onClick={() => onDelete(item.id)}
                           disabled={busy || !canCallApi || isMock}

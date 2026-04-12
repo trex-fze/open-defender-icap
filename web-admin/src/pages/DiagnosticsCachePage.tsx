@@ -40,7 +40,7 @@ export const DiagnosticsCachePage = () => {
           <button
             type="button"
             className="cta-button"
-            style={{ background: 'linear-gradient(120deg,#ff9b9b,#fdd744)', color: '#060b17' }}
+            style={{ background: 'var(--button-danger-bg)', color: 'var(--button-contrast-text)' }}
             onClick={onEvict}
             disabled={loading || !canCallApi || !key.trim()}
           >
@@ -51,13 +51,13 @@ export const DiagnosticsCachePage = () => {
 
       {error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>{error}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>{error}</p>
         </div>
       ) : null}
 
       {message ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
-          <p style={{ margin: 0, color: '#9ef7eb' }}>{message}</p>
+          <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
 

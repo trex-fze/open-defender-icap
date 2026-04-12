@@ -141,7 +141,7 @@ export const PendingClassificationsPage = () => {
           </button>
           <button
             className="cta-button"
-            style={{ background: 'linear-gradient(120deg,#f89b9b,#f26969)', color: '#060b17' }}
+            style={{ background: 'var(--button-danger-strong-bg)', color: 'var(--button-contrast-text)' }}
             onClick={deleteAllPending}
             disabled={loading || busyAll || isMock || !canCallApi || data.length === 0}
           >
@@ -152,24 +152,24 @@ export const PendingClassificationsPage = () => {
 
       {error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Failed to load pending sites: {error}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load pending sites: {error}</p>
         </div>
       ) : null}
 
       {actionError ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Pending action failed: {actionError}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Pending action failed: {actionError}</p>
         </div>
       ) : null}
 
       {message ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
-          <p style={{ margin: 0, color: '#9ef7eb' }}>{message}</p>
+          <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
 
       {isMock ? (
-        <p className="section-title" style={{ color: '#fdd744', marginTop: '0.5rem' }}>
+        <p className="section-title" style={{ color: 'var(--citrus)', marginTop: '0.5rem' }}>
           Using mock data (Admin API offline)
         </p>
       ) : null}
@@ -217,7 +217,7 @@ export const PendingClassificationsPage = () => {
             Classification only: enforcement overrides belong in the Allow / Deny list.
           </p>
           {taxonomyError || isTaxonomyMock || !taxonomyCategories.length ? (
-            <p style={{ marginTop: '0.75rem', marginBottom: 0, color: '#ffcf7f' }}>
+            <p style={{ marginTop: '0.75rem', marginBottom: 0, color: 'var(--status-warning)' }}>
               Taxonomy is unavailable for manual classification. Check Admin API taxonomy endpoint and try again.
             </p>
           ) : null}
@@ -231,7 +231,7 @@ export const PendingClassificationsPage = () => {
             </button>
             <button
               className="cta-button"
-              style={{ background: 'linear-gradient(120deg,#d6def6,#8ca0cb)', color: '#060b17' }}
+              style={{ background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
               onClick={() => setSelectedKey(undefined)}
             >
               Cancel
@@ -283,7 +283,7 @@ export const PendingClassificationsPage = () => {
               <tbody>
                 {data.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: 'center', color: '#7f8fb2' }}>
+                    <td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)' }}>
                       No pending sites.
                     </td>
                   </tr>
@@ -308,8 +308,8 @@ export const PendingClassificationsPage = () => {
                             style={{
                               padding: '0.4rem 0.8rem',
                               fontSize: '0.75rem',
-                              background: 'linear-gradient(120deg,#f8d5d5,#cd7c7c)',
-                              color: '#25090c',
+                              background: 'var(--button-danger-strong-bg)',
+                              color: 'var(--button-contrast-text)',
                             }}
                             disabled={busyKey === item.normalizedKey || isMock || !canCallApi || busyAll}
                             onClick={() => deletePendingRow(item)}

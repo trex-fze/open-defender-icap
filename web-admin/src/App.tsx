@@ -17,6 +17,7 @@ import { PendingClassificationsPage } from './pages/PendingClassificationsPage';
 import { ClassificationsPage } from './pages/ClassificationsPage';
 import { DiagnosticsCachePage } from './pages/DiagnosticsCachePage';
 import { DiagnosticsPageContentPage } from './pages/DiagnosticsPageContentPage';
+import { ThemeProvider } from './context/ThemeContext';
 
 const guard = {
   viewer: ['policy-viewer'] as Role[],
@@ -27,33 +28,35 @@ const guard = {
 
 const App = () => {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/auth/change-password" element={<ProtectedRoute><ChangePasswordPage /></ProtectedRoute>} />
-          <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-            <Route path="/investigations" element={<ProtectedRoute roles={guard.viewer}><InvestigationsPage /></ProtectedRoute>} />
-            <Route path="/policies" element={<ProtectedRoute roles={guard.viewEdit}><PoliciesPage /></ProtectedRoute>} />
-            <Route path="/policies/new" element={<ProtectedRoute roles={guard.editOnly}><PolicyCreatePage /></ProtectedRoute>} />
-            <Route path="/policies/:policyId" element={<ProtectedRoute roles={guard.viewEdit}><PolicyDetailPage /></ProtectedRoute>} />
-            <Route path="/overrides" element={<ProtectedRoute roles={guard.editOnly}><OverridesPage /></ProtectedRoute>} />
-            <Route path="/allow-deny" element={<Navigate to="/overrides" replace />} />
-            <Route path="/classifications/pending" element={<ProtectedRoute roles={guard.viewEdit}><PendingClassificationsPage /></ProtectedRoute>} />
-            <Route path="/classifications" element={<ProtectedRoute roles={guard.viewEdit}><ClassificationsPage /></ProtectedRoute>} />
-            <Route path="/taxonomy" element={<ProtectedRoute roles={guard.editOnly}><TaxonomyPage /></ProtectedRoute>} />
-            <Route path="/diagnostics/cache" element={<ProtectedRoute roles={guard.admin}><DiagnosticsCachePage /></ProtectedRoute>} />
-            <Route path="/diagnostics/page-content" element={<ProtectedRoute roles={guard.viewEdit}><DiagnosticsPageContentPage /></ProtectedRoute>} />
-            <Route path="/settings/iam/*" element={<ProtectedRoute roles={guard.admin}><SettingsIamPage /></ProtectedRoute>} />
-            <Route path="/settings/classifications" element={<ProtectedRoute roles={guard.admin}><SettingsClassificationsPage /></ProtectedRoute>} />
-            <Route path="/settings/rbac" element={<Navigate to="/settings/iam" replace />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/auth/change-password" element={<ProtectedRoute><ChangePasswordPage /></ProtectedRoute>} />
+            <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+              <Route path="/investigations" element={<ProtectedRoute roles={guard.viewer}><InvestigationsPage /></ProtectedRoute>} />
+              <Route path="/policies" element={<ProtectedRoute roles={guard.viewEdit}><PoliciesPage /></ProtectedRoute>} />
+              <Route path="/policies/new" element={<ProtectedRoute roles={guard.editOnly}><PolicyCreatePage /></ProtectedRoute>} />
+              <Route path="/policies/:policyId" element={<ProtectedRoute roles={guard.viewEdit}><PolicyDetailPage /></ProtectedRoute>} />
+              <Route path="/overrides" element={<ProtectedRoute roles={guard.editOnly}><OverridesPage /></ProtectedRoute>} />
+              <Route path="/allow-deny" element={<Navigate to="/overrides" replace />} />
+              <Route path="/classifications/pending" element={<ProtectedRoute roles={guard.viewEdit}><PendingClassificationsPage /></ProtectedRoute>} />
+              <Route path="/classifications" element={<ProtectedRoute roles={guard.viewEdit}><ClassificationsPage /></ProtectedRoute>} />
+              <Route path="/taxonomy" element={<ProtectedRoute roles={guard.editOnly}><TaxonomyPage /></ProtectedRoute>} />
+              <Route path="/diagnostics/cache" element={<ProtectedRoute roles={guard.admin}><DiagnosticsCachePage /></ProtectedRoute>} />
+              <Route path="/diagnostics/page-content" element={<ProtectedRoute roles={guard.viewEdit}><DiagnosticsPageContentPage /></ProtectedRoute>} />
+              <Route path="/settings/iam/*" element={<ProtectedRoute roles={guard.admin}><SettingsIamPage /></ProtectedRoute>} />
+              <Route path="/settings/classifications" element={<ProtectedRoute roles={guard.admin}><SettingsClassificationsPage /></ProtectedRoute>} />
+              <Route path="/settings/rbac" element={<Navigate to="/settings/iam" replace />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
   );
 };
 

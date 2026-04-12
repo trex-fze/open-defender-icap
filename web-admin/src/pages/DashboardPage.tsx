@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { useOpsStatus, type OpsProviderStatus } from '../hooks/useOpsStatus';
 import { useDashboardReportData } from '../hooks/useDashboardReportData';
+import { useTheme } from '../context/ThemeContext';
 
 const formatBytes = (input: number) => {
   if (!Number.isFinite(input) || input <= 0) return '0 B';
@@ -45,21 +46,65 @@ const formatMiB = (input: number) => {
   return `${input.toFixed(3)} MiB`;
 };
 
-const renderDomainTooltip = (valueLabel: string) => ({ active, payload }: { active?: boolean; payload?: Array<{ value?: number; payload?: { domain?: string } }> }) => {
+type ChartPalette = {
+  grid: string;
+  axis: string;
+  requests: string;
+  blocked: string;
+  bandwidthStroke: string;
+  bandwidthFill: string;
+  tooltipBg: string;
+  tooltipBorder: string;
+  tooltipTitle: string;
+  tooltipText: string;
+};
+
+const readChartPalette = (): ChartPalette => {
+  if (typeof window === 'undefined') {
+    return {
+      grid: 'rgba(255,255,255,0.08)',
+      axis: 'rgba(255,255,255,0.72)',
+      requests: '#7dd3fc',
+      blocked: '#f87171',
+      bandwidthStroke: '#34d399',
+      bandwidthFill: '#34d39933',
+      tooltipBg: 'rgba(6, 12, 24, 0.95)',
+      tooltipBorder: 'rgba(255,255,255,0.16)',
+      tooltipTitle: '#e7efff',
+      tooltipText: '#c8d6ff',
+    };
+  }
+
+  const style = window.getComputedStyle(document.documentElement);
+  return {
+    grid: style.getPropertyValue('--chart-grid').trim() || 'rgba(255,255,255,0.08)',
+    axis: style.getPropertyValue('--chart-axis').trim() || 'rgba(255,255,255,0.72)',
+    requests: style.getPropertyValue('--chart-series-requests').trim() || '#7dd3fc',
+    blocked: style.getPropertyValue('--chart-series-blocked').trim() || '#f87171',
+    bandwidthStroke: style.getPropertyValue('--chart-series-bandwidth').trim() || '#34d399',
+    bandwidthFill: style.getPropertyValue('--chart-series-bandwidth-fill').trim() || '#34d39933',
+    tooltipBg: style.getPropertyValue('--tooltip-bg').trim() || 'rgba(6, 12, 24, 0.95)',
+    tooltipBorder: style.getPropertyValue('--tooltip-border').trim() || 'rgba(255,255,255,0.16)',
+    tooltipTitle: style.getPropertyValue('--text-primary').trim() || '#e7efff',
+    tooltipText: style.getPropertyValue('--text-subtle').trim() || '#c8d6ff',
+  };
+};
+
+const renderDomainTooltip = (valueLabel: string, palette: ChartPalette) => ({ active, payload }: { active?: boolean; payload?: Array<{ value?: number; payload?: { domain?: string } }> }) => {
   if (!active || !payload || payload.length === 0) return null;
   const point = payload[0];
   const domain = point?.payload?.domain?.trim() || '(unknown domain)';
   return (
     <div
       style={{
-        background: 'rgba(6, 12, 24, 0.95)',
-        border: '1px solid rgba(255,255,255,0.16)',
+        background: palette.tooltipBg,
+        border: `1px solid ${palette.tooltipBorder}`,
         borderRadius: '0.75rem',
         padding: '0.6rem 0.75rem',
       }}
     >
-      <p style={{ margin: '0 0 0.3rem', color: '#e7efff', fontWeight: 600 }}>Domain: {domain}</p>
-      <p style={{ margin: 0, color: '#c8d6ff' }}>
+      <p style={{ margin: '0 0 0.3rem', color: palette.tooltipTitle, fontWeight: 600 }}>Domain: {domain}</p>
+      <p style={{ margin: 0, color: palette.tooltipText }}>
         {valueLabel}: {formatCompact(Number(point?.value ?? 0))}
       </p>
     </div>
@@ -82,6 +127,7 @@ const providerHealthChipClass = (provider: OpsProviderStatus) => {
 };
 
 export const DashboardPage = () => {
+  const { resolvedTheme } = useTheme();
   const [range, setRange] = useState('1h');
   const [topN, setTopN] = useState(20);
   const [refreshIntervalMs, setRefreshIntervalMs] = useState<number>(() => {
@@ -100,6 +146,7 @@ export const DashboardPage = () => {
 
   const overview = dashboard.data?.overview;
   const coverage = dashboard.data?.coverage;
+  const chartPalette = useMemo(() => readChartPalette(), [resolvedTheme]);
   const hourlyChart = useMemo(
     () =>
       (dashboard.data?.hourly_usage ?? []).map((entry) => ({
@@ -208,7 +255,7 @@ export const DashboardPage = () => {
 
       {dashboard.error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Failed to load dashboard analytics: {dashboard.error}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load dashboard analytics: {dashboard.error}</p>
         </div>
       ) : null}
 
@@ -223,10 +270,10 @@ export const DashboardPage = () => {
           <div className="dashboard-hourly-chart">
             <ResponsiveContainer>
               <ComposedChart data={hourlyChart} margin={{ top: 8, right: 0, bottom: 4, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                <XAxis dataKey="label" stroke="rgba(255,255,255,0.72)" axisLine={false} tickLine={false} />
-                <YAxis yAxisId="req" stroke="rgba(255,255,255,0.72)" axisLine={false} tickLine={false} />
-                <YAxis yAxisId="bw" orientation="right" stroke="rgba(255,255,255,0.72)" axisLine={false} tickLine={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartPalette.grid} />
+                <XAxis dataKey="label" stroke={chartPalette.axis} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="req" stroke={chartPalette.axis} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="bw" orientation="right" stroke={chartPalette.axis} axisLine={false} tickLine={false} />
                 <Tooltip
                   formatter={(value, name) => {
                     if (name === 'Bandwidth (MiB)') {
@@ -236,15 +283,15 @@ export const DashboardPage = () => {
                   }}
                 />
                 <Legend />
-                <Line name="Requests" yAxisId="req" type="monotone" dataKey="requests" stroke="#7dd3fc" dot={false} />
-                <Line name="Blocked" yAxisId="req" type="monotone" dataKey="blocked" stroke="#f87171" dot={false} />
+                <Line name="Requests" yAxisId="req" type="monotone" dataKey="requests" stroke={chartPalette.requests} dot={false} />
+                <Line name="Blocked" yAxisId="req" type="monotone" dataKey="blocked" stroke={chartPalette.blocked} dot={false} />
                 <Area
                   name="Bandwidth (MiB)"
                   yAxisId="bw"
                   type="monotone"
                   dataKey="bandwidthMiB"
-                  stroke="#34d399"
-                  fill="#34d39933"
+                  stroke={chartPalette.bandwidthStroke}
+                  fill={chartPalette.bandwidthFill}
                 />
               </ComposedChart>
             </ResponsiveContainer>
@@ -259,14 +306,14 @@ export const DashboardPage = () => {
 
       <div className="kpi-grid" style={{ marginTop: '1.2rem' }}>
         <div className="kpi-card">
-          <p className="section-title" style={{ color: 'rgba(255,255,255,0.7)' }}>Unique Clients</p>
+          <p className="section-title" style={{ color: 'var(--text-subtle)' }}>Unique Clients</p>
           <h3 style={{ margin: '0 0 0.4rem', fontSize: '2rem' }}>
             {overview ? formatCompact(overview.unique_clients) : '—'}
           </h3>
           <span className="chip chip--green">by client.ip ({range})</span>
         </div>
         <div className="kpi-card">
-          <p className="section-title" style={{ color: 'rgba(255,255,255,0.7)' }}>Total Bandwidth</p>
+          <p className="section-title" style={{ color: 'var(--text-subtle)' }}>Total Bandwidth</p>
           <h3 style={{ margin: '0 0 0.4rem', fontSize: '2rem' }}>
             {overview ? formatBytes(overview.total_bandwidth_bytes) : '—'}
           </h3>
@@ -281,21 +328,21 @@ export const DashboardPage = () => {
           ) : null}
         </div>
         <div className="kpi-card">
-          <p className="section-title" style={{ color: 'rgba(255,255,255,0.7)' }}>Blocked Requests</p>
+          <p className="section-title" style={{ color: 'var(--text-subtle)' }}>Blocked Requests</p>
           <h3 style={{ margin: '0 0 0.4rem', fontSize: '2rem' }}>
             {overview ? formatCompact(overview.blocked_requests) : '—'}
           </h3>
           <span className="chip chip--red">{overview ? pct(overview.blocked_requests, overview.total_requests) : '0.0%'}</span>
         </div>
         <div className="kpi-card">
-          <p className="section-title" style={{ color: 'rgba(255,255,255,0.7)' }}>Total Requests</p>
+          <p className="section-title" style={{ color: 'var(--text-subtle)' }}>Total Requests</p>
           <h3 style={{ margin: '0 0 0.4rem', fontSize: '2rem' }}>
             {overview ? formatCompact(overview.total_requests) : '—'}
           </h3>
           <span className="chip chip--green">allow {overview ? formatCompact(overview.allow_requests) : '0'}</span>
         </div>
         <div className="kpi-card">
-          <p className="section-title" style={{ color: 'rgba(255,255,255,0.7)' }}>LLM Worker Status</p>
+          <p className="section-title" style={{ color: 'var(--text-subtle)' }}>LLM Worker Status</p>
           <h3 style={{ margin: '0 0 0.4rem', fontSize: '2rem' }}>
             {opsLoading ? '…' : formatCompact(ops.pendingCount)}
           </h3>
@@ -327,13 +374,13 @@ export const DashboardPage = () => {
                     {provider.healthHttpStatus !== undefined ? ` · HTTP ${provider.healthHttpStatus}` : ''}
                   </span>
                   {provider.healthDetail ? (
-                    <span style={{ color: '#ffcf7f', fontSize: '0.74rem' }}>{provider.healthDetail}</span>
+                    <span style={{ color: 'var(--status-warning)', fontSize: '0.74rem' }}>{provider.healthDetail}</span>
                   ) : null}
                 </div>
               ))}
             </div>
           ) : null}
-          {opsError ? <p style={{ color: '#ff9b9b', margin: '0.45rem 0 0', fontSize: '0.8rem' }}>{opsError}</p> : null}
+          {opsError ? <p style={{ color: 'var(--status-error)', margin: '0.45rem 0 0', fontSize: '0.8rem' }}>{opsError}</p> : null}
           {!opsLoading ? (
             <p style={{ margin: '0.45rem 0 0' }}>
               <span className={`chip chip--${ops.source === 'live' ? 'green' : 'amber'}`}>ops source: {ops.source}</span>
@@ -351,11 +398,11 @@ export const DashboardPage = () => {
           <div className="dashboard-domain-chart">
             <ResponsiveContainer>
               <BarChart data={domainChart} margin={{ left: 16, right: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartPalette.grid} />
                 <XAxis dataKey="domain" hide />
-                <YAxis stroke="rgba(255,255,255,0.8)" />
-                <Tooltip content={renderDomainTooltip('Hits')} />
-                <Bar dataKey="hits" fill="#60a5fa" />
+                <YAxis stroke={chartPalette.axis} />
+                <Tooltip content={renderDomainTooltip('Hits', chartPalette)} />
+                <Bar dataKey="hits" fill={chartPalette.requests} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -387,11 +434,11 @@ export const DashboardPage = () => {
           <div className="dashboard-domain-chart">
             <ResponsiveContainer>
               <BarChart data={blockedDomainChart} margin={{ left: 16, right: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartPalette.grid} />
                 <XAxis dataKey="domain" hide />
-                <YAxis stroke="rgba(255,255,255,0.8)" />
-                <Tooltip content={renderDomainTooltip('Blocked Hits')} />
-                <Bar dataKey="blocked" fill="#f87171" />
+                <YAxis stroke={chartPalette.axis} />
+                <Tooltip content={renderDomainTooltip('Blocked Hits', chartPalette)} />
+                <Bar dataKey="blocked" fill={chartPalette.blocked} />
               </BarChart>
             </ResponsiveContainer>
           </div>

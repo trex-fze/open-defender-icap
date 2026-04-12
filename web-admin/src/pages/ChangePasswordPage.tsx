@@ -59,16 +59,16 @@ export const ChangePasswordPage = () => {
         onSubmit={handleSubmit}
         style={{
           width: 'min(460px, 92vw)',
-          background: 'rgba(4, 10, 24, 0.75)',
+          background: 'var(--surface-panel)',
           borderRadius: '1.5rem',
           padding: '2rem',
-          border: '1px solid rgba(255,255,255,0.08)',
+          border: '1px solid var(--border-subtle)',
           boxShadow: '0 30px 80px rgba(0,0,0,0.45)',
         }}
       >
         <p className="section-title">Security checkpoint</p>
         <h2 style={{ marginTop: 0 }}>Change your password</h2>
-        <p style={{ color: '#8ca0cb' }}>
+        <p style={{ color: 'var(--muted)' }}>
           Your account requires a password change before continuing.
         </p>
         {error ? (

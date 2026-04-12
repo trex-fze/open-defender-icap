@@ -149,7 +149,7 @@ export const PoliciesPage = () => {
 
       {error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Failed to load live data: {error}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load live data: {error}</p>
           <p style={{ marginTop: '0.35rem', color: 'var(--muted)' }}>
             Showing cached mock data so you can keep iterating.
           </p>
@@ -158,18 +158,18 @@ export const PoliciesPage = () => {
 
       {mutationError ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Policy action failed: {mutationError}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Policy action failed: {mutationError}</p>
         </div>
       ) : null}
 
       {message ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
-          <p style={{ margin: 0, color: '#9ef7eb' }}>{message}</p>
+          <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
 
       {isMock ? (
-        <p className="section-title" style={{ color: '#fdd744', marginTop: '0.5rem' }}>
+        <p className="section-title" style={{ color: 'var(--citrus)', marginTop: '0.5rem' }}>
           Mock stream (Admin API offline)
         </p>
       ) : null}
@@ -229,8 +229,8 @@ export const PoliciesPage = () => {
                             style={{
                               padding: '0.3rem 0.65rem',
                               fontSize: '0.74rem',
-                              background: 'linear-gradient(120deg,#d6def6,#8ca0cb)',
-                              color: '#060b17',
+                              background: 'var(--button-secondary-bg)',
+                              color: 'var(--button-contrast-text)',
                             }}
                             disabled={busy || isMock || !canCallApi || policy.status === 'active'}
                             onClick={() => onDisable(policy.id, policy.name, policy.status)}
@@ -244,8 +244,8 @@ export const PoliciesPage = () => {
                             style={{
                               padding: '0.3rem 0.65rem',
                               fontSize: '0.74rem',
-                              background: 'linear-gradient(120deg,#ff9b9b,#fdd744)',
-                              color: '#060b17',
+                              background: 'var(--button-danger-bg)',
+                              color: 'var(--button-contrast-text)',
                             }}
                             disabled={busy || isMock || !canCallApi || policy.status === 'active'}
                             onClick={() => onDelete(policy.id, policy.name)}

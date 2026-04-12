@@ -99,17 +99,17 @@ export const ClassificationsPage = () => {
 
       {error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Failed to load classification list: {error}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load classification list: {error}</p>
         </div>
       ) : null}
       {actionError ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Classification action failed: {actionError}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Classification action failed: {actionError}</p>
         </div>
       ) : null}
       {message ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
-          <p style={{ margin: 0, color: '#9ef7eb' }}>{message}</p>
+          <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
 
@@ -184,7 +184,7 @@ export const ClassificationsPage = () => {
             </label>
           </div>
           {taxonomyError ? (
-            <p style={{ marginTop: '0.75rem', marginBottom: 0, color: '#ffcf7f' }}>
+            <p style={{ marginTop: '0.75rem', marginBottom: 0, color: 'var(--status-warning)' }}>
               Taxonomy unavailable: {taxonomyError}
             </p>
           ) : null}
@@ -194,7 +194,7 @@ export const ClassificationsPage = () => {
             </button>
             <button
               className="cta-button"
-              style={{ background: 'linear-gradient(120deg,#f8d5d5,#cd7c7c)', color: '#25090c' }}
+              style={{ background: 'var(--button-danger-strong-bg)', color: 'var(--button-contrast-text)' }}
               disabled={!canCallApi || busyKey === selectedRow.normalized_key}
               onClick={() => removeClassification(selectedRow.normalized_key)}
             >
@@ -202,7 +202,7 @@ export const ClassificationsPage = () => {
             </button>
             <button
               className="cta-button"
-              style={{ background: 'linear-gradient(120deg,#d6def6,#8ca0cb)', color: '#060b17' }}
+              style={{ background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
               onClick={() => setSelectedKey(undefined)}
             >
               Cancel
@@ -236,7 +236,7 @@ export const ClassificationsPage = () => {
               <tbody>
                 {data.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', color: '#7f8fb2' }}>
+                    <td colSpan={8} style={{ textAlign: 'center', color: 'var(--muted)' }}>
                       No matching sites.
                     </td>
                   </tr>

@@ -186,7 +186,7 @@ export const PolicyDetailPage = () => {
   if (!policy) {
     return (
       <div className="glass-panel">
-        <p style={{ color: '#ff9b9b', marginTop: 0 }}>Policy not found.</p>
+        <p style={{ color: 'var(--status-error)', marginTop: 0 }}>Policy not found.</p>
         {error ? <p style={{ color: 'var(--muted)' }}>{error}</p> : null}
         <button className="cta-button" onClick={() => navigate('/policies')}>
           Back to policies
@@ -214,7 +214,7 @@ export const PolicyDetailPage = () => {
           {canPublish ? (
             <button
               className="cta-button"
-              style={{ background: 'linear-gradient(120deg,#ff9b9b,#fdd744)', color: '#060b17' }}
+              style={{ background: 'var(--button-danger-bg)', color: 'var(--button-contrast-text)' }}
               onClick={handleActivate}
               disabled={busy || isMock || !canCallApi}
             >
@@ -224,7 +224,7 @@ export const PolicyDetailPage = () => {
           {canEdit ? (
             <button
               className="cta-button"
-              style={{ background: 'linear-gradient(120deg,#d6def6,#8ca0cb)', color: '#060b17' }}
+              style={{ background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
               onClick={handleDisable}
               disabled={busy || isMock || !canCallApi || policy.status === 'active'}
             >
@@ -234,7 +234,7 @@ export const PolicyDetailPage = () => {
           {canPublish ? (
             <button
               className="cta-button"
-              style={{ background: 'linear-gradient(120deg,#f89b9b,#f26969)', color: '#060b17' }}
+              style={{ background: 'var(--button-danger-strong-bg)', color: 'var(--button-contrast-text)' }}
               onClick={handleDelete}
               disabled={busy || isMock || !canCallApi || policy.status === 'active'}
             >
@@ -246,19 +246,19 @@ export const PolicyDetailPage = () => {
 
       {error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Unable to reach Admin API: {error}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Unable to reach Admin API: {error}</p>
         </div>
       ) : null}
 
       {mutationError ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Policy action failed: {mutationError}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Policy action failed: {mutationError}</p>
         </div>
       ) : null}
 
       {message ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
-          <p style={{ margin: 0, color: '#9ef7eb' }}>{message}</p>
+          <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
 
@@ -343,7 +343,7 @@ export const PolicyDetailPage = () => {
 
       <div className="glass-panel">
         <p className="section-title">Version History</p>
-        {versionsError ? <p style={{ color: '#ff9b9b' }}>Failed to load version history: {versionsError}</p> : null}
+        {versionsError ? <p style={{ color: 'var(--status-error)' }}>Failed to load version history: {versionsError}</p> : null}
         <div className="table-wrapper" role="region" tabIndex={0} aria-label="Policy version history table">
           <table>
             <thead>

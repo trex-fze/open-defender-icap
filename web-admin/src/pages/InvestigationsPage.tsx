@@ -34,13 +34,13 @@ export const InvestigationsPage = () => {
 
       {error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>Unable to reach Admin API: {error}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>Unable to reach Admin API: {error}</p>
           <p style={{ color: 'var(--muted)' }}>Showing mock data while we retry the live feed.</p>
         </div>
       ) : null}
 
       {isMock ? (
-        <p className="section-title" style={{ color: '#fdd744', marginTop: '0.5rem' }}>
+        <p className="section-title" style={{ color: 'var(--citrus)', marginTop: '0.5rem' }}>
           Mock stream (Admin API offline)
         </p>
       ) : null}
@@ -84,7 +84,7 @@ export const InvestigationsPage = () => {
                     <td>{item.lastSeen}</td>
                     <td>
                       {item.tags.length === 0 ? (
-                        <span className="chip" style={{ color: '#94a6cc' }}>
+                        <span className="chip" style={{ color: 'var(--muted)' }}>
                           Unassigned
                         </span>
                       ) : (

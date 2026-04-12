@@ -45,7 +45,7 @@ export const PolicyCreatePage = () => {
 
       {!canCallApi ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 225, 127, 0.45)' }}>
-          <p style={{ margin: 0, color: '#ffe17f' }}>
+          <p style={{ margin: 0, color: 'var(--status-warning)' }}>
             Admin API is not configured for live mutations. Set `VITE_ADMIN_API_URL` and sign in with a valid token.
           </p>
         </div>
@@ -93,9 +93,9 @@ export const PolicyCreatePage = () => {
         </div>
 
         {error ? (
-          <p style={{ color: '#ff9b9b', marginBottom: 0 }}>Failed to create draft: {error}</p>
+          <p style={{ color: 'var(--status-error)', marginBottom: 0 }}>Failed to create draft: {error}</p>
         ) : null}
-        {success ? <p style={{ color: '#9ef7eb', marginBottom: 0 }}>{success}</p> : null}
+        {success ? <p style={{ color: 'var(--status-success)', marginBottom: 0 }}>{success}</p> : null}
 
         <div style={{ marginTop: '1.2rem', display: 'flex', gap: '0.7rem', flexWrap: 'wrap' }}>
           <button className="cta-button" type="submit" disabled={busy || !canCallApi || !name.trim()}>
@@ -104,7 +104,7 @@ export const PolicyCreatePage = () => {
           <button
             className="cta-button"
             type="button"
-            style={{ background: 'linear-gradient(120deg,#d6def6,#8ca0cb)', color: '#060b17' }}
+            style={{ background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
             onClick={() => navigate('/policies')}
           >
             Cancel

@@ -586,7 +586,7 @@ const IamUsersPanel = () => {
                     </div>
                   </td>
                   <td>
-                    <div className="chip-row">
+                    <div className="chip-row iam-roles-row">
                       {entry.roles.map((role) => (
                         <span key={role} className="chip">
                           {role}
@@ -1116,7 +1116,7 @@ const IamGroupsPanel = () => {
                     </div>
                   </td>
                   <td>
-                    <div className="chip-row">
+                    <div className="chip-row iam-roles-row">
                       {entry.roles.map((role) => (
                         <span key={role} className="chip">
                           {role}
@@ -1428,7 +1428,7 @@ const IamServiceAccountsPanel = () => {
                     <div className="muted">{entry.account.description || 'No description'}</div>
                   </td>
                   <td>
-                    <div className="chip-row">
+                    <div className="chip-row iam-roles-row">
                       {entry.roles.map((role) => (
                         <span key={role} className="chip subtle">
                           {role}

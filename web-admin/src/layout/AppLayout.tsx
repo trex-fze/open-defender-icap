@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { ReactNode, useEffect, useState } from 'react';
 import { Role, useAuth } from '../context/AuthContext';
+import { ThemePreference, useTheme } from '../context/ThemeContext';
 
 const MOBILE_BREAKPOINT = 960;
 const SIDEBAR_COLLAPSE_KEY = 'od.sidebar.collapsed';
@@ -47,6 +48,7 @@ const readCollapsedPreference = () => {
 
 const AppLayout = () => {
   const { user, hasAnyRole, logout } = useAuth();
+  const { preference, setPreference } = useTheme();
   const location = useLocation();
   const [isDesktopCollapsed, setIsDesktopCollapsed] = useState<boolean>(readCollapsedPreference);
   const [isMobile, setIsMobile] = useState<boolean>(isMobileWidth);
@@ -104,6 +106,13 @@ const AppLayout = () => {
   const desktopToggleLabel = isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
   const userInitial = (user?.name?.trim()?.charAt(0) || 'G').toUpperCase();
 
+  const cycleTheme = () => {
+    const order: ThemePreference[] = ['system', 'dark', 'light'];
+    const idx = order.indexOf(preference);
+    const next = order[(idx + 1) % order.length];
+    setPreference(next);
+  };
+
   return (
     <div
       className={`app-shell${isSidebarCollapsed ? ' sidebar-collapsed' : ''}${isMobile ? ' sidebar-mobile' : ''}${isMobileOpen ? ' sidebar-open-mobile' : ''}`}
@@ -157,6 +166,15 @@ const AppLayout = () => {
         <UserBadge>
           {isSidebarCollapsed ? (
             <div className="user-collapsed-controls">
+              <button
+                type="button"
+                className="theme-toggle-compact"
+                aria-label={`Theme: ${preference}. Change theme`}
+                title={`Theme: ${preference}. Click to change.`}
+                onClick={cycleTheme}
+              >
+                {preference === 'system' ? 'TH' : preference === 'dark' ? 'DK' : 'LT'}
+              </button>
               <div className="user-chip" title={user?.name ?? 'Guest'}>{userInitial}</div>
               {user ? (
                 <button type="button" className="sidebar-logout sidebar-logout-compact" aria-label="Logout" title="Logout" onClick={logout}>
@@ -168,8 +186,21 @@ const AppLayout = () => {
             <>
               <div className="user-meta">
                 <strong>{user?.name ?? 'Guest'}</strong>
-                <p style={{ margin: 0, color: '#7f8fb2', fontSize: '0.85rem' }}>{user?.email ?? 'not signed in'}</p>
+                <p style={{ margin: 0, color: 'var(--muted)', fontSize: '0.85rem' }}>{user?.email ?? 'not signed in'}</p>
               </div>
+              <label className="theme-control" htmlFor="theme-preference-select">
+                <span>Theme</span>
+                <select
+                  id="theme-preference-select"
+                  className="theme-select"
+                  value={preference}
+                  onChange={(event) => setPreference(event.target.value as ThemePreference)}
+                >
+                  <option value="system">System</option>
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </label>
               {user ? (
                 <button type="button" className="sidebar-logout" onClick={logout}>Logout</button>
               ) : null}

@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/brand/favicon.png" />
+    <script>
+      (function () {
+        var key = 'od.theme.preference';
+        var stored = localStorage.getItem(key);
+        var pref = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+        var resolved = pref === 'system'
+          ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : pref;
+        document.documentElement.setAttribute('data-theme', resolved);
+        document.documentElement.style.colorScheme = resolved;
+      })();
+    </script>
     <title>Open Defender ICAP Admin</title>
   </head>
   <body>

@@ -75,7 +75,7 @@ export const DiagnosticsPageContentPage = () => {
 
       {error ? (
         <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
-          <p style={{ margin: 0, color: '#ff9b9b' }}>{error}</p>
+          <p style={{ margin: 0, color: 'var(--status-error)' }}>{error}</p>
         </div>
       ) : null}
 

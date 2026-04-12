@@ -99,10 +99,10 @@ export const LoginPage = () => {
         onSubmit={handleSubmit}
         style={{
           width: 'min(420px, 90vw)',
-          background: 'rgba(4, 10, 24, 0.75)',
+          background: 'var(--surface-panel)',
           borderRadius: '1.5rem',
           padding: '2rem',
-          border: '1px solid rgba(255,255,255,0.08)',
+          border: '1px solid var(--border-subtle)',
           boxShadow: '0 30px 80px rgba(0,0,0,0.45)',
         }}
       >
@@ -111,30 +111,30 @@ export const LoginPage = () => {
         </div>
         <p className="section-title">Local Sign-in</p>
         <h2 style={{ marginTop: 0 }}>Welcome back</h2>
-        <p style={{ color: '#8ca0cb' }}>Sign in using your local username or email and password.</p>
+        <p style={{ color: 'var(--muted)' }}>Sign in using your local username or email and password.</p>
         {authNotice ? (
           <div
             style={{
-              border: '1px solid rgba(255, 122, 122, 0.5)',
-              borderRadius: '0.75rem',
-              padding: '0.65rem 0.8rem',
-              color: '#ff9b9b',
-              marginBottom: '0.9rem',
-            }}
-          >
+                border: '1px solid rgba(255, 122, 122, 0.5)',
+                borderRadius: '0.75rem',
+                padding: '0.65rem 0.8rem',
+                color: 'var(--status-error)',
+                marginBottom: '0.9rem',
+              }}
+            >
             <p style={{ margin: 0 }}>{authNotice}</p>
           </div>
         ) : null}
         {error ? (
           <div
             style={{
-              border: '1px solid rgba(255, 122, 122, 0.5)',
-              borderRadius: '0.75rem',
-              padding: '0.65rem 0.8rem',
-              color: '#ff9b9b',
-              marginBottom: '0.9rem',
-            }}
-          >
+                border: '1px solid rgba(255, 122, 122, 0.5)',
+                borderRadius: '0.75rem',
+                padding: '0.65rem 0.8rem',
+                color: 'var(--status-error)',
+                marginBottom: '0.9rem',
+              }}
+            >
             <p style={{ margin: 0 }}>{error}</p>
           </div>
         ) : null}
@@ -165,7 +165,7 @@ export const LoginPage = () => {
           <button
             type="button"
             className="cta-button"
-            style={{ width: '100%', marginTop: '0.6rem', background: 'linear-gradient(120deg,#d6def6,#8ca0cb)', color: '#060b17' }}
+            style={{ width: '100%', marginTop: '0.6rem', background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
             onClick={clearAuthNotice}
           >
             Dismiss notice
