@@ -155,6 +155,10 @@ a {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
   transition: transform 0.2s ease, width 0.2s ease, padding 0.2s ease;
 }
 
@@ -196,6 +200,8 @@ a {
   flex-direction: column;
   gap: 0.4rem;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .nav-link {
