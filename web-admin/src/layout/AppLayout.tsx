@@ -131,10 +131,6 @@ const AppLayout = () => {
         </button>
         <div className="sidebar-brand-row">
           <img className="sidebar-brand-logo" src="/brand/logo.png" alt="Open Defender ICAP" />
-          <div className="sidebar-brand-text">
-            <h1>Open Defender - ICAP</h1>
-            <p className="sidebar-subtitle">AI-enhanced Web Security Platform</p>
-          </div>
         </div>
         <nav className="sidebar-nav" aria-label="Primary">
           {navItems
