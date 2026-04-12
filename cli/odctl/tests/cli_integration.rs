@@ -399,3 +399,183 @@ async fn auth_login_device_flow_stores_session() {
         env::remove_var("HOME");
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn classification_manual_classify_hits_admin_api() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/api/v1/classifications/domain%3Aexample.com/manual-classify",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "normalized_key": "domain:example.com",
+            "primary_category": "news-media",
+            "subcategory": "general-news",
+            "risk_level": "low",
+            "recommended_action": "Allow",
+            "confidence": 0.91,
+            "updated_at": "2026-04-12T00:00:00Z"
+        })))
+        .mount(&server)
+        .await;
+
+    Command::cargo_bin("odctl")
+        .unwrap()
+        .arg("--base-url")
+        .arg(server.uri())
+        .arg("--token")
+        .arg("static")
+        .args([
+            "classification",
+            "manual-classify",
+            "domain:example.com",
+            "--category",
+            "news-media",
+            "--subcategory",
+            "general-news",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("domain:example.com"))
+        .stdout(predicate::str::contains("Allow"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn classification_metadata_classify_hits_admin_api() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/api/v1/classifications/domain%3Aexample.com/metadata-classify",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "normalized_key": "domain:example.com",
+            "status": "queued_manual_metadata",
+            "provider_name": "openai-fallback"
+        })))
+        .mount(&server)
+        .await;
+
+    Command::cargo_bin("odctl")
+        .unwrap()
+        .arg("--base-url")
+        .arg(server.uri())
+        .arg("--token")
+        .arg("static")
+        .args([
+            "classification",
+            "metadata-classify",
+            "domain:example.com",
+            "--provider",
+            "openai-fallback",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("queued_manual_metadata"))
+        .stdout(predicate::str::contains("openai-fallback"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn taxonomy_show_hits_admin_api() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/taxonomy"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "version": "v1",
+            "updated_at": "2026-04-12T00:00:00Z",
+            "updated_by": "tester",
+            "categories": [
+                {
+                    "id": "news-media",
+                    "name": "News Media",
+                    "enabled": true,
+                    "locked": false,
+                    "subcategories": [
+                        {"id": "general-news", "name": "General", "enabled": true, "locked": false}
+                    ]
+                }
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    Command::cargo_bin("odctl")
+        .unwrap()
+        .arg("--base-url")
+        .arg(server.uri())
+        .arg("--token")
+        .arg("static")
+        .args(["taxonomy", "show"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("v1"))
+        .stdout(predicate::str::contains("news-media"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn override_export_hits_admin_api() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/overrides/export"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("example.com\n*.example.org\n"))
+        .mount(&server)
+        .await;
+
+    let temp = TempDir::new().unwrap();
+    let output = temp.path().join("allow.txt");
+
+    Command::cargo_bin("odctl")
+        .unwrap()
+        .arg("--base-url")
+        .arg(server.uri())
+        .arg("--token")
+        .arg("static")
+        .args([
+            "override",
+            "export",
+            "--action",
+            "allow",
+            "--file",
+            output.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Exported"));
+
+    let content = fs::read_to_string(output).unwrap();
+    assert!(content.contains("example.com"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn iam_audit_list_hits_admin_api() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/iam/audit"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [
+                {
+                    "id": "95d7c496-bec7-4b25-9d1a-339eb7f7f019",
+                    "actor": "admin@example.com",
+                    "action": "iam.user.create",
+                    "target_type": "user",
+                    "target_id": "f6f117bb-98cf-4ec8-8d95-590f96b24556",
+                    "payload": {},
+                    "created_at": "2026-04-12T00:00:00Z"
+                }
+            ],
+            "meta": {"limit": 100, "has_more": false, "next_cursor": null, "prev_cursor": null}
+        })))
+        .mount(&server)
+        .await;
+
+    Command::cargo_bin("odctl")
+        .unwrap()
+        .arg("--base-url")
+        .arg(server.uri())
+        .arg("--token")
+        .arg("static")
+        .args(["iam", "audit", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("iam.user.create"))
+        .stdout(predicate::str::contains("admin@example.com"));
+}

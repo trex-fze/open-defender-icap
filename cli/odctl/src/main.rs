@@ -72,6 +72,8 @@ enum Commands {
     #[clap(subcommand)]
     Page(PageCmd),
     #[clap(subcommand)]
+    Taxonomy(TaxonomyCmd),
+    #[clap(subcommand)]
     Classification(ClassificationCmd),
     #[clap(subcommand)]
     Report(ReportCmd),
@@ -213,6 +215,11 @@ enum PolicyCmd {
         #[clap(long)]
         file: PathBuf,
     },
+    Delete {
+        id: String,
+        #[clap(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -250,6 +257,24 @@ enum OverrideCmd {
     },
     Delete {
         id: String,
+    },
+    Export {
+        #[clap(long)]
+        action: String,
+        #[clap(long)]
+        file: PathBuf,
+    },
+    Import {
+        #[clap(long)]
+        action: String,
+        #[clap(long)]
+        file: PathBuf,
+        #[clap(long, default_value = "merge")]
+        mode: String,
+        #[clap(long)]
+        dry_run: bool,
+        #[clap(long)]
+        yes: bool,
     },
 }
 
@@ -295,7 +320,38 @@ enum PageCmd {
 }
 
 #[derive(Subcommand, Debug)]
+enum TaxonomyCmd {
+    Show,
+    #[clap(subcommand)]
+    Activation(TaxonomyActivationCmd),
+}
+
+#[derive(Subcommand, Debug)]
+enum TaxonomyActivationCmd {
+    Export {
+        #[clap(long)]
+        file: PathBuf,
+    },
+    Apply {
+        #[clap(long)]
+        file: PathBuf,
+        #[clap(long)]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum ClassificationCmd {
+    List {
+        #[clap(long, default_value = "all")]
+        state: String,
+        #[clap(long)]
+        query: Option<String>,
+        #[clap(long, default_value_t = 50)]
+        limit: u32,
+        #[clap(long)]
+        cursor: Option<String>,
+    },
     Pending {
         #[clap(long, default_value_t = 50)]
         limit: u32,
@@ -318,6 +374,43 @@ enum ClassificationCmd {
         confidence: f32,
         #[clap(long)]
         reason: Option<String>,
+    },
+    Update {
+        key: String,
+        #[clap(long, help = "Primary category label")]
+        category: String,
+        #[clap(long, help = "Subcategory label")]
+        subcategory: String,
+        #[clap(long)]
+        reason: Option<String>,
+    },
+    Delete {
+        key: String,
+        #[clap(long)]
+        yes: bool,
+    },
+    ManualClassify {
+        key: String,
+        #[clap(long, help = "Primary category label")]
+        category: String,
+        #[clap(long, help = "Subcategory label")]
+        subcategory: String,
+        #[clap(long)]
+        reason: Option<String>,
+    },
+    MetadataClassify {
+        key: String,
+        #[clap(long)]
+        provider: Option<String>,
+        #[clap(long)]
+        reason: Option<String>,
+    },
+    PendingDelete {
+        key: String,
+    },
+    PendingClear {
+        #[clap(long)]
+        yes: bool,
     },
     Export {
         #[clap(long)]
@@ -371,6 +464,14 @@ enum ReportCmd {
         #[clap(long, default_value = "24h")]
         range: String,
     },
+    Dashboard {
+        #[clap(long, default_value = "24h")]
+        range: String,
+        #[clap(long, default_value_t = 10)]
+        top: u32,
+        #[clap(long)]
+        bucket: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -403,6 +504,8 @@ enum IamCmd {
     Roles(IamRolesCmd),
     #[clap(subcommand)]
     ServiceAccounts(IamServiceAccountCmd),
+    #[clap(subcommand)]
+    Audit(IamAuditCmd),
     Whoami,
     RecoverAdminPassword {
         #[clap(long, default_value = "admin")]
@@ -473,6 +576,45 @@ enum IamUsersCmd {
     RevokeRole {
         id: String,
         role: String,
+    },
+    SetPassword {
+        id: String,
+        #[clap(long)]
+        password: String,
+        #[clap(long, default_value_t = true)]
+        must_change_password: bool,
+    },
+    #[clap(subcommand)]
+    Tokens(IamUserTokenCmd),
+}
+
+#[derive(Subcommand, Debug)]
+enum IamUserTokenCmd {
+    List {
+        user_id: String,
+    },
+    Create {
+        user_id: String,
+        #[clap(long)]
+        name: String,
+        #[clap(long)]
+        expires_at: Option<String>,
+    },
+    Revoke {
+        user_id: String,
+        token_id: String,
+        #[clap(long)]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum IamAuditCmd {
+    List {
+        #[clap(long, default_value_t = 100)]
+        limit: u32,
+        #[clap(long)]
+        cursor: Option<String>,
     },
 }
 
@@ -798,6 +940,14 @@ async fn main() -> Result<()> {
         Commands::Migrate(_) => unreachable!(),
         Commands::Page(cmd) => {
             handle_page(
+                cmd,
+                client.as_ref().expect("api client must exist"),
+                cli.json,
+            )
+            .await?
+        }
+        Commands::Taxonomy(cmd) => {
+            handle_taxonomy(
                 cmd,
                 client.as_ref().expect("api client must exist"),
                 cli.json,
@@ -1588,6 +1738,17 @@ async fn handle_policy(cmd: &PolicyCmd, client: &ApiClient, json: bool) -> Resul
                 println!("Validation errors: {}", response.errors.join(", "));
             }
         }
+        PolicyCmd::Delete { id, yes } => {
+            if !yes {
+                return Err(anyhow!(
+                    "policy delete is destructive; rerun with --yes to confirm"
+                ));
+            }
+            client.delete(&format!("/api/v1/policies/{id}")).await?;
+            if !json {
+                println!("Deleted policy {id}");
+            }
+        }
     }
     Ok(())
 }
@@ -1672,6 +1833,84 @@ async fn handle_override(cmd: &OverrideCmd, client: &ApiClient, json: bool) -> R
             client.delete(&format!("/api/v1/overrides/{id}")).await?;
             if !json {
                 println!("Deleted override {id}");
+            }
+        }
+        OverrideCmd::Export { action, file } => {
+            let action = normalize_override_exchange_action(action)?;
+            let content = client
+                .get_text("/api/v1/overrides/export", &[("action", action.as_str())])
+                .await?;
+            fs::write(file, &content)
+                .with_context(|| format!("failed writing export to {}", file.display()))?;
+            if !json {
+                let line_count = if content.trim().is_empty() {
+                    0
+                } else {
+                    content.lines().count()
+                };
+                println!(
+                    "Exported {} {} override entries to {}",
+                    line_count,
+                    action,
+                    file.display()
+                );
+            }
+        }
+        OverrideCmd::Import {
+            action,
+            file,
+            mode,
+            dry_run,
+            yes,
+        } => {
+            let action = normalize_override_exchange_action(action)?;
+            let mode = normalize_import_mode(mode)?;
+            if mode == "replace" && !dry_run && !yes {
+                return Err(anyhow!(
+                    "replace import is destructive; pass --yes to confirm or use --dry-run"
+                ));
+            }
+            let content = fs::read_to_string(file)
+                .with_context(|| format!("failed reading {}", file.display()))?;
+            let response: OverrideImportResponse = client
+                .post(
+                    "/api/v1/overrides/import",
+                    &json!({
+                        "action": action,
+                        "mode": mode,
+                        "dry_run": *dry_run,
+                        "content": content,
+                    }),
+                )
+                .await?;
+            if json {
+                print_json(&response)?;
+            } else {
+                println!(
+                    "Override import {} for {}: imported {}, updated {}, deleted {}, invalid {}",
+                    if response.dry_run {
+                        "preview"
+                    } else {
+                        "applied"
+                    },
+                    response.action,
+                    response.imported,
+                    response.updated,
+                    response.deleted,
+                    response.invalid
+                );
+                if !response.invalid_lines.is_empty() {
+                    println!("Invalid lines:");
+                    for line in response.invalid_lines.iter().take(10) {
+                        println!(
+                            "  line {} -> {} ({})",
+                            line.line_number, line.value, line.error
+                        );
+                    }
+                    if response.invalid_lines.len() > 10 {
+                        println!("  ... and {} more", response.invalid_lines.len() - 10);
+                    }
+                }
             }
         }
     }
@@ -1893,12 +2132,169 @@ async fn handle_page(cmd: &PageCmd, client: &ApiClient, json: bool) -> Result<()
     Ok(())
 }
 
+async fn handle_taxonomy(cmd: &TaxonomyCmd, client: &ApiClient, json: bool) -> Result<()> {
+    match cmd {
+        TaxonomyCmd::Show => {
+            let payload: TaxonomyResponse = client.get("/api/v1/taxonomy", &[]).await?;
+            if json {
+                print_json(&payload)?;
+            } else {
+                println!("Version    : {}", payload.version);
+                println!("Updated At : {}", payload.updated_at);
+                println!(
+                    "Updated By : {}",
+                    payload
+                        .updated_by
+                        .clone()
+                        .unwrap_or_else(|| "-".to_string())
+                );
+                let rows = payload
+                    .categories
+                    .iter()
+                    .map(|category| {
+                        vec![
+                            category.id.clone(),
+                            category.name.clone(),
+                            category.enabled.to_string(),
+                            category.locked.to_string(),
+                            category.subcategories.len().to_string(),
+                        ]
+                    })
+                    .collect();
+                print_table(
+                    &["Category ID", "Name", "Enabled", "Locked", "Subcategories"],
+                    rows,
+                );
+            }
+        }
+        TaxonomyCmd::Activation(action) => match action {
+            TaxonomyActivationCmd::Export { file } => {
+                let payload: TaxonomyResponse = client.get("/api/v1/taxonomy", &[]).await?;
+                let export = TaxonomyActivationUpdateRequest {
+                    version: payload.version,
+                    categories: payload
+                        .categories
+                        .into_iter()
+                        .map(|category| TaxonomyActivationCategoryUpdate {
+                            id: category.id,
+                            enabled: category.enabled,
+                            subcategories: category
+                                .subcategories
+                                .into_iter()
+                                .map(|sub| TaxonomyActivationSubcategoryUpdate {
+                                    id: sub.id,
+                                    enabled: sub.enabled,
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                };
+                fs::write(file, serde_json::to_string_pretty(&export)?)
+                    .with_context(|| format!("failed writing {}", file.display()))?;
+                if !json {
+                    println!("Saved taxonomy activation payload to {}", file.display());
+                }
+            }
+            TaxonomyActivationCmd::Apply { file, yes } => {
+                if !yes {
+                    return Err(anyhow!(
+                        "taxonomy activation apply is mutable; rerun with --yes to confirm"
+                    ));
+                }
+                let content = fs::read_to_string(file)
+                    .with_context(|| format!("failed reading {}", file.display()))?;
+                let payload: TaxonomyActivationUpdateRequest = serde_json::from_str(&content)
+                    .with_context(|| {
+                        format!("invalid taxonomy activation payload in {}", file.display())
+                    })?;
+                let response: TaxonomyActivationSaveResponse =
+                    client.put("/api/v1/taxonomy/activation", &payload).await?;
+                if json {
+                    print_json(&response)?;
+                } else {
+                    println!("Saved taxonomy activation profile {}", response.version);
+                    println!("Updated At : {}", response.updated_at);
+                    println!(
+                        "Updated By : {}",
+                        response.updated_by.unwrap_or_else(|| "-".to_string())
+                    );
+                }
+            }
+        },
+    }
+    Ok(())
+}
+
 async fn handle_classification(
     cmd: &ClassificationCmd,
     client: &ApiClient,
     json: bool,
 ) -> Result<()> {
     match cmd {
+        ClassificationCmd::List {
+            state,
+            query,
+            limit,
+            cursor,
+        } => {
+            let normalized_state = normalize_classification_state(state)?;
+            let mut params = vec![
+                ("state".to_string(), normalized_state),
+                ("limit".to_string(), limit.to_string()),
+            ];
+            if let Some(q) = query
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                params.push(("q".to_string(), q.to_string()));
+            }
+            if let Some(value) = cursor {
+                params.push(("cursor".to_string(), value.clone()));
+            }
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let response: CursorPaged<ClassificationRecord> =
+                client.get("/api/v1/classifications", &refs).await?;
+            if json {
+                print_json(&response)?;
+            } else if response.data.is_empty() {
+                println!("No classification rows matched your filters");
+            } else {
+                let rows = response
+                    .data
+                    .iter()
+                    .map(|row| {
+                        vec![
+                            row.normalized_key.clone(),
+                            row.state.clone(),
+                            row.primary_category
+                                .clone()
+                                .unwrap_or_else(|| "-".to_string()),
+                            row.subcategory.clone().unwrap_or_else(|| "-".to_string()),
+                            row.effective_action
+                                .clone()
+                                .unwrap_or_else(|| "-".to_string()),
+                            row.updated_at.clone(),
+                        ]
+                    })
+                    .collect();
+                print_table(
+                    &[
+                        "Key",
+                        "State",
+                        "Category",
+                        "Subcategory",
+                        "Effective Action",
+                        "Updated",
+                    ],
+                    rows,
+                );
+                print_next_cursor(response.meta.next_cursor.as_deref());
+            }
+        }
         ClassificationCmd::Pending {
             limit,
             cursor,
@@ -1938,6 +2334,29 @@ async fn handle_classification(
                 print_next_cursor(records.meta.next_cursor.as_deref());
             }
         }
+        ClassificationCmd::PendingDelete { key } => {
+            client
+                .delete(&format!("/api/v1/classifications/{}/pending", encode(key)))
+                .await?;
+            if !json {
+                println!("Deleted pending classification row for {key}");
+            }
+        }
+        ClassificationCmd::PendingClear { yes } => {
+            if !yes {
+                return Err(anyhow!(
+                    "pending-clear is destructive; rerun with --yes to confirm"
+                ));
+            }
+            let response: ClearAllPendingResponse = client
+                .delete_json("/api/v1/classifications/pending")
+                .await?;
+            if json {
+                print_json(&response)?;
+            } else {
+                println!("Deleted {} pending classification rows", response.deleted);
+            }
+        }
         ClassificationCmd::Unblock {
             key,
             action,
@@ -1973,6 +2392,116 @@ async fn handle_classification(
                 println!("Risk       : {}", record.risk_level);
                 println!("Confidence : {:.2}", record.confidence);
                 println!("Updated At : {}", record.updated_at);
+            }
+        }
+        ClassificationCmd::ManualClassify {
+            key,
+            category,
+            subcategory,
+            reason,
+        } => {
+            let body = json!({
+                "primary_category": category,
+                "subcategory": subcategory,
+                "reason": reason,
+            });
+            let record: ManualClassificationResponse = client
+                .post(
+                    &format!("/api/v1/classifications/{}/manual-classify", encode(key)),
+                    &body,
+                )
+                .await?;
+            if json {
+                print_json(&record)?;
+            } else {
+                println!("Updated classification for {}", record.normalized_key);
+                println!("Action     : {}", record.recommended_action);
+                println!(
+                    "Category   : {} / {}",
+                    record.primary_category, record.subcategory
+                );
+                println!("Risk       : {}", record.risk_level);
+                println!("Confidence : {:.2}", record.confidence);
+                println!("Updated At : {}", record.updated_at);
+            }
+        }
+        ClassificationCmd::MetadataClassify {
+            key,
+            provider,
+            reason,
+        } => {
+            let body = json!({
+                "provider_name": provider,
+                "reason": reason,
+            });
+            let response: MetadataClassifyResponse = client
+                .post(
+                    &format!("/api/v1/classifications/{}/metadata-classify", encode(key)),
+                    &body,
+                )
+                .await?;
+            if json {
+                print_json(&response)?;
+            } else {
+                println!(
+                    "Queued metadata-only classification for {}",
+                    response.normalized_key
+                );
+                println!("Status   : {}", response.status);
+                println!(
+                    "Provider : {}",
+                    response
+                        .provider_name
+                        .clone()
+                        .unwrap_or_else(|| "default".to_string())
+                );
+            }
+        }
+        ClassificationCmd::Update {
+            key,
+            category,
+            subcategory,
+            reason,
+        } => {
+            let body = json!({
+                "primary_category": category,
+                "subcategory": subcategory,
+                "reason": reason,
+            });
+            let record: ClassificationRecord = client
+                .patch(&format!("/api/v1/classifications/{}", encode(key)), &body)
+                .await?;
+            if json {
+                print_json(&record)?;
+            } else {
+                println!("Updated classification {}", record.normalized_key);
+                println!(
+                    "Category : {} / {}",
+                    record.primary_category.unwrap_or_else(|| "-".to_string()),
+                    record.subcategory.unwrap_or_else(|| "-".to_string())
+                );
+                println!(
+                    "Action   : {}",
+                    record
+                        .effective_action
+                        .clone()
+                        .or(record.recommended_action.clone())
+                        .unwrap_or_else(|| "-".to_string())
+                );
+                println!("Updated  : {}", record.updated_at);
+            }
+        }
+        ClassificationCmd::Delete { key, yes } => {
+            if !yes {
+                return Err(anyhow!(
+                    "classification delete is destructive; rerun with --yes to confirm"
+                ));
+            }
+            client
+                .delete(&format!("/api/v1/classifications/{}", encode(key)))
+                .await?;
+            if !json {
+                println!("Deleted classification state for {key}");
             }
         }
         ClassificationCmd::Export { file, query } => {
@@ -2148,6 +2677,42 @@ async fn handle_report(cmd: &ReportCmd, client: &ApiClient, json: bool) -> Resul
                 println!("Domain coverage  : {}", report.domain_docs);
             }
         }
+        ReportCmd::Dashboard { range, top, bucket } => {
+            let mut params = vec![
+                ("range".to_string(), range.clone()),
+                ("top_n".to_string(), top.to_string()),
+            ];
+            if let Some(value) = bucket {
+                params.push(("bucket".to_string(), value.clone()));
+            }
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let report: DashboardReportResponse =
+                client.get("/api/v1/reporting/dashboard", &refs).await?;
+            if json {
+                print_json(&report)?;
+            } else {
+                println!(
+                    "Dashboard range: {} (bucket {})",
+                    report.range, report.bucket_interval
+                );
+                println!("Total requests : {}", report.overview.total_requests);
+                println!("Blocked requests: {}", report.overview.blocked_requests);
+                println!("Unique clients : {}", report.overview.unique_clients);
+                println!(
+                    "Top domains    : {}",
+                    report
+                        .top_domains
+                        .iter()
+                        .take(5)
+                        .map(|item| format!("{} ({})", item.key, item.doc_count))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -2227,6 +2792,7 @@ async fn handle_iam(cmd: &IamCmd, client: &ApiClient, json: bool) -> Result<()> 
         IamCmd::Groups(sub) => handle_iam_groups(sub, client, json).await?,
         IamCmd::Roles(sub) => handle_iam_roles(sub, client, json).await?,
         IamCmd::ServiceAccounts(sub) => handle_iam_service_accounts(sub, client, json).await?,
+        IamCmd::Audit(sub) => handle_iam_audit(sub, client, json).await?,
         IamCmd::Whoami => {
             let response: WhoAmIResponse = client.get("/api/v1/iam/whoami", &[]).await?;
             if json {
@@ -2417,6 +2983,114 @@ async fn handle_iam_users(cmd: &IamUsersCmd, client: &ApiClient, json: bool) -> 
                 println!("Roles now: {}", roles.join(", "));
             }
         }
+        IamUsersCmd::SetPassword {
+            id,
+            password,
+            must_change_password,
+        } => {
+            if password.trim().len() < 8 {
+                return Err(anyhow!("password must be at least 8 characters"));
+            }
+            client
+                .post_no_content(
+                    &format!("/api/v1/iam/users/{id}/set-password"),
+                    &json!({
+                        "password": password,
+                        "must_change_password": must_change_password,
+                    }),
+                )
+                .await?;
+            if !json {
+                println!("Updated password for user {id}");
+            }
+        }
+        IamUsersCmd::Tokens(tokens_cmd) => {
+            handle_iam_user_tokens(tokens_cmd, client, json).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn handle_iam_user_tokens(
+    cmd: &IamUserTokenCmd,
+    client: &ApiClient,
+    json: bool,
+) -> Result<()> {
+    match cmd {
+        IamUserTokenCmd::List { user_id } => {
+            let tokens: Vec<UserTokenRecord> = client
+                .get(&format!("/api/v1/iam/users/{user_id}/tokens"), &[])
+                .await?;
+            if json {
+                print_json(&tokens)?;
+            } else if tokens.is_empty() {
+                println!("No tokens found for user {user_id}");
+            } else {
+                let rows = tokens
+                    .iter()
+                    .map(|token| {
+                        vec![
+                            token.id.to_string(),
+                            token.name.clone(),
+                            token.status.clone(),
+                            token.token_hint.clone(),
+                            token.created_at.clone(),
+                            token.expires_at.clone().unwrap_or_else(|| "-".to_string()),
+                        ]
+                    })
+                    .collect();
+                print_table(
+                    &["Token ID", "Name", "Status", "Hint", "Created", "Expires"],
+                    rows,
+                );
+            }
+        }
+        IamUserTokenCmd::Create {
+            user_id,
+            name,
+            expires_at,
+        } => {
+            if name.trim().is_empty() {
+                return Err(anyhow!("--name is required"));
+            }
+            let token: UserTokenWithSecret = client
+                .post(
+                    &format!("/api/v1/iam/users/{user_id}/tokens"),
+                    &json!({
+                        "name": name,
+                        "expires_at": expires_at,
+                    }),
+                )
+                .await?;
+            if json {
+                print_json(&token)?;
+            } else {
+                println!("Created token {}", token.token_record.id);
+                println!("Name : {}", token.token_record.name);
+                println!("Token: {}", token.token);
+                println!("Copy this token now; it will not be shown again.");
+            }
+        }
+        IamUserTokenCmd::Revoke {
+            user_id,
+            token_id,
+            yes,
+        } => {
+            if !yes {
+                return Err(anyhow!(
+                    "token revoke is destructive; rerun with --yes to confirm"
+                ));
+            }
+            client
+                .delete(&format!(
+                    "/api/v1/iam/users/{}/tokens/{}",
+                    user_id, token_id
+                ))
+                .await?;
+            if !json {
+                println!("Revoked token {token_id} for user {user_id}");
+            }
+        }
     }
     Ok(())
 }
@@ -2535,6 +3209,48 @@ async fn handle_iam_roles(cmd: &IamRolesCmd, client: &ApiClient, json: bool) -> 
                     })
                     .collect();
                 print_table(&["Role", "Permissions", "Builtin"], rows);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_iam_audit(cmd: &IamAuditCmd, client: &ApiClient, json: bool) -> Result<()> {
+    match cmd {
+        IamAuditCmd::List { limit, cursor } => {
+            let mut params = vec![("limit".to_string(), limit.to_string())];
+            if let Some(value) = cursor {
+                params.push(("cursor".to_string(), value.clone()));
+            }
+            let refs: Vec<(&str, &str)> = params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let events: CursorPaged<IamAuditRecord> =
+                client.get("/api/v1/iam/audit", &refs).await?;
+            if json {
+                print_json(&events)?;
+            } else if events.data.is_empty() {
+                println!("No IAM audit events found");
+            } else {
+                let rows = events
+                    .data
+                    .iter()
+                    .map(|event| {
+                        vec![
+                            event.created_at.clone(),
+                            event.actor.clone().unwrap_or_else(|| "system".into()),
+                            event.action.clone(),
+                            event.target_type.clone().unwrap_or_else(|| "-".into()),
+                            event.target_id.clone().unwrap_or_else(|| "-".into()),
+                        ]
+                    })
+                    .collect();
+                print_table(
+                    &["When", "Actor", "Action", "Target Type", "Target ID"],
+                    rows,
+                );
+                print_next_cursor(events.meta.next_cursor.as_deref());
             }
         }
     }
@@ -2737,6 +3453,32 @@ fn parse_scope(scope: &str) -> Result<(String, String)> {
     Ok((scope_type, scope_value))
 }
 
+fn normalize_override_exchange_action(input: &str) -> Result<String> {
+    let normalized = input.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "allow" | "block" => Ok(normalized),
+        _ => Err(anyhow!("action must be one of: allow, block")),
+    }
+}
+
+fn normalize_import_mode(input: &str) -> Result<String> {
+    let normalized = input.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "merge" | "replace" => Ok(normalized),
+        _ => Err(anyhow!("mode must be one of: merge, replace")),
+    }
+}
+
+fn normalize_classification_state(input: &str) -> Result<String> {
+    let normalized = input.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "all" | "classified" | "unclassified" => Ok(normalized),
+        _ => Err(anyhow!(
+            "state must be one of: all, classified, unclassified"
+        )),
+    }
+}
+
 fn render_traffic_report(report: &TrafficReportResponse) {
     println!(
         "Traffic range: {} (bucket interval {})",
@@ -2908,6 +3650,16 @@ impl ApiClient {
         Ok(resp.json().await?)
     }
 
+    async fn get_text(&self, path: &str, query: &[(&str, &str)]) -> Result<String> {
+        let url = format!("{}{}", self.base_url, path);
+        let mut req = self.http.get(url);
+        if !query.is_empty() {
+            req = req.query(&query);
+        }
+        let resp = self.send(req).await?;
+        Ok(resp.text().await?)
+    }
+
     async fn post<T: DeserializeOwned>(&self, path: &str, body: &impl Serialize) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let req = self.http.post(url).json(body);
@@ -2925,6 +3677,13 @@ impl ApiClient {
     async fn put<T: DeserializeOwned>(&self, path: &str, body: &impl Serialize) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let req = self.http.put(url).json(body);
+        let resp = self.send(req).await?;
+        Ok(resp.json().await?)
+    }
+
+    async fn patch<T: DeserializeOwned>(&self, path: &str, body: &impl Serialize) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let req = self.http.patch(url).json(body);
         let resp = self.send(req).await?;
         Ok(resp.json().await?)
     }
@@ -3164,6 +3923,33 @@ struct PendingClassificationRecord {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+struct ClearAllPendingResponse {
+    deleted: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct MetadataClassifyResponse {
+    normalized_key: String,
+    status: String,
+    provider_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ClassificationRecord {
+    normalized_key: String,
+    state: String,
+    primary_category: Option<String>,
+    subcategory: Option<String>,
+    risk_level: Option<String>,
+    recommended_action: Option<String>,
+    effective_action: Option<String>,
+    effective_decision_source: Option<String>,
+    confidence: Option<f32>,
+    status: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct ManualClassificationResponse {
     normalized_key: String,
     primary_category: String,
@@ -3236,6 +4022,80 @@ struct ClassificationFlushResponse {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+struct OverrideImportInvalidLine {
+    line_number: u32,
+    value: String,
+    error: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct OverrideImportResponse {
+    action: String,
+    mode: String,
+    dry_run: bool,
+    total_lines: u32,
+    parsed: usize,
+    duplicates: u32,
+    imported: usize,
+    updated: usize,
+    deleted: usize,
+    skipped: usize,
+    invalid: usize,
+    invalid_lines: Vec<OverrideImportInvalidLine>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TaxonomyResponse {
+    version: String,
+    updated_at: String,
+    updated_by: Option<String>,
+    categories: Vec<TaxonomyCategory>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TaxonomyCategory {
+    id: String,
+    name: String,
+    enabled: bool,
+    locked: bool,
+    subcategories: Vec<TaxonomySubcategory>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TaxonomySubcategory {
+    id: String,
+    name: String,
+    enabled: bool,
+    locked: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TaxonomyActivationUpdateRequest {
+    version: String,
+    categories: Vec<TaxonomyActivationCategoryUpdate>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TaxonomyActivationCategoryUpdate {
+    id: String,
+    enabled: bool,
+    subcategories: Vec<TaxonomyActivationSubcategoryUpdate>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TaxonomyActivationSubcategoryUpdate {
+    id: String,
+    enabled: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TaxonomyActivationSaveResponse {
+    version: String,
+    updated_at: String,
+    updated_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct LlmProviderSummary {
     name: String,
     provider_type: String,
@@ -3277,6 +4137,24 @@ struct ReportingStatusResponse {
     action_docs: i64,
     category_docs: i64,
     domain_docs: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DashboardOverviewResponse {
+    total_requests: i64,
+    allow_requests: i64,
+    blocked_requests: i64,
+    block_rate: f64,
+    unique_clients: i64,
+    total_bandwidth_bytes: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DashboardReportResponse {
+    range: String,
+    bucket_interval: String,
+    overview: DashboardOverviewResponse,
+    top_domains: Vec<TopEntryResponse>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -3357,6 +4235,35 @@ struct ServiceAccountWithToken {
     account: ServiceAccountRecord,
     token: String,
     roles: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct UserTokenRecord {
+    id: Uuid,
+    user_id: Uuid,
+    name: String,
+    token_hint: String,
+    status: String,
+    created_at: String,
+    last_used_at: Option<String>,
+    expires_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct UserTokenWithSecret {
+    token: String,
+    token_record: UserTokenRecord,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct IamAuditRecord {
+    id: Uuid,
+    actor: Option<String>,
+    action: String,
+    target_type: Option<String>,
+    target_id: Option<String>,
+    payload: Option<serde_json::Value>,
+    created_at: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
