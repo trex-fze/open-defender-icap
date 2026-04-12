@@ -59,35 +59,30 @@ type ChartPalette = {
   tooltipText: string;
 };
 
-const readChartPalette = (): ChartPalette => {
-  if (typeof window === 'undefined') {
-    return {
-      grid: 'rgba(255,255,255,0.08)',
-      axis: 'rgba(255,255,255,0.72)',
-      requests: '#7dd3fc',
-      blocked: '#f87171',
-      bandwidthStroke: '#34d399',
-      bandwidthFill: '#34d39933',
-      tooltipBg: 'rgba(6, 12, 24, 0.95)',
-      tooltipBorder: 'rgba(255,255,255,0.16)',
-      tooltipTitle: '#e7efff',
-      tooltipText: '#c8d6ff',
-    };
-  }
+const CHART_PALETTE_DARK: ChartPalette = {
+  grid: 'rgba(255,255,255,0.08)',
+  axis: 'rgba(255,255,255,0.78)',
+  requests: '#7aa8ff',
+  blocked: '#f87171',
+  bandwidthStroke: '#5bc6ae',
+  bandwidthFill: '#5bc6ae33',
+  tooltipBg: 'rgba(6, 12, 24, 0.95)',
+  tooltipBorder: 'rgba(255,255,255,0.16)',
+  tooltipTitle: '#f8fbff',
+  tooltipText: '#c8d6ff',
+};
 
-  const style = window.getComputedStyle(document.documentElement);
-  return {
-    grid: style.getPropertyValue('--chart-grid').trim() || 'rgba(255,255,255,0.08)',
-    axis: style.getPropertyValue('--chart-axis').trim() || 'rgba(255,255,255,0.72)',
-    requests: style.getPropertyValue('--chart-series-requests').trim() || '#7dd3fc',
-    blocked: style.getPropertyValue('--chart-series-blocked').trim() || '#f87171',
-    bandwidthStroke: style.getPropertyValue('--chart-series-bandwidth').trim() || '#34d399',
-    bandwidthFill: style.getPropertyValue('--chart-series-bandwidth-fill').trim() || '#34d39933',
-    tooltipBg: style.getPropertyValue('--tooltip-bg').trim() || 'rgba(6, 12, 24, 0.95)',
-    tooltipBorder: style.getPropertyValue('--tooltip-border').trim() || 'rgba(255,255,255,0.16)',
-    tooltipTitle: style.getPropertyValue('--text-primary').trim() || '#e7efff',
-    tooltipText: style.getPropertyValue('--text-subtle').trim() || '#c8d6ff',
-  };
+const CHART_PALETTE_LIGHT: ChartPalette = {
+  grid: 'rgba(27,44,68,0.16)',
+  axis: 'rgba(27,44,68,0.86)',
+  requests: '#356fd4',
+  blocked: '#cd4e66',
+  bandwidthStroke: '#188b72',
+  bandwidthFill: '#188b7230',
+  tooltipBg: 'rgba(248, 251, 255, 0.97)',
+  tooltipBorder: 'rgba(31, 57, 87, 0.25)',
+  tooltipTitle: '#0e1b2b',
+  tooltipText: '#46566f',
 };
 
 const renderDomainTooltip = (valueLabel: string, palette: ChartPalette) => ({ active, payload }: { active?: boolean; payload?: Array<{ value?: number; payload?: { domain?: string } }> }) => {
@@ -146,7 +141,10 @@ export const DashboardPage = () => {
 
   const overview = dashboard.data?.overview;
   const coverage = dashboard.data?.coverage;
-  const chartPalette = useMemo(() => readChartPalette(), [resolvedTheme]);
+  const chartPalette = useMemo(
+    () => (resolvedTheme === 'light' ? CHART_PALETTE_LIGHT : CHART_PALETTE_DARK),
+    [resolvedTheme],
+  );
   const hourlyChart = useMemo(
     () =>
       (dashboard.data?.hourly_usage ?? []).map((entry) => ({
@@ -271,10 +269,36 @@ export const DashboardPage = () => {
             <ResponsiveContainer>
               <ComposedChart data={hourlyChart} margin={{ top: 8, right: 0, bottom: 4, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartPalette.grid} />
-                <XAxis dataKey="label" stroke={chartPalette.axis} axisLine={false} tickLine={false} />
-                <YAxis yAxisId="req" stroke={chartPalette.axis} axisLine={false} tickLine={false} />
-                <YAxis yAxisId="bw" orientation="right" stroke={chartPalette.axis} axisLine={false} tickLine={false} />
+                <XAxis
+                  dataKey="label"
+                  stroke={chartPalette.axis}
+                  tick={{ fill: chartPalette.axis, fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  yAxisId="req"
+                  stroke={chartPalette.axis}
+                  tick={{ fill: chartPalette.axis, fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  yAxisId="bw"
+                  orientation="right"
+                  stroke={chartPalette.axis}
+                  tick={{ fill: chartPalette.axis, fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
                 <Tooltip
+                  contentStyle={{
+                    background: chartPalette.tooltipBg,
+                    border: `1px solid ${chartPalette.tooltipBorder}`,
+                    borderRadius: '0.75rem',
+                    color: chartPalette.tooltipText,
+                  }}
+                  labelStyle={{ color: chartPalette.tooltipTitle }}
                   formatter={(value, name) => {
                     if (name === 'Bandwidth (MiB)') {
                       return [formatMiB(Number(value)), name];
@@ -282,9 +306,9 @@ export const DashboardPage = () => {
                     return [formatCompact(Number(value)), name];
                   }}
                 />
-                <Legend />
-                <Line name="Requests" yAxisId="req" type="monotone" dataKey="requests" stroke={chartPalette.requests} dot={false} />
-                <Line name="Blocked" yAxisId="req" type="monotone" dataKey="blocked" stroke={chartPalette.blocked} dot={false} />
+                <Legend wrapperStyle={{ color: chartPalette.axis }} />
+                <Line name="Requests" yAxisId="req" type="monotone" dataKey="requests" stroke={chartPalette.requests} strokeWidth={2.2} dot={false} />
+                <Line name="Blocked" yAxisId="req" type="monotone" dataKey="blocked" stroke={chartPalette.blocked} strokeWidth={2.2} dot={false} />
                 <Area
                   name="Bandwidth (MiB)"
                   yAxisId="bw"
@@ -292,6 +316,8 @@ export const DashboardPage = () => {
                   dataKey="bandwidthMiB"
                   stroke={chartPalette.bandwidthStroke}
                   fill={chartPalette.bandwidthFill}
+                  fillOpacity={0.26}
+                  strokeWidth={2}
                 />
               </ComposedChart>
             </ResponsiveContainer>
@@ -400,7 +426,7 @@ export const DashboardPage = () => {
               <BarChart data={domainChart} margin={{ left: 16, right: 16 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartPalette.grid} />
                 <XAxis dataKey="domain" hide />
-                <YAxis stroke={chartPalette.axis} />
+                <YAxis stroke={chartPalette.axis} tick={{ fill: chartPalette.axis, fontSize: 12 }} />
                 <Tooltip content={renderDomainTooltip('Hits', chartPalette)} />
                 <Bar dataKey="hits" fill={chartPalette.requests} />
               </BarChart>
@@ -436,7 +462,7 @@ export const DashboardPage = () => {
               <BarChart data={blockedDomainChart} margin={{ left: 16, right: 16 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartPalette.grid} />
                 <XAxis dataKey="domain" hide />
-                <YAxis stroke={chartPalette.axis} />
+                <YAxis stroke={chartPalette.axis} tick={{ fill: chartPalette.axis, fontSize: 12 }} />
                 <Tooltip content={renderDomainTooltip('Blocked Hits', chartPalette)} />
                 <Bar dataKey="blocked" fill={chartPalette.blocked} />
               </BarChart>
