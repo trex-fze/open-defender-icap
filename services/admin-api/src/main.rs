@@ -663,7 +663,7 @@ async fn main() -> Result<()> {
     };
 
     let cors_allow_origin = env::var("OD_ADMIN_CORS_ALLOW_ORIGIN")
-        .unwrap_or_else(|_| "http://localhost:19001".to_string());
+        .unwrap_or_else(|_| "https://localhost:19001".to_string());
     let cors_layer = {
         let allow_origin = cors_allow_origin.clone();
         middleware::from_fn(move |req, next| {

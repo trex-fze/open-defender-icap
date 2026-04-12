@@ -10,10 +10,9 @@ const isLikelyJwt = (token: string): boolean => {
 
 const localhostFallback = () => {
   if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname || 'localhost';
-    return `http://${hostname}:19000`;
+    return window.location.origin;
   }
-  return 'http://localhost:19000';
+  return 'http://localhost:19001';
 };
 
 const resolveBaseUrl = () => {

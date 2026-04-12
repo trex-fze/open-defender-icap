@@ -357,15 +357,14 @@ services:
         condition: service_started
 
   web-admin:
-    image: node:20
-    working_dir: /app/web-admin
-    command: ["bash", "-lc", "npm install && npm run dev -- --host 0.0.0.0 --port 19001"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/web-admin/Dockerfile
+    restart: unless-stopped
     ports:
       - "19001:19001"
-    environment:
-      VITE_ADMIN_API_URL: http://localhost:19000
     volumes:
-      - ../../web-admin:/app/web-admin
+      - ./web-admin/certs:/etc/nginx/certs:ro
     depends_on:
       admin-api:
         condition: service_started
