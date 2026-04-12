@@ -17,7 +17,7 @@ This guide helps operators stand up Open Defender quickly for realistic local te
   - `3128` (HAProxy edge listener for client proxy traffic)
   - `1344` (ICAP adaptor)
   - `19000` (Admin API)
-  - `19001` (Web Admin)
+  - `19001` (Web Admin HTTPS)
   - `19010` (Policy Engine)
   - `19100` (Event Ingester)
   - `5601` (Kibana)
@@ -43,6 +43,9 @@ If you want browser/device traffic to pass through the stack:
 3. Generate and trust the Squid CA certificate:
    - Run `make gen-certs`
    - Import `deploy/docker/squid/certs/ca.pem` into the OS/browser trust store
+4. Trust the web-admin TLS certificate for compose UI access:
+   - Import `deploy/docker/web-admin/certs/web-admin.pem` into your browser/OS trust store
+   - Access UI at `https://localhost:19001`
 
 Without the CA trust step, HTTPS interception tests will show certificate warnings (expected).
 
@@ -72,7 +75,7 @@ flowchart LR
 
     PG1 --> API[Admin API :19000]
     PG2 --> API
-    API --> UI[Web Admin :19001]
+    API --> UI[Web Admin HTTPS :19001]
     API --> CLI[odctl]
 
     ICAP -->|Allow/Block/ContentPending response| SQ --> U

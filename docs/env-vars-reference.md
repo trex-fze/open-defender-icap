@@ -20,7 +20,7 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `OD_LOCAL_AUTH_TTL_SECONDS`, `OD_LOCAL_AUTH_MAX_FAILED_ATTEMPTS`, `OD_LOCAL_AUTH_LOCKOUT_SECONDS`, `OD_LOCAL_AUTH_REFRESH_TTL_SECONDS`, `OD_LOCAL_AUTH_REFRESH_MAX_SESSIONS` | Local auth access-token/refresh-token and lockout controls. |
 | `OD_IAM_SERVICE_TOKEN_TTL_DAYS` | Default service-account token expiry window in days (used when `expires_at` is omitted on create/rotate). |
 | `OD_OIDC_ISSUER`, `OD_OIDC_AUDIENCE`, `OD_OIDC_HS256_SECRET` | OIDC/JWT validation parameters. |
-| `OD_ADMIN_CORS_ALLOW_ORIGIN` | Browser origin allowed by Admin API CORS middleware. |
+| `OD_ADMIN_CORS_ALLOW_ORIGIN` | Browser origin allowed by Admin API CORS middleware (compose default `https://localhost:19001`). |
 
 ## Reporting, ingest, and telemetry
 
@@ -86,6 +86,8 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `VITE_ADMIN_API_FALLBACK` | Optional fallback Admin API URL when primary is empty. |
 | `VITE_ADMIN_TOKEN_MODE` | Auth header mode (`auto`, `bearer`, `token`) for browser calls. |
 | `VITE_LLM_PROVIDERS_URL` | Optional frontend override for direct provider fetch; when unset, dashboard uses Admin API proxy endpoint (`/api/v1/ops/llm/providers`). |
+| `VITE_ADMIN_API_PROXY_TARGET` | Vite dev-server proxy target for `/api/*` requests (recommended `http://localhost:19000` outside compose). |
+| `VITE_HTTPS_ENABLED`, `VITE_HTTPS_CERT_FILE`, `VITE_HTTPS_KEY_FILE` | Optional Vite dev-server HTTPS enablement with local cert/key paths. |
 
 ## Advanced config overrides
 

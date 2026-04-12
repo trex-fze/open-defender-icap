@@ -6,7 +6,7 @@ This runbook describes how operators validate Stage 10 management parity in the 
 
 - Stack is running (`make compose-up` or `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --build`)
 - Admin API is healthy (`http://localhost:19000/health/ready`)
-- Web admin is reachable (`http://localhost:19001`)
+- Web admin is reachable (`https://localhost:19001`)
 - User has a token with at least `policy-admin` for full workflow testing
 
 ## Environment setup
@@ -127,7 +127,7 @@ Store screenshots under `docs/evidence/stage10-web-admin/` using this naming con
 ## Troubleshooting
 
 - **UI shows mock mode unexpectedly**: verify `VITE_ADMIN_API_URL`/`VITE_ADMIN_API_FALLBACK` resolve to the live Admin API, confirm browser auth state exists in local storage (`od.admin.tokens`), and ensure `VITE_ADMIN_TOKEN_MODE` matches your token type (`auto` is recommended).
-- **Policy Version History shows `Failed to load version history: Failed to fetch`**: confirm `http://localhost:19000/health/ready` is healthy, verify `OD_ADMIN_CORS_ALLOW_ORIGIN` allows the web-admin origin (`http://localhost:19001` by default), and check browser devtools for blocked CORS/network requests.
+- **Policy Version History shows `Failed to load version history: Failed to fetch`**: confirm `http://localhost:19000/health/ready` is healthy, verify `OD_ADMIN_CORS_ALLOW_ORIGIN` allows the web-admin origin (`https://localhost:19001` by default), and check browser devtools for blocked CORS/network requests.
 - **Recorded action differs from effective action in Classifications**: this is expected when overrides, policy updates, or taxonomy activation changed after persistence. Use `effective_action` and `effective_decision_source` as current enforcement truth.
 - **Unexpected block with `Review` action**: current runtime enforces `Review` as a blocked response with review-specific message text. Confirm policy intent in draft/version history before publish.
 - **Scope change on Allow / Deny still appears to affect old hosts**: verify override update completed, then re-test. Updated runtime now invalidates both previous and new scope cache keys on edit; if behavior persists, inspect cache diagnostics for stale `domain:*` / `subdomain:*` entries tied to the old scope.

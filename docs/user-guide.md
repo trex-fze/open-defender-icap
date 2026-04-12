@@ -108,7 +108,8 @@ Smoke verification: run `tests/policy-runtime-smoke.sh` to verify publish -> rel
 Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & tokens. Example commands: `odctl smoke 10.0.0.5:1344`, `OD_POLICY_URL=http://localhost:19010 OD_ADMIN_TOKEN=secret odctl policy reload`, `OD_ADMIN_TOKEN=secret odctl policy simulate request.json`.
 
 ## 7. React Admin UI
-- Start dev server: `npm install && npm run dev` in `web-admin/` (port 19001).
+- Compose default web UI: `https://localhost:19001` served by nginx with TLS (self-signed cert from `make gen-certs`).
+- Standalone frontend dev: `npm install && npm run dev` in `web-admin/` (port 19001; Vite proxy forwards `/api/*` to `VITE_ADMIN_API_PROXY_TARGET`).
 - Routes: Dashboard, Investigations, Policies (+ draft create/publish), **Pending Sites** (manual classification with category/subcategory and policy-computed action; per-row metadata-only classify with preferred provider selection and fallback-aware queueing; per-row pending delete plus guarded delete-all queue cleanup; subdomain inputs auto-promote to canonical domain key), **Classifications** (classified/unclassified CRUD management with both `Effective Action` and `Recorded Action` columns), Allow / Deny list (domain + subdomain overrides), Taxonomy (canonical listing with activation toggles and save/reset), Diagnostics (Page Content + Cache tools), Settings (RBAC + CLI audit logs + Classification Exchange import/export/flush + Allow/Deny Exchange line-by-line import/export).
 - Dashboard analytics: live graphs for unique clients (`client.ip`), total bandwidth, hourly request/blocked/bandwidth trend, frequently accessed domains, blocked domains, and top blocked requesters by `client.ip`.
 - Authentication: local username/password login screen; RBAC controls navigation after token issuance.
@@ -118,7 +119,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - Frontend expansion roadmap: see `rfc/stage-10-frontend-management-parity.md` and `implementation-plan/stage-10-frontend-management-parity.md` for full management-feature parity scope.
 
 ## 8. Docker & Compose Workflows
-- **Prep**: Copy `.env.example` → `.env`, edit tokens/passwords, then run `make gen-certs` (generates Squid CA/server certs under `deploy/docker/squid/certs/`; import `ca.pem` into any client trust store that should trust the proxy). Use root `/.env` as the only compose runtime env file.
+- **Prep**: Copy `.env.example` → `.env`, edit tokens/passwords, then run `make gen-certs` (generates Squid CA/server certs under `deploy/docker/squid/certs/` and web-admin TLS cert/key under `deploy/docker/web-admin/certs/`; import `ca.pem` for proxy trust and `web-admin.pem` for browser trust on `https://localhost:19001`). Use root `/.env` as the only compose runtime env file.
 - **Local dev**: `make compose-up` (preferred) starts Redis, Postgres, ICAP adaptor, Policy engine, Admin API, Squid, workers, Kibana, Prometheus, React UI, and the `odctl` runner. Direct compose equivalent from repo root: `docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build`. Use `make compose-logs SERVICE=icap-adaptor` to tail logs quickly.
 - **Smoke stack**: `docker compose --env-file .env -f deploy/docker/docker-compose.smoke.yml up --build --abort-on-container-exit` spins up only Redis/Postgres/core services plus a smoke-tests container that runs `odctl smoke`.
 - **CI/integration**: `docker compose --env-file .env -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.test.yml up --abort-on-container-exit` runs the same smoke harness but can skip heavy services via profiles.
@@ -132,7 +133,7 @@ Config file location: `~/.odctl/config` (YAML/JSON) storing API endpoints & toke
 - **ICAP errors**: Check adaptor logs for parse errors; ensure Squid metadata headers present; verify `policy_endpoint` reachable.
 - **Redis issues**: Confirm `redis_url` configured; check `redis-cli INFO` for latency; fallback memory cache will emit warnings if Redis unreachable.
 - **Policy errors**: 400 from `/api/v1/decision` indicates validation failure; inspect request body for missing `normalized_key`.
-- **Policies -> Version History shows `Failed to fetch`**: verify Admin API readiness (`curl http://localhost:19000/health/ready`), ensure `OD_ADMIN_CORS_ALLOW_ORIGIN` matches the UI origin (default `http://localhost:19001`), and confirm the browser is using the expected `VITE_ADMIN_API_URL` target.
+- **Policies -> Version History shows `Failed to fetch`**: verify Admin API readiness (`curl http://localhost:19000/health/ready`), ensure `OD_ADMIN_CORS_ALLOW_ORIGIN` matches the UI origin (default `https://localhost:19001`), and confirm the browser is using same-origin `/api/*` through nginx or the expected `VITE_ADMIN_API_URL` target.
 - **CLI auth failures**: Ensure config token valid; inspect `~/.odctl/logs` (future) for stack traces.
 - **Forgot local admin password**: run `odctl iam recover-admin-password` from a trusted host with DB access; include incident reason and rotate credentials immediately after regaining access.
 - **IAM disable/delete blocked with 409**: `PROTECTED_USER` means target is protected (default local admin). `LAST_ACTIVE_ADMIN` means operation would remove final active `policy-admin`; promote another admin first.

@@ -133,6 +133,13 @@ flowchart LR
 - **Why this matters**: Crawl4AI/LLM classification may ingest the upstream product's block or warning page instead of the original destination content.
 - **Recommended setup**: Route monitored traffic so Open Defender evaluates unmodified origin responses, or bypass upstream warning-page injection for the traffic under classification.
 
+### Frontend TLS (local/dev default)
+
+- Web admin is served by `nginx` with TLS at `https://localhost:19001` in docker compose.
+- Run `make gen-certs` before `make compose-up`; this generates frontend certs under `deploy/docker/web-admin/certs/`.
+- Import `deploy/docker/web-admin/certs/web-admin.pem` into your local browser/OS trust store for warning-free access.
+- Frontend API calls use same-origin `/api/*`, and nginx reverse-proxies those requests to `admin-api:19000`.
+
 ### Useful URLs
 
 | Service | URL |
@@ -142,7 +149,7 @@ flowchart LR
 | Event Ingester (AI analytics feed) | http://localhost:19100/health/ready |
 | Kibana Dashboards | http://localhost:5601 |
 | Prometheus + Alerts | http://localhost:9090 |
-| Web Admin UI (LLM insights) | http://localhost:19001 |
+| Web Admin UI (LLM insights) | https://localhost:19001 |
 
 ## Key Environment Variables
 
@@ -151,7 +158,7 @@ flowchart LR
 | `OD_ADMIN_TOKEN` | Shared secret for Admin API/CLI auth (used by `odctl` and tests). Required for AI-assisted dashboards/CLI. |
 | `OD_ADMIN_DATABASE_URL` / `DATABASE_URL` | Postgres connection string for Admin API (`OD_ADMIN_DATABASE_URL` preferred for compose stacks). |
 | `OD_POLICY_DATABASE_URL` | Postgres URL for Policy Engine (compose defaults this to the shared `defender_admin` DB; override only when intentionally separating runtime storage). |
-| `OD_ADMIN_CORS_ALLOW_ORIGIN` | Allowed browser origin for Admin API CORS responses (default `http://localhost:19001` for local web-admin). |
+| `OD_ADMIN_CORS_ALLOW_ORIGIN` | Allowed browser origin for Admin API CORS responses (default `https://localhost:19001` for local web-admin). |
 | `OD_CACHE_REDIS_URL` | Redis address for cache invalidation. |
 | `OD_CACHE_CHANNEL` | Redis pub/sub channel for cache busting. |
 | `OD_OIDC_ISSUER` / `OD_OIDC_AUDIENCE` / `OD_OIDC_HS256_SECRET` | Enables HS256 or OIDC device flow auth so AI tooling honors RBAC. |
@@ -174,7 +181,9 @@ flowchart LR
 | `OD_LLM_PROVIDER_HEALTH_TTL_SECS` / `OD_LLM_PROVIDER_HEALTH_TIMEOUT_MS` | LLM worker provider-health probe cache TTL and HTTP probe timeout for `/providers` status fields. |
 | `OPENAI_API_KEY` | API key for OpenAI-compatible providers (used when `type=openai/openai_compatible`). |
 | `LLM_API_KEY` | Legacy fallback for single-endpoint deployments. |
-| `VITE_ADMIN_API_URL` / `VITE_ADMIN_API_FALLBACK` / `VITE_ADMIN_TOKEN_MODE` | Standalone frontend API target + auth header mode from `web-admin/.env`. |
+| `VITE_ADMIN_API_URL` / `VITE_ADMIN_API_FALLBACK` / `VITE_ADMIN_TOKEN_MODE` | Frontend API base + auth header mode from `web-admin/.env` (leave API URL empty for same-origin `/api/*`). |
+| `VITE_ADMIN_API_PROXY_TARGET` | Vite dev-server proxy target for `/api/*` in standalone frontend development (recommended `http://localhost:19000`). |
+| `VITE_HTTPS_ENABLED` / `VITE_HTTPS_CERT_FILE` / `VITE_HTTPS_KEY_FILE` | Optional standalone Vite HTTPS controls when not using nginx compose frontend. |
 | `VITE_LLM_PROVIDERS_URL` | Optional frontend override for direct dashboard provider-status fetch; leave unset to use Admin API proxy by default. |
 | `INGEST_URL`, `ELASTIC_URL`, `ADMIN_URL` | Overrides used by Stage 6/7 smoke scripts. |
 

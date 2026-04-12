@@ -50,12 +50,14 @@ make compose-golden-prodlike # Stage 24 golden-prodlike bootstrap + verify
 make compose-golden-down  # Teardown golden profile stacks
 ```
 
-Run `make gen-certs` once before the first `compose-up`; import `deploy/docker/squid/certs/ca.pem` into any client trust store hitting the Squid proxy.
+Run `make gen-certs` once before the first `compose-up`; this generates:
+- Squid CA/server certs under `deploy/docker/squid/certs/` (import `ca.pem` in clients using the proxy)
+- Web admin TLS cert/key under `deploy/docker/web-admin/certs/` (import `web-admin.pem` for warning-free `https://localhost:19001` access)
 
 ## Startup sequence
 1. Ensure Docker Desktop/Engine is running and ports 1344, 19000, 19001, 19005, 19010, 3128, 5432, 6379, 9200, 5601, 9090 are free.
 2. Copy `.env.example` → `.env` (edit tokens/passwords as needed).
-3. Run `make gen-certs` once to generate Squid certificates (stores them under `deploy/docker/squid/certs/`).
+3. Run `make gen-certs` once to generate Squid and web-admin certificates (`deploy/docker/squid/certs/`, `deploy/docker/web-admin/certs/`).
 4. `docker compose --env-file ../../.env up -d postgres redis` and wait for healthchecks, or just run `docker compose --env-file ../../.env up --build` / `make compose-up` to start everything.
 5. Run migrations/seeds as needed:
    - `docker compose --env-file ../../.env run --rm odctl-runner odctl migrate run all`
@@ -65,6 +67,7 @@ Run `make gen-certs` once before the first `compose-up`; import `deploy/docker/s
     - Admin API: http://localhost:19000/health/ready
     - Policy Engine: http://localhost:19010/health/ready
     - Event Ingester: http://localhost:19100/health/ready
+    - Web Admin: https://localhost:19001
     - Kibana: http://localhost:5601 (user `elastic`, password from `.env`)
     - Prometheus: http://localhost:9090
    - Squid proxy: http://localhost:3128 (ICAP wired to adaptor)
