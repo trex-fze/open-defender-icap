@@ -127,6 +127,12 @@ flowchart LR
    make compose-down               # docker compose down
    ```
 
+### Deployment Warning
+
+- **Avoid upstream interstitial filtering**: Running Open Defender behind an existing web filter that injects block/warning/interstitial pages can interfere with classification quality.
+- **Why this matters**: Crawl4AI/LLM classification may ingest the upstream product's block or warning page instead of the original destination content.
+- **Recommended setup**: Route monitored traffic so Open Defender evaluates unmodified origin responses, or bypass upstream warning-page injection for the traffic under classification.
+
 ### Useful URLs
 
 | Service | URL |
@@ -176,6 +182,7 @@ flowchart LR
 
 - **Docker Desktop/macOS (development)**: source IP can be NAT-rewritten before HAProxy/Squid ACL evaluation; use `OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0` and restrict `3128` to LAN via host/router firewall.
 - **Linux-hosted proxy (production-like)**: preserve strict source ACLs such as `OD_SQUID_ALLOWED_CLIENT_CIDRS=192.168.1.0/24` (or tighter `/32`) and validate with `tests/proxy-production-linux-e2e.sh`.
+- **Filtering chain caution**: avoid placing upstream block/warning page injectors ahead of this stack for classified traffic; interstitial content can be misclassified as the destination.
 
 > See `docs/env-vars-reference.md` for the complete runtime/frontend/test variable catalog and `web-admin/.env.example` for standalone frontend defaults.
 
