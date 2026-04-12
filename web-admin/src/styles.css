@@ -652,6 +652,15 @@ tr:hover td {
   background: rgba(10, 17, 33, 0.94);
 }
 
+.dashboard-hourly-panel {
+  min-height: 560px;
+}
+
+.dashboard-hourly-chart {
+  width: 100%;
+  height: 420px;
+}
+
 .scroll-table-panel {
   height: 620px;
   display: flex;
@@ -792,6 +801,14 @@ tr:hover td {
 
   .dashboard-domain-panel {
     height: 560px;
+  }
+
+  .dashboard-hourly-panel {
+    min-height: 440px;
+  }
+
+  .dashboard-hourly-chart {
+    height: 300px;
   }
 
   .dashboard-domain-panel--compact {

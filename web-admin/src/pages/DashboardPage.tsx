@@ -164,10 +164,9 @@ export const DashboardPage = () => {
     <div>
       <div className="page-header">
         <div>
-          <p className="section-title">Command Deck</p>
-          <h2 style={{ margin: 0, fontSize: '2.4rem' }}>Trust & Safety Pulse</h2>
+          <h2 style={{ margin: 0, fontSize: '2.4rem' }}>Dashboard</h2>
           <p style={{ color: 'var(--muted)' }}>
-            Client-IP traffic intelligence with usage, bandwidth, and block trends.
+            AI Enhanced Web Security Platform
           </p>
         </div>
         <div className="page-header-actions dashboard-header-actions">
@@ -213,7 +212,52 @@ export const DashboardPage = () => {
         </div>
       ) : null}
 
-      <div className="kpi-grid">
+      <div className="layout-grid" style={{ marginTop: '1.1rem' }}>
+        <div className="glass-panel panel--full dashboard-hourly-panel">
+          <p className="section-title">Hourly Usage (Requests + Bandwidth)</p>
+          {bandwidthCoverageGap ? (
+            <p style={{ margin: '0 0 0.8rem', color: 'var(--muted)', fontSize: '0.82rem' }}>
+              Some records in this range do not include `network.bytes`, so bandwidth totals may appear lower than request volume.
+            </p>
+          ) : null}
+          <div className="dashboard-hourly-chart">
+            <ResponsiveContainer>
+              <ComposedChart data={hourlyChart}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
+                <XAxis dataKey="label" stroke="rgba(255,255,255,0.8)" />
+                <YAxis yAxisId="req" stroke="rgba(255,255,255,0.8)" />
+                <YAxis yAxisId="bw" orientation="right" stroke="rgba(255,255,255,0.8)" />
+                <Tooltip
+                  formatter={(value, name) => {
+                    if (name === 'Bandwidth (MiB)') {
+                      return [formatMiB(Number(value)), name];
+                    }
+                    return [formatCompact(Number(value)), name];
+                  }}
+                />
+                <Legend />
+                <Line name="Requests" yAxisId="req" type="monotone" dataKey="requests" stroke="#7dd3fc" dot={false} />
+                <Line name="Blocked" yAxisId="req" type="monotone" dataKey="blocked" stroke="#f87171" dot={false} />
+                <Area
+                  name="Bandwidth (MiB)"
+                  yAxisId="bw"
+                  type="monotone"
+                  dataKey="bandwidthMiB"
+                  stroke="#34d399"
+                  fill="#34d39933"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          {overview ? (
+            <p style={{ margin: '0.8rem 0 0', color: 'var(--muted)', fontSize: '0.82rem' }}>
+              Hourly bucket sum: {formatBytes(hourlyBandwidthBytes)} (overview total: {formatBytes(overview.total_bandwidth_bytes)})
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="kpi-grid" style={{ marginTop: '1.2rem' }}>
         <div className="kpi-card">
           <p className="section-title" style={{ color: 'rgba(255,255,255,0.7)' }}>Unique Clients</p>
           <h3 style={{ margin: '0 0 0.4rem', fontSize: '2rem' }}>
@@ -293,51 +337,6 @@ export const DashboardPage = () => {
           {!opsLoading ? (
             <p style={{ margin: '0.45rem 0 0' }}>
               <span className={`chip chip--${ops.source === 'live' ? 'green' : 'amber'}`}>ops source: {ops.source}</span>
-            </p>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="layout-grid" style={{ marginTop: '2rem' }}>
-        <div className="glass-panel panel--full">
-          <p className="section-title">Hourly Usage (Requests + Bandwidth)</p>
-          {bandwidthCoverageGap ? (
-            <p style={{ margin: '0 0 0.8rem', color: 'var(--muted)', fontSize: '0.82rem' }}>
-              Some records in this range do not include `network.bytes`, so bandwidth totals may appear lower than request volume.
-            </p>
-          ) : null}
-          <div style={{ width: '100%', height: 320 }}>
-            <ResponsiveContainer>
-              <ComposedChart data={hourlyChart}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
-                <XAxis dataKey="label" stroke="rgba(255,255,255,0.8)" />
-                <YAxis yAxisId="req" stroke="rgba(255,255,255,0.8)" />
-                <YAxis yAxisId="bw" orientation="right" stroke="rgba(255,255,255,0.8)" />
-                <Tooltip
-                  formatter={(value, name) => {
-                    if (name === 'Bandwidth (MiB)') {
-                      return [formatMiB(Number(value)), name];
-                    }
-                    return [formatCompact(Number(value)), name];
-                  }}
-                />
-                <Legend />
-                <Line name="Requests" yAxisId="req" type="monotone" dataKey="requests" stroke="#7dd3fc" dot={false} />
-                <Line name="Blocked" yAxisId="req" type="monotone" dataKey="blocked" stroke="#f87171" dot={false} />
-                <Area
-                  name="Bandwidth (MiB)"
-                  yAxisId="bw"
-                  type="monotone"
-                  dataKey="bandwidthMiB"
-                  stroke="#34d399"
-                  fill="#34d39933"
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-          {overview ? (
-            <p style={{ margin: '0.8rem 0 0', color: 'var(--muted)', fontSize: '0.82rem' }}>
-              Hourly bucket sum: {formatBytes(hourlyBandwidthBytes)} (overview total: {formatBytes(overview.total_bandwidth_bytes)})
             </p>
           ) : null}
         </div>
