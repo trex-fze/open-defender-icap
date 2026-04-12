@@ -1,39 +1,61 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500&display=swap');
+@font-face {
+  font-family: 'Ubuntu variable';
+  font-stretch: 100%;
+  font-style: normal;
+  font-weight: 100 800;
+  src: url('https://assets.ubuntu.com/v1/f1ea362b-Ubuntu%5Bwdth,wght%5D-latin-v0.896a.woff2') format('woff2-variations');
+}
+
+@font-face {
+  font-family: 'Ubuntu variable';
+  font-stretch: 100%;
+  font-style: italic;
+  font-weight: 100 800;
+  src: url('https://assets.ubuntu.com/v1/90b59210-Ubuntu-Italic%5Bwdth,wght%5D-latin-v0.896a.woff2') format('woff2-variations');
+}
+
+@font-face {
+  font-family: 'Ubuntu Mono variable';
+  font-style: normal;
+  font-weight: 100 800;
+  src: url('https://assets.ubuntu.com/v1/d5fc1819-UbuntuMono%5Bwght%5D-latin-v0.869.woff2') format('woff2-variations');
+}
 
 :root {
-  font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif;
+  font-family: 'Ubuntu variable', Ubuntu, -apple-system, 'Segoe UI', Roboto, Oxygen, Cantarell, 'Helvetica Neue', sans-serif;
   color: #0c111d;
-  background-color: #020810;
+  background-color: #111;
   --ink: #020810;
   --stone: #0f172a;
-  --citrus: #fdd744;
+  --citrus: #86a8ff;
   --peach: #ff7a7a;
   --muted: #d7e5ff;
   --foam: #88f5e6;
   --sky: #3d9df3;
   --sand: #f5f4ef;
-  --gradient: linear-gradient(135deg, #040b16 0%, #0b1930 55%, #142b4f 100%);
-  --focus-ring: rgba(136, 245, 230, 0.24);
-  --accent-line: rgba(136, 245, 230, 0.58);
+  --gradient: linear-gradient(135deg, #12151a 0%, #171c25 55%, #202836 100%);
+  --focus-ring: rgba(123, 161, 255, 0.28);
+  --accent-line: rgba(123, 161, 255, 0.62);
   --text-primary: #f8fbff;
   --text-subtle: #c8d6ff;
   --text-heading: #d7e2ff;
-  --surface-sidebar: rgba(2, 8, 16, 0.9);
-  --surface-main: rgba(7, 15, 30, 0.35);
+  --link-color: #7da8ff;
+  --surface-sidebar: rgba(21, 24, 31, 0.96);
+  --surface-main: rgba(17, 21, 29, 0.48);
   --surface-card: rgba(255, 255, 255, 0.08);
-  --surface-panel: rgba(10, 17, 33, 0.6);
-  --surface-panel-strong: rgba(8, 14, 28, 0.55);
-  --surface-input: rgba(4, 13, 26, 0.6);
+  --surface-panel: rgba(20, 24, 33, 0.86);
+  --surface-panel-strong: rgba(16, 20, 28, 0.9);
+  --surface-input: rgba(15, 19, 27, 0.9);
   --surface-row-hover: rgba(255, 255, 255, 0.04);
-  --surface-active-nav: rgba(248, 251, 255, 0.12);
+  --surface-active-nav: rgba(123, 161, 255, 0.2);
   --surface-user-badge: rgba(255, 255, 255, 0.05);
   --surface-user-chip: rgba(255, 255, 255, 0.11);
   --surface-subtle: rgba(255, 255, 255, 0.08);
   --surface-pill: rgba(255, 255, 255, 0.04);
   --surface-code-bg: rgba(0, 0, 0, 0.35);
   --border-soft: rgba(255, 255, 255, 0.2);
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.25);
+  --border-subtle: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.28);
   --error-border: rgba(255, 122, 122, 0.5);
   --error-bg: rgba(255, 122, 122, 0.08);
   --table-header-bg: rgba(10, 17, 33, 0.94);
@@ -41,29 +63,29 @@
   --backdrop-bg: rgba(2, 8, 16, 0.55);
   --chart-grid: rgba(255, 255, 255, 0.08);
   --chart-axis: rgba(255, 255, 255, 0.72);
-  --chart-series-requests: #7dd3fc;
+  --chart-series-requests: #7aa8ff;
   --chart-series-blocked: #f87171;
-  --chart-series-bandwidth: #34d399;
-  --chart-series-bandwidth-fill: #34d39933;
+  --chart-series-bandwidth: #5bc6ae;
+  --chart-series-bandwidth-fill: #5bc6ae33;
   --tooltip-bg: rgba(6, 12, 24, 0.95);
   --tooltip-border: rgba(255, 255, 255, 0.16);
   --status-error: #ff9b9b;
-  --status-warning: #ffcf7f;
+  --status-warning: #b6b8ff;
   --status-success: #9ef7eb;
-  --button-secondary-bg: linear-gradient(120deg, #d6def6, #8ca0cb);
-  --button-danger-bg: linear-gradient(120deg, #ff9b9b, #fdd744);
+  --button-secondary-bg: linear-gradient(120deg, #d4ddff, #93a8e6);
+  --button-danger-bg: linear-gradient(120deg, #ff9da8, #f17f95);
   --button-danger-strong-bg: linear-gradient(120deg, #f89b9b, #f26969);
   --button-contrast-text: #060b17;
-  --button-primary-bg: linear-gradient(120deg, var(--foam), var(--citrus));
-  --button-primary-shadow: rgba(5, 250, 205, 0.25);
-  --button-secondary-shadow: rgba(141, 165, 214, 0.28);
+  --button-primary-bg: linear-gradient(120deg, #a9bfff, #6f93ff);
+  --button-primary-shadow: rgba(111, 147, 255, 0.3);
+  --button-secondary-shadow: rgba(143, 164, 227, 0.32);
   --button-danger-shadow: rgba(242, 106, 112, 0.24);
-  --chip-success-bg: rgba(8, 55, 63, 0.95);
-  --chip-success-text: #9ef7eb;
-  --chip-success-border: rgba(158, 247, 235, 0.4);
-  --chip-warning-bg: rgba(63, 46, 7, 0.95);
-  --chip-warning-text: #ffe17f;
-  --chip-warning-border: rgba(255, 225, 127, 0.45);
+  --chip-success-bg: rgba(14, 74, 67, 0.96);
+  --chip-success-text: #b4f6eb;
+  --chip-success-border: rgba(180, 246, 235, 0.36);
+  --chip-warning-bg: rgba(56, 61, 110, 0.96);
+  --chip-warning-text: #d9dcff;
+  --chip-warning-border: rgba(217, 220, 255, 0.34);
   --chip-danger-bg: rgba(78, 15, 28, 0.95);
   --chip-danger-text: #ffb9c6;
   --chip-danger-border: rgba(255, 185, 198, 0.4);
@@ -80,54 +102,55 @@
 
 :root[data-theme='light'] {
   --muted: #46566f;
-  --gradient: linear-gradient(135deg, #f4f8ff 0%, #edf4ff 55%, #e4eeff 100%);
-  --focus-ring: rgba(61, 157, 243, 0.26);
-  --accent-line: rgba(61, 157, 243, 0.5);
+  --gradient: linear-gradient(135deg, #f8f9fc 0%, #f3f6fb 55%, #edf2fa 100%);
+  --focus-ring: rgba(34, 102, 204, 0.28);
+  --accent-line: rgba(34, 102, 204, 0.56);
   --text-primary: #0e1b2b;
-  --text-subtle: #3a4b63;
-  --text-heading: #22364d;
+  --text-subtle: #46566f;
+  --text-heading: #26384f;
+  --link-color: #24598f;
   --surface-sidebar: rgba(246, 250, 255, 0.98);
   --surface-main: rgba(255, 255, 255, 0.72);
   --surface-card: rgba(255, 255, 255, 0.98);
   --surface-panel: rgba(255, 255, 255, 0.96);
   --surface-panel-strong: rgba(248, 251, 255, 0.98);
   --surface-input: rgba(255, 255, 255, 0.99);
-  --surface-row-hover: rgba(31, 57, 87, 0.08);
-  --surface-active-nav: rgba(31, 57, 87, 0.12);
+  --surface-row-hover: rgba(34, 102, 204, 0.08);
+  --surface-active-nav: rgba(34, 102, 204, 0.12);
   --surface-user-badge: rgba(31, 57, 87, 0.08);
   --surface-user-chip: rgba(31, 57, 87, 0.14);
   --surface-subtle: rgba(31, 57, 87, 0.08);
   --surface-pill: rgba(31, 57, 87, 0.04);
   --surface-code-bg: rgba(31, 57, 87, 0.12);
-  --border-soft: rgba(31, 57, 87, 0.24);
-  --border-subtle: rgba(31, 57, 87, 0.18);
-  --border-strong: rgba(31, 57, 87, 0.3);
+  --border-soft: rgba(27, 44, 68, 0.22);
+  --border-subtle: rgba(27, 44, 68, 0.16);
+  --border-strong: rgba(27, 44, 68, 0.28);
   --error-border: rgba(209, 67, 87, 0.45);
   --error-bg: rgba(209, 67, 87, 0.12);
   --table-header-bg: rgba(236, 244, 255, 0.98);
   --skeleton-bg: rgba(31, 57, 87, 0.12);
   --backdrop-bg: rgba(14, 23, 37, 0.42);
-  --chart-grid: rgba(31, 57, 87, 0.12);
-  --chart-axis: rgba(31, 57, 87, 0.72);
+  --chart-grid: rgba(27, 44, 68, 0.12);
+  --chart-axis: rgba(27, 44, 68, 0.76);
   --tooltip-bg: rgba(248, 251, 255, 0.97);
   --tooltip-border: rgba(31, 57, 87, 0.25);
   --status-error: #d14357;
-  --status-warning: #a56a00;
+  --status-warning: #5157ba;
   --status-success: #0e7a5e;
-  --button-secondary-bg: linear-gradient(120deg, #cad7f5, #8ea5d6);
-  --button-danger-bg: linear-gradient(120deg, #fca2af, #f6be52);
-  --button-danger-strong-bg: linear-gradient(120deg, #f78b9b, #f06a70);
+  --button-secondary-bg: linear-gradient(120deg, #d7e2ff, #9fb4ea);
+  --button-danger-bg: linear-gradient(120deg, #fda5b2, #f27f96);
+  --button-danger-strong-bg: linear-gradient(120deg, #f78b9b, #ef667f);
   --button-contrast-text: #111a2b;
-  --button-primary-bg: linear-gradient(120deg, #7ce5d8, #eecb47);
-  --button-primary-shadow: rgba(61, 157, 243, 0.2);
-  --button-secondary-shadow: rgba(82, 112, 168, 0.26);
+  --button-primary-bg: linear-gradient(120deg, #8db0ff, #5f89ef);
+  --button-primary-shadow: rgba(95, 137, 239, 0.25);
+  --button-secondary-shadow: rgba(95, 137, 239, 0.2);
   --button-danger-shadow: rgba(206, 87, 104, 0.24);
-  --chip-success-bg: rgba(221, 247, 239, 0.95);
+  --chip-success-bg: rgba(218, 245, 238, 0.95);
   --chip-success-text: #0e6d58;
   --chip-success-border: rgba(14, 109, 88, 0.28);
-  --chip-warning-bg: rgba(255, 244, 214, 0.95);
-  --chip-warning-text: #8d5a00;
-  --chip-warning-border: rgba(141, 90, 0, 0.24);
+  --chip-warning-bg: rgba(231, 233, 255, 0.95);
+  --chip-warning-text: #4a50ac;
+  --chip-warning-border: rgba(74, 80, 172, 0.28);
   --chip-danger-bg: rgba(255, 227, 232, 0.96);
   --chip-danger-text: #b03a4f;
   --chip-danger-border: rgba(176, 58, 79, 0.25);
@@ -146,6 +169,20 @@
   box-sizing: border-box;
 }
 
+h1,
+h3,
+h5 {
+  font-weight: 550;
+}
+
+h2 {
+  font-weight: 300;
+}
+
+h4 {
+  font-weight: 400;
+}
+
 body {
   margin: 0;
   font-family: inherit;
@@ -154,9 +191,21 @@ body {
   min-height: 100vh;
 }
 
+code,
+pre,
+.token-display,
+.payload-snippet {
+  font-family: 'Ubuntu Mono variable', 'Ubuntu Mono', Consolas, Monaco, Courier, monospace;
+}
+
 a {
-  color: inherit;
+  color: var(--link-color);
   text-decoration: none;
+}
+
+a:hover,
+a:visited:hover {
+  text-decoration: underline;
 }
 
 .app-shell {
@@ -261,6 +310,12 @@ a {
   color: var(--muted);
   font-weight: 500;
   transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+  text-decoration: none;
+}
+
+.nav-link:hover,
+.nav-link:visited:hover {
+  text-decoration: none;
 }
 
 .nav-link__icon {
@@ -728,7 +783,7 @@ a {
   border-radius: 0.75rem;
   background: var(--surface-code-bg);
   border: 1px solid var(--border-subtle);
-  font-family: 'IBM Plex Sans', monospace;
+  font-family: 'Ubuntu Mono variable', 'Ubuntu Mono', Consolas, Monaco, Courier, monospace;
   word-break: break-all;
 }
 
@@ -806,8 +861,9 @@ tr:hover td {
 
 .section-title {
   font-size: 1rem;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-weight: 500;
   color: var(--text-heading);
   margin-bottom: 0.75rem;
 }
@@ -833,9 +889,9 @@ tr:hover td {
   border-radius: 999px;
   border: none;
   cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-weight: 500;
   background: var(--button-primary-bg);
   color: var(--button-contrast-text);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
