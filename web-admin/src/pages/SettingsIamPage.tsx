@@ -32,7 +32,7 @@ export const SettingsIamPage = () => {
     <div className="settings-shell">
       <div className="page-header" style={{ marginBottom: '1.5rem' }}>
         <div>
-          <p className="section-title">Identity & Access</p>
+          <p className="section-title">Settings</p>
           <h2 style={{ margin: 0 }}>IAM Workspace</h2>
           <p style={{ color: 'var(--muted)', marginTop: '0.35rem' }}>
             Manage users, groups, roles, service accounts, and audit evidence from a single canvas.
