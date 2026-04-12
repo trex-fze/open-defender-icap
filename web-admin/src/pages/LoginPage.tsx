@@ -106,6 +106,9 @@ export const LoginPage = () => {
           boxShadow: '0 30px 80px rgba(0,0,0,0.45)',
         }}
       >
+        <div className="login-brand-wrap">
+          <img src="/brand/logo.png" alt="Open Defender ICAP" className="login-brand-logo" />
+        </div>
         <p className="section-title">Local Sign-in</p>
         <h2 style={{ marginTop: 0 }}>Welcome back</h2>
         <p style={{ color: '#8ca0cb' }}>Sign in using your local username or email and password.</p>
