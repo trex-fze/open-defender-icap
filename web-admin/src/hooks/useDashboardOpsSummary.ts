@@ -5,25 +5,25 @@ import { useAdminApi } from './useAdminApi';
 
 export type DashboardOpsProviderMetric = {
   provider: string;
-  failures_5m: number;
-  timeouts_5m: number;
-  latency_p95_seconds?: number;
+  failures_5m: number | null;
+  timeouts_5m: number | null;
+  latency_p95_seconds?: number | null;
 };
 
 export type DashboardOpsSummary = {
   range: string;
   source: 'live' | 'partial' | 'unavailable';
   queue: {
-    pending_age_p95_seconds?: number;
-    llm_jobs_started_per_sec_10m?: number;
-    llm_jobs_completed_per_sec_10m?: number;
-    llm_dlq_growth_10m?: number;
-    page_fetch_dlq_growth_10m?: number;
+    pending_age_p95_seconds?: number | null;
+    llm_jobs_started_per_sec_10m?: number | null;
+    llm_jobs_completed_per_sec_10m?: number | null;
+    llm_dlq_growth_10m?: number | null;
+    page_fetch_dlq_growth_10m?: number | null;
   };
   auth: {
-    login_failures_10m?: number;
-    lockouts_10m?: number;
-    refresh_failures_10m?: number;
+    login_failures_10m?: number | null;
+    lockouts_10m?: number | null;
+    refresh_failures_10m?: number | null;
   };
   providers: DashboardOpsProviderMetric[];
   errors: string[];

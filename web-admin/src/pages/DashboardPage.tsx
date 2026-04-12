@@ -63,6 +63,8 @@ const formatRate = (value?: number) => {
   return `${value.toFixed(3)}/s`;
 };
 
+const hasNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
 type ChartPalette = {
   grid: string;
   axis: string;
@@ -456,24 +458,24 @@ export const DashboardPage = () => {
             </p>
             <div className="chip-row" style={{ marginBottom: '0.7rem' }}>
               <span className="chip chip--amber">
-                Pending age p95: {opsSummary.data.queue.pending_age_p95_seconds !== undefined ? `${opsSummary.data.queue.pending_age_p95_seconds.toFixed(1)}s` : '—'}
+                Pending age p95: {hasNumber(opsSummary.data.queue.pending_age_p95_seconds) ? `${opsSummary.data.queue.pending_age_p95_seconds.toFixed(1)}s` : '—'}
               </span>
               <span className="chip chip--green">LLM started: {formatRate(opsSummary.data.queue.llm_jobs_started_per_sec_10m)}</span>
               <span className="chip chip--green">LLM completed: {formatRate(opsSummary.data.queue.llm_jobs_completed_per_sec_10m)}</span>
               <span className="chip chip--red">
-                LLM DLQ +10m: {opsSummary.data.queue.llm_dlq_growth_10m !== undefined ? formatCompact(opsSummary.data.queue.llm_dlq_growth_10m) : '—'}
+                LLM DLQ +10m: {hasNumber(opsSummary.data.queue.llm_dlq_growth_10m) ? formatCompact(opsSummary.data.queue.llm_dlq_growth_10m) : '—'}
               </span>
               <span className="chip chip--red">
-                Fetch DLQ +10m: {opsSummary.data.queue.page_fetch_dlq_growth_10m !== undefined ? formatCompact(opsSummary.data.queue.page_fetch_dlq_growth_10m) : '—'}
+                Fetch DLQ +10m: {hasNumber(opsSummary.data.queue.page_fetch_dlq_growth_10m) ? formatCompact(opsSummary.data.queue.page_fetch_dlq_growth_10m) : '—'}
               </span>
               <span className="chip chip--red">
-                Login failures +10m: {opsSummary.data.auth.login_failures_10m !== undefined ? formatCompact(opsSummary.data.auth.login_failures_10m) : '—'}
+                Login failures +10m: {hasNumber(opsSummary.data.auth.login_failures_10m) ? formatCompact(opsSummary.data.auth.login_failures_10m) : '—'}
               </span>
               <span className="chip chip--amber">
-                Lockouts +10m: {opsSummary.data.auth.lockouts_10m !== undefined ? formatCompact(opsSummary.data.auth.lockouts_10m) : '—'}
+                Lockouts +10m: {hasNumber(opsSummary.data.auth.lockouts_10m) ? formatCompact(opsSummary.data.auth.lockouts_10m) : '—'}
               </span>
               <span className="chip chip--amber">
-                Refresh failures +10m: {opsSummary.data.auth.refresh_failures_10m !== undefined ? formatCompact(opsSummary.data.auth.refresh_failures_10m) : '—'}
+                Refresh failures +10m: {hasNumber(opsSummary.data.auth.refresh_failures_10m) ? formatCompact(opsSummary.data.auth.refresh_failures_10m) : '—'}
               </span>
             </div>
             {opsSummary.data.providers.length > 0 ? (
@@ -493,7 +495,7 @@ export const DashboardPage = () => {
                         <td>{item.provider}</td>
                         <td>{formatCompact(item.failures_5m)}</td>
                         <td>{formatCompact(item.timeouts_5m)}</td>
-                        <td>{item.latency_p95_seconds !== undefined ? `${item.latency_p95_seconds.toFixed(2)}s` : '—'}</td>
+                        <td>{hasNumber(item.latency_p95_seconds) ? `${item.latency_p95_seconds.toFixed(2)}s` : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
