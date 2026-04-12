@@ -254,7 +254,7 @@ export const DashboardPage = () => {
       </p>
 
       {dashboard.error ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load dashboard analytics: {dashboard.error}</p>
         </div>
       ) : null}

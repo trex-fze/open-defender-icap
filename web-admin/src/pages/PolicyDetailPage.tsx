@@ -213,8 +213,7 @@ export const PolicyDetailPage = () => {
           </button>
           {canPublish ? (
             <button
-              className="cta-button"
-              style={{ background: 'var(--button-danger-bg)', color: 'var(--button-contrast-text)' }}
+              className="cta-button btn-danger"
               onClick={handleActivate}
               disabled={busy || isMock || !canCallApi}
             >
@@ -223,8 +222,7 @@ export const PolicyDetailPage = () => {
           ) : null}
           {canEdit ? (
             <button
-              className="cta-button"
-              style={{ background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
+              className="cta-button btn-secondary"
               onClick={handleDisable}
               disabled={busy || isMock || !canCallApi || policy.status === 'active'}
             >
@@ -233,8 +231,7 @@ export const PolicyDetailPage = () => {
           ) : null}
           {canPublish ? (
             <button
-              className="cta-button"
-              style={{ background: 'var(--button-danger-strong-bg)', color: 'var(--button-contrast-text)' }}
+              className="cta-button btn-danger-strong"
               onClick={handleDelete}
               disabled={busy || isMock || !canCallApi || policy.status === 'active'}
             >
@@ -245,19 +242,19 @@ export const PolicyDetailPage = () => {
       </div>
 
       {error ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Unable to reach Admin API: {error}</p>
         </div>
       ) : null}
 
       {mutationError ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Policy action failed: {mutationError}</p>
         </div>
       ) : null}
 
       {message ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
+        <div className="glass-panel glass-panel--success">
           <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}

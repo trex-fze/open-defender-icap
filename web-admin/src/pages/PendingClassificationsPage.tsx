@@ -140,8 +140,7 @@ export const PendingClassificationsPage = () => {
             Refresh
           </button>
           <button
-            className="cta-button"
-            style={{ background: 'var(--button-danger-strong-bg)', color: 'var(--button-contrast-text)' }}
+            className="cta-button btn-danger-strong"
             onClick={deleteAllPending}
             disabled={loading || busyAll || isMock || !canCallApi || data.length === 0}
           >
@@ -151,19 +150,19 @@ export const PendingClassificationsPage = () => {
       </div>
 
       {error ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load pending sites: {error}</p>
         </div>
       ) : null}
 
       {actionError ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Pending action failed: {actionError}</p>
         </div>
       ) : null}
 
       {message ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
+        <div className="glass-panel glass-panel--success">
           <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
@@ -230,8 +229,7 @@ export const PendingClassificationsPage = () => {
               {busyKey === selectedRecord.normalizedKey ? 'Saving...' : 'Save Classification'}
             </button>
             <button
-              className="cta-button"
-              style={{ background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
+              className="cta-button btn-secondary"
               onClick={() => setSelectedKey(undefined)}
             >
               Cancel
@@ -304,12 +302,10 @@ export const PendingClassificationsPage = () => {
                             Manual Classify
                           </button>
                           <button
-                            className="cta-button"
+                            className="cta-button btn-danger-strong"
                             style={{
                               padding: '0.4rem 0.8rem',
                               fontSize: '0.75rem',
-                              background: 'var(--button-danger-strong-bg)',
-                              color: 'var(--button-contrast-text)',
                             }}
                             disabled={busyKey === item.normalizedKey || isMock || !canCallApi || busyAll}
                             onClick={() => deletePendingRow(item)}

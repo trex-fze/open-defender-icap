@@ -131,8 +131,7 @@ export const TaxonomyPage = () => {
             {busy ? 'Saving...' : 'Save Changes'}
           </button>
           <button
-            className="cta-button"
-            style={{ background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
+            className="cta-button btn-secondary"
             disabled={busy || !isDirty}
             onClick={resetLocal}
           >
@@ -145,19 +144,19 @@ export const TaxonomyPage = () => {
       </div>
 
       {error ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load taxonomy: {error}</p>
         </div>
       ) : null}
 
       {actionError ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Save failed: {actionError}</p>
         </div>
       ) : null}
 
       {message ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
+        <div className="glass-panel glass-panel--success">
           <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
@@ -168,7 +167,7 @@ export const TaxonomyPage = () => {
         </p>
       ) : null}
 
-      <div className="glass-panel" style={{ marginTop: '1rem', background: 'rgba(108,140,255,0.08)' }}>
+      <div className="glass-panel" style={{ marginTop: '1rem', background: 'var(--surface-subtle)' }}>
         <p style={{ margin: '0 0 0.3rem' }}>
           Taxonomy structure is locked to the canonical file. Checked boxes mean traffic is disabled/blocked; unchecked
           boxes mean the category/subcategory is allowed. Enabling a category resets all of its topics to allowed—you can
@@ -226,7 +225,7 @@ export const TaxonomyPage = () => {
                 </label>
                 {category.locked ? <span className="chip chip--teal">Locked</span> : null}
               </div>
-              <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.5rem' }}>
+              <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '0.5rem' }}>
                 <p className="section-title" style={{ marginBottom: '0.4rem' }}>Subcategories</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   {category.subcategories.map((sub) => (

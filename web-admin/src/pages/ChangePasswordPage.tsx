@@ -63,7 +63,7 @@ export const ChangePasswordPage = () => {
           borderRadius: '1.5rem',
           padding: '2rem',
           border: '1px solid var(--border-subtle)',
-          boxShadow: '0 30px 80px rgba(0,0,0,0.45)',
+          boxShadow: 'var(--auth-shadow)',
         }}
       >
         <p className="section-title">Security checkpoint</p>

@@ -44,7 +44,7 @@ export const PolicyCreatePage = () => {
       </div>
 
       {!canCallApi ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 225, 127, 0.45)' }}>
+        <div className="glass-panel glass-panel--warning">
           <p style={{ margin: 0, color: 'var(--status-warning)' }}>
             Admin API is not configured for live mutations. Set `VITE_ADMIN_API_URL` and sign in with a valid token.
           </p>
@@ -102,9 +102,8 @@ export const PolicyCreatePage = () => {
             {busy ? 'Creating...' : 'Create Draft'}
           </button>
           <button
-            className="cta-button"
+            className="cta-button btn-secondary"
             type="button"
-            style={{ background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
             onClick={() => navigate('/policies')}
           >
             Cancel

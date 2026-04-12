@@ -39,8 +39,7 @@ export const DiagnosticsCachePage = () => {
           </button>
           <button
             type="button"
-            className="cta-button"
-            style={{ background: 'var(--button-danger-bg)', color: 'var(--button-contrast-text)' }}
+            className="cta-button btn-danger"
             onClick={onEvict}
             disabled={loading || !canCallApi || !key.trim()}
           >
@@ -50,13 +49,13 @@ export const DiagnosticsCachePage = () => {
       </form>
 
       {error ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>{error}</p>
         </div>
       ) : null}
 
       {message ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
+        <div className="glass-panel glass-panel--success">
           <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
@@ -76,16 +75,7 @@ export const DiagnosticsCachePage = () => {
           <p style={{ margin: '0.3rem 0' }}>
             <strong>Created:</strong> {new Date(entry.created_at).toLocaleString()}
           </p>
-          <pre
-            style={{
-              marginTop: '0.9rem',
-              background: 'rgba(4, 13, 26, 0.6)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '0.8rem',
-              padding: '0.8rem',
-              overflowX: 'auto',
-            }}
-          >
+          <pre className="code-block-panel">
             {JSON.stringify(entry.value, null, 2)}
           </pre>
         </div>

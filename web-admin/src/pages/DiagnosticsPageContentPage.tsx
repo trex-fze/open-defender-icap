@@ -74,7 +74,7 @@ export const DiagnosticsPageContentPage = () => {
       </form>
 
       {error ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>{error}</p>
         </div>
       ) : null}
@@ -141,16 +141,7 @@ export const DiagnosticsPageContentPage = () => {
             </div>
           ) : null}
 
-          <pre
-            style={{
-              marginTop: '0.9rem',
-              background: 'rgba(4, 13, 26, 0.6)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '0.8rem',
-              padding: '0.8rem',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
+          <pre className="code-block-panel" style={{ whiteSpace: 'pre-wrap' }}>
             {record.excerpt ?? 'No excerpt available'}
           </pre>
         </div>

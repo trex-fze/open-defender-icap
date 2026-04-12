@@ -33,7 +33,7 @@ export const InvestigationsPage = () => {
       </div>
 
       {error ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Unable to reach Admin API: {error}</p>
           <p style={{ color: 'var(--muted)' }}>Showing mock data while we retry the live feed.</p>
         </div>

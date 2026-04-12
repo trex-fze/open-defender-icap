@@ -148,7 +148,7 @@ export const PoliciesPage = () => {
       </div>
 
       {error ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load live data: {error}</p>
           <p style={{ marginTop: '0.35rem', color: 'var(--muted)' }}>
             Showing cached mock data so you can keep iterating.
@@ -157,13 +157,13 @@ export const PoliciesPage = () => {
       ) : null}
 
       {mutationError ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Policy action failed: {mutationError}</p>
         </div>
       ) : null}
 
       {message ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
+        <div className="glass-panel glass-panel--success">
           <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
@@ -225,12 +225,10 @@ export const PoliciesPage = () => {
                         ) : null}
                         {canEdit ? (
                           <button
-                            className="cta-button"
+                            className="cta-button btn-secondary"
                             style={{
                               padding: '0.3rem 0.65rem',
                               fontSize: '0.74rem',
-                              background: 'var(--button-secondary-bg)',
-                              color: 'var(--button-contrast-text)',
                             }}
                             disabled={busy || isMock || !canCallApi || policy.status === 'active'}
                             onClick={() => onDisable(policy.id, policy.name, policy.status)}
@@ -240,12 +238,10 @@ export const PoliciesPage = () => {
                         ) : null}
                         {canPublish ? (
                           <button
-                            className="cta-button"
+                            className="cta-button btn-danger"
                             style={{
                               padding: '0.3rem 0.65rem',
                               fontSize: '0.74rem',
-                              background: 'var(--button-danger-bg)',
-                              color: 'var(--button-contrast-text)',
                             }}
                             disabled={busy || isMock || !canCallApi || policy.status === 'active'}
                             onClick={() => onDelete(policy.id, policy.name)}

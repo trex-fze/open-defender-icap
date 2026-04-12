@@ -107,19 +107,19 @@ export const OverridesPage = () => {
       </div>
 
       {error ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load overrides: {error}</p>
         </div>
       ) : null}
 
       {actionError ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Override change failed: {actionError}</p>
         </div>
       ) : null}
 
       {message ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
+        <div className="glass-panel glass-panel--success">
           <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
@@ -194,9 +194,8 @@ export const OverridesPage = () => {
               {busy ? 'Saving...' : editing ? 'Update Entry' : 'Create Entry'}
           </button>
           <button
-            className="cta-button"
+            className="cta-button btn-secondary"
             type="button"
-            style={{ background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
             onClick={resetForm}
           >
             Clear
@@ -270,12 +269,10 @@ export const OverridesPage = () => {
                           Edit
                         </button>
                         <button
-                          className="cta-button"
+                          className="cta-button btn-danger"
                           style={{
                             padding: '0.4rem 0.8rem',
                             fontSize: '0.75rem',
-                            background: 'var(--button-danger-bg)',
-                            color: 'var(--button-contrast-text)',
                           }}
                           onClick={() => onDelete(item.id)}
                           disabled={busy || !canCallApi || isMock}

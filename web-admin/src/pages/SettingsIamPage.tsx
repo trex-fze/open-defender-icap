@@ -1371,7 +1371,7 @@ const IamServiceAccountsPanel = () => {
         <button className="cta-button" disabled={!api.canCallApi}>Generate Token</button>
       </form>
       {lastToken && (
-        <div className="glass-panel" style={{ marginTop: '1rem', borderColor: 'rgba(86,196,255,0.3)' }}>
+        <div className="glass-panel glass-panel--info" style={{ marginTop: '1rem' }}>
           <p className="section-title">New token for {lastToken.account.name}</p>
           <code className="token-display">{lastToken.token}</code>
           <p className="muted" style={{ marginTop: '0.35rem' }}>

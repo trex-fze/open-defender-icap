@@ -98,17 +98,17 @@ export const ClassificationsPage = () => {
       </div>
 
       {error ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Failed to load classification list: {error}</p>
         </div>
       ) : null}
       {actionError ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(255, 122, 122, 0.4)' }}>
+        <div className="glass-panel glass-panel--error">
           <p style={{ margin: 0, color: 'var(--status-error)' }}>Classification action failed: {actionError}</p>
         </div>
       ) : null}
       {message ? (
-        <div className="glass-panel" style={{ borderColor: 'rgba(158, 247, 235, 0.4)' }}>
+        <div className="glass-panel glass-panel--success">
           <p style={{ margin: 0, color: 'var(--status-success)' }}>{message}</p>
         </div>
       ) : null}
@@ -193,16 +193,14 @@ export const ClassificationsPage = () => {
               {busyKey === selectedRow.normalized_key ? 'Saving...' : 'Save'}
             </button>
             <button
-              className="cta-button"
-              style={{ background: 'var(--button-danger-strong-bg)', color: 'var(--button-contrast-text)' }}
+              className="cta-button btn-danger-strong"
               disabled={!canCallApi || busyKey === selectedRow.normalized_key}
               onClick={() => removeClassification(selectedRow.normalized_key)}
             >
               {busyKey === selectedRow.normalized_key ? 'Removing...' : 'Remove Domain'}
             </button>
             <button
-              className="cta-button"
-              style={{ background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
+              className="cta-button btn-secondary"
               onClick={() => setSelectedKey(undefined)}
             >
               Cancel

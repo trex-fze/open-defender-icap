@@ -103,7 +103,7 @@ export const LoginPage = () => {
           borderRadius: '1.5rem',
           padding: '2rem',
           border: '1px solid var(--border-subtle)',
-          boxShadow: '0 30px 80px rgba(0,0,0,0.45)',
+          boxShadow: 'var(--auth-shadow)',
         }}
       >
         <div className="login-brand-wrap">
@@ -115,7 +115,8 @@ export const LoginPage = () => {
         {authNotice ? (
           <div
             style={{
-                border: '1px solid rgba(255, 122, 122, 0.5)',
+                border: '1px solid var(--error-border)',
+                background: 'var(--error-bg)',
                 borderRadius: '0.75rem',
                 padding: '0.65rem 0.8rem',
                 color: 'var(--status-error)',
@@ -128,7 +129,8 @@ export const LoginPage = () => {
         {error ? (
           <div
             style={{
-                border: '1px solid rgba(255, 122, 122, 0.5)',
+                border: '1px solid var(--error-border)',
+                background: 'var(--error-bg)',
                 borderRadius: '0.75rem',
                 padding: '0.65rem 0.8rem',
                 color: 'var(--status-error)',
@@ -164,8 +166,8 @@ export const LoginPage = () => {
         {authNotice ? (
           <button
             type="button"
-            className="cta-button"
-            style={{ width: '100%', marginTop: '0.6rem', background: 'var(--button-secondary-bg)', color: 'var(--button-contrast-text)' }}
+            className="cta-button btn-secondary"
+            style={{ width: '100%', marginTop: '0.6rem' }}
             onClick={clearAuthNotice}
           >
             Dismiss notice
