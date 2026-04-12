@@ -392,6 +392,15 @@ impl ProviderRouter {
         self.fallback.as_ref()
     }
 
+    fn by_name(&self, name: &str) -> Option<&ResolvedProvider> {
+        if self.primary.name == name {
+            return Some(&self.primary);
+        }
+        self.fallback
+            .as_ref()
+            .filter(|provider| provider.name == name)
+    }
+
     fn catalog(&self) -> Arc<Vec<metrics::ProviderSummary>> {
         Arc::clone(&self.catalog)
     }
@@ -1264,6 +1273,7 @@ impl PendingReconciler {
                 content_version: None,
                 content_language: None,
                 requeue_attempt: 0,
+                provider_override: None,
             };
             let fetch_job = PageFetchJob {
                 normalized_key: pending.normalized_key.clone(),
@@ -2262,8 +2272,14 @@ impl JobConsumer {
         retry_instruction: Option<&str>,
         stale_provider: Option<&ResolvedProvider>,
     ) -> Result<(LlmResponse, String, PromptContextMode, bool, Option<String>)> {
+        let preferred_primary = job
+            .provider_override
+            .as_deref()
+            .and_then(|name| self.router.by_name(name));
+        let primary = preferred_primary.unwrap_or_else(|| self.router.primary());
+
         if let Some(provider) = stale_provider {
-            if provider.name != self.router.primary().name {
+            if provider.name != primary.name {
                 let (provider_job, prompt, context_mode, excerpt_sent, metadata_only_reason) = self
                     .prepare_provider_request(job, provider, retry_instruction)
                     .await?;
@@ -2304,7 +2320,6 @@ impl JobConsumer {
             }
         }
 
-        let primary = self.router.primary();
         let (
             primary_job,
             primary_prompt,
@@ -2369,7 +2384,13 @@ impl JobConsumer {
                     };
                 }
 
-                let fallback = if let Some(provider) = self.router.fallback() {
+                let fallback = if primary.name == self.router.primary().name {
+                    self.router.fallback()
+                } else {
+                    Some(self.router.primary())
+                };
+
+                let fallback = if let Some(provider) = fallback {
                     provider
                 } else {
                     metrics::record_fallback_skipped("fallback_not_configured");
@@ -2878,6 +2899,8 @@ struct ClassificationJobPayload {
     content_language: Option<String>,
     #[serde(default)]
     requeue_attempt: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_override: Option<String>,
 }
 
 fn classification_idempotency_key(job: &ClassificationJobPayload) -> String {
@@ -3155,6 +3178,7 @@ async fn invoke_provider_healthcheck(provider: &ResolvedProvider) -> Result<()> 
         content_version: None,
         content_language: None,
         requeue_attempt: 0,
+        provider_override: None,
     };
 
     match provider.kind {
@@ -3732,6 +3756,7 @@ mod tests {
             content_version: Some(2),
             content_language: Some("en".into()),
             requeue_attempt: 0,
+            provider_override: None,
         };
         let prompt = build_prompt(&job, &taxonomy_prompt, None, PromptContextMode::WithExcerpt);
         assert!(prompt.contains("Allowed Taxonomy IDs"));
@@ -3740,6 +3765,43 @@ mod tests {
         assert!(prompt.contains("captured page excerpt"));
         assert!(prompt.contains("Content Hash: abc123"));
         assert!(prompt.contains("Content Version: 2"));
+    }
+
+    #[test]
+    fn provider_router_resolves_by_name() {
+        let primary = ResolvedProvider {
+            name: "local-lmstudio".into(),
+            kind: ProviderKind::LmStudio,
+            endpoint: "http://localhost:1234/v1/chat/completions".into(),
+            model: Some("test-model".into()),
+            timeout_ms: Some(1000),
+            headers: HashMap::new(),
+            api_key: String::new(),
+        };
+        let fallback = ResolvedProvider {
+            name: "openai-fallback".into(),
+            kind: ProviderKind::Openai,
+            endpoint: "https://api.openai.com/v1/chat/completions".into(),
+            model: Some("gpt-4o-mini".into()),
+            timeout_ms: Some(1000),
+            headers: HashMap::new(),
+            api_key: "test".into(),
+        };
+        let router = ProviderRouter {
+            primary,
+            fallback: Some(fallback),
+            catalog: Arc::new(Vec::new()),
+        };
+
+        assert_eq!(
+            router.by_name("local-lmstudio").map(|p| p.name.as_str()),
+            Some("local-lmstudio")
+        );
+        assert_eq!(
+            router.by_name("openai-fallback").map(|p| p.name.as_str()),
+            Some("openai-fallback")
+        );
+        assert!(router.by_name("missing-provider").is_none());
     }
 
     #[test]
@@ -3760,6 +3822,7 @@ mod tests {
             content_version: None,
             content_language: None,
             requeue_attempt: 0,
+            provider_override: None,
         };
         let prompt = build_prompt(&job, &taxonomy_prompt, None, PromptContextMode::WithExcerpt);
         assert!(prompt.contains("Homepage Content Excerpt: unavailable"));
@@ -4009,6 +4072,7 @@ mod tests {
             content_version: None,
             content_language: None,
             requeue_attempt: 0,
+            provider_override: None,
         };
 
         sleep(Duration::from_millis(500)).await;
@@ -4107,6 +4171,7 @@ mod tests {
             content_version: None,
             content_language: None,
             requeue_attempt: 0,
+            provider_override: None,
         };
 
         sleep(Duration::from_millis(500)).await;
@@ -4200,6 +4265,7 @@ mod tests {
             content_version: None,
             content_language: None,
             requeue_attempt: 0,
+            provider_override: None,
         };
 
         tokio::time::sleep(Duration::from_millis(500)).await;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PaginationControls } from '../components/PaginationControls';
 import { PendingClassification, usePendingClassifications } from '../hooks/usePendingClassifications';
+import { useLlmProviders } from '../hooks/useLlmProviders';
 import { usePendingActions } from '../hooks/usePendingActions';
 import { useTaxonomyData } from '../hooks/useTaxonomyData';
 
@@ -17,14 +18,23 @@ export const PendingClassificationsPage = () => {
     isMock: isTaxonomyMock,
     canCallApi: canCallTaxonomyApi,
   } = useTaxonomyData();
-  const { manualClassify, clearPending, clearAllPending, busyKey, busyAll, error: actionError } = usePendingActions();
+  const { manualClassify, metadataClassify, clearPending, clearAllPending, busyKey, busyAll, error: actionError } = usePendingActions();
+  const {
+    data: llmProviders,
+    loading: llmProvidersLoading,
+    error: llmProvidersError,
+  } = useLlmProviders();
   const [selectedKey, setSelectedKey] = useState<string | undefined>();
+  const [metadataKey, setMetadataKey] = useState<string | undefined>();
   const [reason, setReason] = useState('Manual analyst classification');
+  const [metadataReason, setMetadataReason] = useState('Manual metadata-only classification from Pending Sites');
   const [categoryId, setCategoryId] = useState('');
   const [subcategoryId, setSubcategoryId] = useState('');
+  const [providerName, setProviderName] = useState('');
   const [message, setMessage] = useState<string | undefined>();
 
   const selectedRecord = selectedKey ? data.find((item) => item.normalizedKey === selectedKey) : undefined;
+  const metadataRecord = metadataKey ? data.find((item) => item.normalizedKey === metadataKey) : undefined;
   const taxonomyCategories = useMemo(
     () =>
       taxonomy.categories
@@ -44,6 +54,13 @@ export const PendingClassificationsPage = () => {
     !isMock &&
     !isTaxonomyMock &&
     !taxonomyLoading;
+  const canSubmitMetadata =
+    Boolean(metadataRecord) &&
+    Boolean(providerName) &&
+    canCallApi &&
+    !isMock &&
+    !llmProvidersLoading &&
+    llmProviders.length > 0;
 
   useEffect(() => {
     setCursor(undefined);
@@ -79,6 +96,20 @@ export const PendingClassificationsPage = () => {
     });
   }, [selectedCategory]);
 
+  useEffect(() => {
+    if (llmProviders.length === 0) {
+      setProviderName('');
+      return;
+    }
+
+    setProviderName((prev) => {
+      if (llmProviders.some((provider) => provider.name === prev)) {
+        return prev;
+      }
+      return llmProviders[0]?.name ?? '';
+    });
+  }, [llmProviders]);
+
   const submitManualDecision = async () => {
     if (!selectedRecord || !selectedCategory || !selectedSubcategory) return;
     setMessage(undefined);
@@ -89,6 +120,24 @@ export const PendingClassificationsPage = () => {
         reason: reason.trim() || undefined,
       });
       setMessage(`Saved classification for ${selectedRecord.normalizedKey}`);
+      setSelectedKey(undefined);
+      setMetadataKey(undefined);
+      await refresh();
+    } catch {
+      setMessage(undefined);
+    }
+  };
+
+  const submitMetadataDecision = async () => {
+    if (!metadataRecord || !providerName) return;
+    setMessage(undefined);
+    try {
+      await metadataClassify(metadataRecord.normalizedKey, {
+        provider_name: providerName,
+        reason: metadataReason.trim() || undefined,
+      });
+      setMessage(`Queued metadata-only classification for ${metadataRecord.normalizedKey}`);
+      setMetadataKey(undefined);
       setSelectedKey(undefined);
       await refresh();
     } catch {
@@ -103,6 +152,9 @@ export const PendingClassificationsPage = () => {
       await clearPending(row.normalizedKey);
       if (selectedKey === row.normalizedKey) {
         setSelectedKey(undefined);
+      }
+      if (metadataKey === row.normalizedKey) {
+        setMetadataKey(undefined);
       }
       setMessage(`Deleted pending site ${row.normalizedKey}`);
       await refresh();
@@ -121,6 +173,7 @@ export const PendingClassificationsPage = () => {
     try {
       const deleted = await clearAllPending();
       setSelectedKey(undefined);
+      setMetadataKey(undefined);
       setMessage(`Deleted ${deleted} pending sites.`);
       await refresh();
     } catch {
@@ -238,6 +291,66 @@ export const PendingClassificationsPage = () => {
         </div>
       ) : null}
 
+      {metadataRecord ? (
+        <div className="glass-panel">
+          <p className="section-title">Metadata-only Classification</p>
+          <p style={{ marginTop: 0, color: 'var(--muted)' }}>{metadataRecord.normalizedKey}</p>
+          <div className="layout-grid">
+            <label>
+              <span style={{ display: 'block', marginBottom: '0.3rem' }}>Preferred Provider</span>
+              <select
+                className="search-input"
+                value={providerName}
+                onChange={(event) => setProviderName(event.target.value)}
+                disabled={llmProvidersLoading || llmProviders.length === 0}
+              >
+                {llmProviders.map((provider) => (
+                  <option key={provider.name} value={provider.name}>
+                    {provider.name} ({provider.healthStatus})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span style={{ display: 'block', marginBottom: '0.3rem' }}>Reason</span>
+              <input
+                className="search-input"
+                value={metadataReason}
+                onChange={(event) => setMetadataReason(event.target.value)}
+              />
+            </label>
+          </div>
+          <p style={{ marginTop: '0.75rem', marginBottom: 0, color: 'var(--muted)' }}>
+            Preferred provider is tried first, then normal fallback policy applies if needed.
+          </p>
+          {llmProvidersError ? (
+            <p style={{ marginTop: '0.75rem', marginBottom: 0, color: 'var(--status-warning)' }}>
+              LLM providers are unavailable: {llmProvidersError}
+            </p>
+          ) : null}
+          {!llmProvidersLoading && llmProviders.length === 0 ? (
+            <p style={{ marginTop: '0.75rem', marginBottom: 0, color: 'var(--status-warning)' }}>
+              No LLM providers are available for metadata-only classification.
+            </p>
+          ) : null}
+          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+            <button
+              className="cta-button"
+              disabled={!canSubmitMetadata || busyKey === metadataRecord.normalizedKey}
+              onClick={submitMetadataDecision}
+            >
+              {busyKey === metadataRecord.normalizedKey ? 'Queueing...' : 'Queue Metadata-only Classification'}
+            </button>
+            <button
+              className="cta-button btn-secondary"
+              onClick={() => setMetadataKey(undefined)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="glass-panel scroll-table-panel">
         <PaginationControls
           limit={limit}
@@ -297,9 +410,23 @@ export const PendingClassificationsPage = () => {
                           <button
                             className="cta-button"
                             style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem' }}
-                            onClick={() => setSelectedKey(item.normalizedKey)}
+                            onClick={() => {
+                              setSelectedKey(item.normalizedKey);
+                              setMetadataKey(undefined);
+                            }}
                           >
                             Manual Classify
+                          </button>
+                          <button
+                            className="cta-button btn-secondary"
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem' }}
+                            disabled={busyKey === item.normalizedKey || isMock || !canCallApi || busyAll}
+                            onClick={() => {
+                              setMetadataKey(item.normalizedKey);
+                              setSelectedKey(undefined);
+                            }}
+                          >
+                            Metadata-only Classify
                           </button>
                           <button
                             className="cta-button btn-danger-strong"

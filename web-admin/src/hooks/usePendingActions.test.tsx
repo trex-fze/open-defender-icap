@@ -107,4 +107,27 @@ describe('usePendingActions', () => {
     expect(mockFetch).toHaveBeenCalledOnce();
     expect(mockFetch.mock.calls[0]?.[0]).toContain('/api/v1/classifications/pending');
   });
+
+  it('posts metadata-only classification payload to metadata endpoint', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: async () => ({}),
+      text: async () => '{}',
+    });
+
+    const { result } = renderHook(() => usePendingActions());
+
+    await act(async () => {
+      await result.current.metadataClassify('domain:test.example', {
+        provider_name: 'openai-fallback',
+        reason: 'manual metadata-only review',
+      });
+    });
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch.mock.calls[0]?.[0]).toContain('/api/v1/classifications/domain%3Atest.example/metadata-classify');
+    expect(result.current.error).toBeUndefined();
+  });
 });

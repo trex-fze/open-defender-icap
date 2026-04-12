@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgPool, Row};
 use tracing::{error, warn};
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct PendingQuery {
@@ -72,6 +73,45 @@ pub struct ManualClassifyRequest {
 pub struct UpsertPendingRequest {
     pub status: Option<String>,
     pub base_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MetadataClassifyRequest {
+    pub provider_name: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MetadataClassifyResponse {
+    pub normalized_key: String,
+    pub status: String,
+    pub provider_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ClassificationJobPayload {
+    normalized_key: String,
+    entity_level: String,
+    hostname: String,
+    full_url: String,
+    trace_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    idempotency_key: Option<String>,
+    requires_content: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_excerpt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_language: Option<String>,
+    #[serde(default)]
+    requeue_attempt: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_override: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -426,6 +466,143 @@ pub async fn upsert_pending(
     Ok(StatusCode::ACCEPTED)
 }
 
+pub async fn metadata_classify(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Path(normalized_key): Path<String>,
+    Json(payload): Json<MetadataClassifyRequest>,
+) -> Result<Json<MetadataClassifyResponse>, (StatusCode, Json<ApiError>)> {
+    require_roles(&user, ROLE_POLICY_EDIT)
+        .map_err(|status| (status, Json(ApiError::forbidden())))?;
+
+    if parse_normalized_key(&normalized_key).is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "INVALID_NORMALIZED_KEY",
+                "normalized_key must start with domain: or subdomain:",
+            )),
+        ));
+    }
+
+    let applied_key =
+        canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+    let (entity_level, hostname) = parse_normalized_key(&applied_key).ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "INVALID_NORMALIZED_KEY",
+                "normalized_key must start with domain: or subdomain:",
+            )),
+        )
+    })?;
+
+    let provider_name = normalize_provider_name(payload.provider_name.as_deref());
+
+    if let Some(provider) = provider_name.as_deref() {
+        let provider_valid = state
+            .validate_llm_provider_name(provider)
+            .await
+            .map_err(|err| {
+                error!(target = "svc-admin", %err, provider, "failed to validate llm provider");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(ApiError::new(
+                        "LLM_PROVIDER_LOOKUP_FAILED",
+                        "failed to validate selected llm provider",
+                    )),
+                )
+            })?;
+
+        if !provider_valid {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new(
+                    "INVALID_LLM_PROVIDER",
+                    "selected llm provider is not available",
+                )),
+            ));
+        }
+    }
+
+    let pending = sqlx::query(
+        r#"SELECT base_url
+           FROM classification_requests
+           WHERE normalized_key = $1"#,
+    )
+    .bind(&applied_key)
+    .fetch_optional(state.pool())
+    .await
+    .map_err(db_error)?;
+
+    let Some(pending_row) = pending else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ApiError::new(
+                "PENDING_NOT_FOUND",
+                "pending classification record was not found",
+            )),
+        ));
+    };
+
+    let base_url: Option<String> = pending_row.get("base_url");
+    let job = build_metadata_classification_job(
+        applied_key.clone(),
+        entity_level,
+        &hostname,
+        base_url,
+        provider_name.clone(),
+    );
+
+    state.queue_classification_job(&job).await.map_err(|err| {
+        error!(
+            target = "svc-admin",
+            %err,
+            key = %applied_key,
+            "failed to publish metadata-only classification job"
+        );
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiError::new(
+                "CLASSIFICATION_QUEUE_UNAVAILABLE",
+                "failed to enqueue metadata-only classification job",
+            )),
+        )
+    })?;
+
+    let status = "queued_manual_metadata";
+    sqlx::query(
+        r#"UPDATE classification_requests
+           SET status = $2,
+               last_error = NULL,
+               updated_at = NOW()
+           WHERE normalized_key = $1"#,
+    )
+    .bind(&applied_key)
+    .bind(status)
+    .execute(state.pool())
+    .await
+    .map_err(db_error)?;
+
+    state
+        .log_policy_event(
+            "pending.metadata_classify",
+            Some(user.actor),
+            Some(applied_key.clone()),
+            json!({
+                "provider_name": provider_name,
+                "reason": payload.reason,
+            }),
+        )
+        .await;
+
+    Ok(Json(MetadataClassifyResponse {
+        normalized_key: applied_key,
+        status: status.to_string(),
+        provider_name: job.provider_override,
+    }))
+}
+
 pub async fn clear_pending(
     Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
@@ -610,4 +787,100 @@ fn parse_normalized_key(normalized_key: &str) -> Option<(&'static str, String)> 
         return Some(("subdomain", host.to_string()));
     }
     None
+}
+
+fn normalize_provider_name(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn metadata_job_idempotency_key(normalized_key: &str, provider_name: Option<&str>) -> String {
+    format!(
+        "manual-meta:{}:{}",
+        normalized_key,
+        provider_name.unwrap_or("default")
+    )
+}
+
+fn build_metadata_classification_job(
+    normalized_key: String,
+    entity_level: &str,
+    hostname: &str,
+    base_url: Option<String>,
+    provider_name: Option<String>,
+) -> ClassificationJobPayload {
+    let full_url = base_url
+        .clone()
+        .unwrap_or_else(|| format!("https://{}", hostname));
+    let trace_id = format!("manual-meta-{}", Uuid::new_v4());
+    let idempotency_key = metadata_job_idempotency_key(&normalized_key, provider_name.as_deref());
+
+    ClassificationJobPayload {
+        normalized_key,
+        entity_level: entity_level.to_string(),
+        hostname: hostname.to_string(),
+        full_url,
+        trace_id,
+        idempotency_key: Some(idempotency_key),
+        requires_content: false,
+        base_url,
+        content_excerpt: None,
+        content_hash: None,
+        content_version: None,
+        content_language: None,
+        requeue_attempt: 0,
+        provider_override: provider_name,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_provider_name_trims_and_omits_empty() {
+        assert_eq!(
+            normalize_provider_name(Some(" openai-fallback ")),
+            Some("openai-fallback".to_string())
+        );
+        assert_eq!(normalize_provider_name(Some("   ")), None);
+        assert_eq!(normalize_provider_name(None), None);
+    }
+
+    #[test]
+    fn metadata_idempotency_key_defaults_when_provider_missing() {
+        assert_eq!(
+            metadata_job_idempotency_key("domain:example.com", None),
+            "manual-meta:domain:example.com:default"
+        );
+        assert_eq!(
+            metadata_job_idempotency_key("domain:example.com", Some("local-lmstudio")),
+            "manual-meta:domain:example.com:local-lmstudio"
+        );
+    }
+
+    #[test]
+    fn build_metadata_job_uses_base_url_and_provider_override() {
+        let job = build_metadata_classification_job(
+            "domain:example.com".to_string(),
+            "domain",
+            "example.com",
+            Some("https://portal.example.com".to_string()),
+            Some("openai-fallback".to_string()),
+        );
+
+        assert_eq!(job.normalized_key, "domain:example.com");
+        assert_eq!(job.entity_level, "domain");
+        assert_eq!(job.hostname, "example.com");
+        assert_eq!(job.full_url, "https://portal.example.com");
+        assert!(!job.requires_content);
+        assert_eq!(job.provider_override.as_deref(), Some("openai-fallback"));
+        assert_eq!(
+            job.idempotency_key.as_deref(),
+            Some("manual-meta:domain:example.com:openai-fallback")
+        );
+        assert!(job.trace_id.starts_with("manual-meta-"));
+    }
 }

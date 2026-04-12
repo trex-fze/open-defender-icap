@@ -180,6 +180,7 @@ pub struct AppState {
     policy_engine_admin_token: Option<String>,
     llm_providers_url: String,
     http_client: reqwest::Client,
+    classification_job_publisher: Option<Arc<ClassificationJobPublisher>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +202,31 @@ struct LlmProviderSummary {
     health_http_status: Option<u16>,
     #[serde(default)]
     health_detail: Option<String>,
+}
+
+#[derive(Clone)]
+struct ClassificationJobPublisher {
+    client: redis::Client,
+    stream: String,
+}
+
+impl ClassificationJobPublisher {
+    fn new(redis_url: String, stream: String) -> Result<Self> {
+        let client = redis::Client::open(redis_url)?;
+        Ok(Self { client, stream })
+    }
+
+    async fn publish(&self, payload: &str) -> Result<()> {
+        let mut conn = self.client.get_async_connection().await?;
+        let _: () = redis::cmd("XADD")
+            .arg(&self.stream)
+            .arg("*")
+            .arg("payload")
+            .arg(payload)
+            .query_async(&mut conn)
+            .await?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -397,6 +423,49 @@ impl AppState {
         self.reporting_client.as_ref()
     }
 
+    pub async fn queue_classification_job<T>(&self, payload: &T) -> Result<()>
+    where
+        T: Serialize,
+    {
+        let publisher = self
+            .classification_job_publisher
+            .as_ref()
+            .ok_or_else(|| anyhow!("classification job publisher is not configured"))?;
+        let serialized = serde_json::to_string(payload)?;
+        publisher.publish(&serialized).await
+    }
+
+    async fn fetch_llm_provider_summaries(&self) -> Result<Vec<LlmProviderSummary>> {
+        let response = self
+            .http_client
+            .get(&self.llm_providers_url)
+            .send()
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to fetch llm providers from {}",
+                    self.llm_providers_url
+                )
+            })?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "llm providers endpoint returned {}",
+                response.status()
+            ));
+        }
+
+        response
+            .json::<Vec<LlmProviderSummary>>()
+            .await
+            .context("failed to decode llm providers response")
+    }
+
+    pub async fn validate_llm_provider_name(&self, provider_name: &str) -> Result<bool> {
+        let providers = self.fetch_llm_provider_summaries().await?;
+        Ok(providers.iter().any(|item| item.name == provider_name))
+    }
+
     pub fn cache_invalidator(&self) -> Option<&CacheInvalidator> {
         self.cache_invalidator.as_deref()
     }
@@ -475,11 +544,19 @@ async fn main() -> Result<()> {
         .or_else(|| admin_token.clone());
     let llm_providers_url = env::var("OD_LLM_PROVIDERS_URL")
         .unwrap_or_else(|_| "http://llm-worker:19015/providers".to_string());
+    let classification_job_stream =
+        env::var("OD_CLASSIFICATION_STREAM").unwrap_or_else(|_| "classification-jobs".to_string());
     let cache_invalidator = redis_url
         .as_ref()
         .map(|url| CacheInvalidator::new(url.clone(), cache_channel.clone()))
         .transpose()
         .context("failed to initialize cache invalidator")?
+        .map(Arc::new);
+    let classification_job_publisher = redis_url
+        .as_ref()
+        .map(|url| ClassificationJobPublisher::new(url.clone(), classification_job_stream.clone()))
+        .transpose()
+        .context("failed to initialize classification job publisher")?
         .map(Arc::new);
 
     let pool = PgPoolOptions::new()
@@ -574,6 +651,7 @@ async fn main() -> Result<()> {
         policy_engine_admin_token,
         llm_providers_url,
         http_client: reqwest::Client::new(),
+        classification_job_publisher,
     };
 
     let auth_layer = {
@@ -689,6 +767,10 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/classifications/:normalized_key/manual-classify",
             post(classification_requests::manual_classify),
+        )
+        .route(
+            "/api/v1/classifications/:normalized_key/metadata-classify",
+            post(classification_requests::metadata_classify),
         )
         .route(
             "/api/v1/classifications/:normalized_key/pending",
@@ -864,43 +946,15 @@ async fn health() -> &'static str {
 async fn list_llm_providers(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<LlmProviderSummary>>, StatusCode> {
-    let response = state
-        .http_client
-        .get(&state.llm_providers_url)
-        .send()
-        .await
-        .map_err(|err| {
-            warn!(
-                target = "svc-admin",
-                %err,
-                url = %state.llm_providers_url,
-                "failed to fetch llm providers"
-            );
-            StatusCode::BAD_GATEWAY
-        })?;
-
-    if !response.status().is_success() {
+    let providers = state.fetch_llm_provider_summaries().await.map_err(|err| {
         warn!(
             target = "svc-admin",
-            status = %response.status(),
+            %err,
             url = %state.llm_providers_url,
-            "llm providers endpoint returned non-success status"
+            "failed to fetch llm providers"
         );
-        return Err(StatusCode::BAD_GATEWAY);
-    }
-
-    let providers = response
-        .json::<Vec<LlmProviderSummary>>()
-        .await
-        .map_err(|err| {
-            warn!(
-                target = "svc-admin",
-                %err,
-                url = %state.llm_providers_url,
-                "failed to decode llm providers response"
-            );
-            StatusCode::BAD_GATEWAY
-        })?;
+        StatusCode::BAD_GATEWAY
+    })?;
 
     Ok(Json(providers))
 }

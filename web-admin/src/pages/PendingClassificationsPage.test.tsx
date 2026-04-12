@@ -2,14 +2,17 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PendingClassificationsPage } from './PendingClassificationsPage';
+import { useLlmProviders } from '../hooks/useLlmProviders';
 import { usePendingClassifications } from '../hooks/usePendingClassifications';
 import { usePendingActions } from '../hooks/usePendingActions';
 import { useTaxonomyData, type TaxonomyActivationState } from '../hooks/useTaxonomyData';
 
+vi.mock('../hooks/useLlmProviders');
 vi.mock('../hooks/usePendingClassifications');
 vi.mock('../hooks/usePendingActions');
 vi.mock('../hooks/useTaxonomyData');
 
+const mockedUseLlmProviders = vi.mocked(useLlmProviders);
 const mockedUsePendingClassifications = vi.mocked(usePendingClassifications);
 const mockedUsePendingActions = vi.mocked(usePendingActions);
 const mockedUseTaxonomyData = vi.mocked(useTaxonomyData);
@@ -40,6 +43,7 @@ const taxonomyState: TaxonomyActivationState = {
 describe('PendingClassificationsPage', () => {
   const refresh = vi.fn().mockResolvedValue(undefined);
   const manualClassify = vi.fn().mockResolvedValue(undefined);
+  const metadataClassify = vi.fn().mockResolvedValue(undefined);
   const clearPending = vi.fn().mockResolvedValue(undefined);
   const clearAllPending = vi.fn().mockResolvedValue(1);
 
@@ -65,10 +69,30 @@ describe('PendingClassificationsPage', () => {
     });
     mockedUsePendingActions.mockReturnValue({
       manualClassify,
+      metadataClassify,
       clearPending,
       clearAllPending,
       busyKey: undefined,
       busyAll: false,
+      error: undefined,
+      canCallApi: true,
+    });
+    mockedUseLlmProviders.mockReturnValue({
+      data: [
+        {
+          name: 'local-lmstudio',
+          providerType: 'lmstudio',
+          role: 'primary',
+          healthStatus: 'healthy',
+        },
+        {
+          name: 'openai-fallback',
+          providerType: 'openai',
+          role: 'fallback',
+          healthStatus: 'healthy',
+        },
+      ],
+      loading: false,
       error: undefined,
       canCallApi: true,
     });
@@ -191,5 +215,27 @@ describe('PendingClassificationsPage', () => {
     expect(clearAllPending).toHaveBeenCalled();
     expect(refresh).toHaveBeenCalled();
     expect(screen.getByText(/Deleted 7 pending sites/i)).toBeInTheDocument();
+  });
+
+  it('queues metadata-only classification with preferred provider', async () => {
+    const user = userEvent.setup();
+
+    render(<PendingClassificationsPage />);
+
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: 'Metadata-only Classify' }));
+    });
+
+    await act(async () => {
+      await user.selectOptions(screen.getByLabelText('Preferred Provider'), 'openai-fallback');
+      await user.click(screen.getByRole('button', { name: 'Queue Metadata-only Classification' }));
+    });
+
+    expect(metadataClassify).toHaveBeenCalledWith(
+      'domain:test.example',
+      expect.objectContaining({ provider_name: 'openai-fallback' }),
+    );
+    expect(refresh).toHaveBeenCalled();
+    expect(screen.getByText(/Queued metadata-only classification/i)).toBeInTheDocument();
   });
 });

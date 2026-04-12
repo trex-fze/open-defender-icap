@@ -25,4 +25,5 @@ export const queryKeys = {
   reportingDashboard: (baseUrl: string, range: string, topN: number, bucket?: string) =>
     ['reporting-dashboard', baseUrl, range, topN, bucket ?? 'auto'] as const,
   opsStatus: (baseUrl: string, providersUrl: string) => ['ops-status', baseUrl, providersUrl] as const,
+  llmProviders: (baseUrl: string) => ['llm-providers', baseUrl] as const,
 };

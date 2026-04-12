@@ -665,6 +665,7 @@ mod support {
             policy_engine_admin_token: Some("test-token".to_string()),
             llm_providers_url: "http://llm-worker:19015/providers".to_string(),
             http_client: reqwest::Client::new(),
+            classification_job_publisher: None,
         })
     }
 }

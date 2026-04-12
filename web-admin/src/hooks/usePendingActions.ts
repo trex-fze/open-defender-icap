@@ -8,6 +8,11 @@ type ManualClassifyPayload = {
   reason?: string;
 };
 
+type MetadataClassifyPayload = {
+  provider_name?: string;
+  reason?: string;
+};
+
 type ClearAllPendingResponse = {
   deleted: number;
 };
@@ -51,6 +56,26 @@ export const usePendingActions = () => {
     }
   };
 
+  const metadataClassify = async (
+    normalizedKey: string,
+    payload: MetadataClassifyPayload,
+  ) => {
+    setBusyKey(normalizedKey);
+    setError(undefined);
+    try {
+      await adminPostJson<unknown, MetadataClassifyPayload>(
+        api as AdminApiContext,
+        `/api/v1/classifications/${encodeURIComponent(normalizedKey)}/metadata-classify`,
+        payload,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to enqueue metadata-only classification');
+      throw err;
+    } finally {
+      setBusyKey(undefined);
+    }
+  };
+
   const clearAllPending = async (): Promise<number> => {
     setBusyAll(true);
     setError(undefined);
@@ -70,6 +95,7 @@ export const usePendingActions = () => {
 
   return {
     manualClassify,
+    metadataClassify,
     clearPending,
     clearAllPending,
     busyKey,
