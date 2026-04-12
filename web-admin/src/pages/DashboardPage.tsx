@@ -47,6 +47,17 @@ const formatMiB = (input: number) => {
   return `${input.toFixed(3)} MiB`;
 };
 
+const formatBucketLabel = (timestamp: string, timezone?: string) => {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: timezone,
+  }).format(date);
+};
+
 const formatRate = (value?: number) => {
   if (value === undefined || !Number.isFinite(value)) return '—';
   return `${value.toFixed(3)}/s`;
@@ -155,7 +166,7 @@ export const DashboardPage = () => {
   const hourlyChart = useMemo(
     () =>
       (dashboard.data?.hourly_usage ?? []).map((entry) => ({
-        label: entry.timestamp.slice(11, 16),
+        timestamp: entry.timestamp,
         requests: entry.total_requests,
         blocked: entry.blocked_requests,
         bandwidthMiB: Number((entry.bandwidth_bytes / (1024 * 1024)).toFixed(3)),
@@ -273,7 +284,10 @@ export const DashboardPage = () => {
 
       <div className="layout-grid" style={{ marginTop: '1.1rem' }}>
         <div className="glass-panel panel--full dashboard-hourly-panel">
-          <p className="section-title">Hourly Usage (Requests + Bandwidth)</p>
+          <p className="section-title">Usage (Requests + Bandwidth)</p>
+          <p style={{ margin: '0 0 0.55rem', color: 'var(--muted)', fontSize: '0.78rem' }}>
+            Bucket: {dashboard.data?.bucket_interval ?? 'auto'} · Time zone: {dashboard.data?.timezone ?? 'browser local'}
+          </p>
           {bandwidthCoverageGap ? (
             <p style={{ margin: '0 0 0.8rem', color: 'var(--muted)', fontSize: '0.82rem' }}>
               Some records in this range do not include `network.bytes`, so bandwidth totals may appear lower than request volume.
@@ -284,11 +298,12 @@ export const DashboardPage = () => {
               <ComposedChart data={hourlyChart} margin={{ top: 8, right: 0, bottom: 4, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartPalette.grid} />
                 <XAxis
-                  dataKey="label"
+                  dataKey="timestamp"
                   stroke={chartPalette.axis}
                   tick={{ fill: chartPalette.axis, fontSize: 12 }}
                   axisLine={false}
                   tickLine={false}
+                  tickFormatter={(value) => formatBucketLabel(String(value), dashboard.data?.timezone)}
                 />
                 <YAxis
                   yAxisId="req"
@@ -319,6 +334,7 @@ export const DashboardPage = () => {
                     }
                     return [formatCompact(Number(value)), name];
                   }}
+                  labelFormatter={(label) => formatBucketLabel(String(label), dashboard.data?.timezone)}
                 />
                 <Legend wrapperStyle={{ color: chartPalette.axis }} />
                 <Line name="Requests" yAxisId="req" type="monotone" dataKey="requests" stroke={chartPalette.requests} strokeWidth={2.2} dot={false} />

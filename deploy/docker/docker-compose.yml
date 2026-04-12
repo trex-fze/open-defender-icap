@@ -6,6 +6,8 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
+    environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
     volumes:
       - ../../data/redis:/data
     healthcheck:
@@ -18,6 +20,8 @@ services:
     image: postgres:15-alpine
     restart: unless-stopped
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
+      PGTZ: ${OD_TIMEZONE:-Asia/Dubai}
       POSTGRES_USER: ${POSTGRES_USER:-defender}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-defender}
       POSTGRES_DB: ${POSTGRES_DB:-defender}
@@ -36,6 +40,7 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.1
     restart: unless-stopped
     environment:
+      - TZ=${OD_TIMEZONE:-Asia/Dubai}
       - discovery.type=single-node
       - xpack.security.enabled=true
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-changeme-elastic}
@@ -58,6 +63,7 @@ services:
     image: docker.elastic.co/kibana/kibana:8.12.1
     restart: unless-stopped
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       ELASTICSEARCH_HOSTS: http://elasticsearch:9200
       ELASTICSEARCH_SERVICEACCOUNTTOKEN: ${ELASTICSEARCH_SERVICEACCOUNTTOKEN:-AAEAAWVsYXN0aWMva2liYW5hL29kLXN0YWNrOk1MUUJvVnlnU19TSmNDT0Z6OVZMeGc}
     ports:
@@ -71,6 +77,8 @@ services:
     restart: unless-stopped
     ports:
       - "9090:9090"
+    environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus-rules.yml:/etc/prometheus/prometheus-rules.yml:ro
@@ -81,6 +89,7 @@ services:
       dockerfile: deploy/docker/rust.Dockerfile
     command: ["icap-adaptor"]
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "1344:1344"
@@ -99,6 +108,7 @@ services:
       dockerfile: deploy/docker/rust.Dockerfile
     command: ["policy-engine"]
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       RUST_LOG: ${RUST_LOG:-info}
       OD_POLICY_DATABASE_URL: ${OD_POLICY_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_admin}
       OD_ADMIN_DATABASE_URL: ${OD_ADMIN_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_admin}
@@ -119,6 +129,7 @@ services:
       dockerfile: deploy/docker/rust.Dockerfile
     command: ["admin-api"]
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       RUST_LOG: ${RUST_LOG:-info}
       OD_ADMIN_DATABASE_URL: ${OD_ADMIN_DATABASE_URL:-postgres://defender:defender@postgres:5432/defender_admin}
       OD_ADMIN_TOKEN: ${OD_ADMIN_TOKEN:-changeme-admin}
@@ -142,6 +153,8 @@ services:
       OD_REPORTING_ELASTIC_USERNAME: ${OD_REPORTING_ELASTIC_USERNAME:-elastic}
       OD_REPORTING_ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-changeme-elastic}
       OD_REPORTING_DEFAULT_RANGE: ${OD_REPORTING_DEFAULT_RANGE:-24h}
+      OD_REPORTING_TIMEZONE: ${OD_REPORTING_TIMEZONE:-Asia/Dubai}
+      OD_PROMETHEUS_URL: ${OD_PROMETHEUS_URL:-http://prometheus:9090}
     ports:
       - "19000:19000"
     volumes:
@@ -158,6 +171,7 @@ services:
       dockerfile: deploy/docker/rust.Dockerfile
     command: ["llm-worker"]
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       RUST_LOG: ${RUST_LOG:-info}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OD_LOG_DIR: ${OD_LOG_DIR:-/app/logs}
@@ -203,6 +217,7 @@ services:
       dockerfile: deploy/docker/rust.Dockerfile
     command: ["event-ingester"]
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       RUST_LOG: ${RUST_LOG:-info}
       OD_ELASTIC_URL: ${OD_ELASTIC_URL:-http://elasticsearch:9200}
       OD_ELASTIC_INDEX_PREFIX: ${OD_ELASTIC_INDEX_PREFIX:-traffic-events}
@@ -227,6 +242,7 @@ services:
       dockerfile: deploy/docker/crawl4ai/Dockerfile
     restart: unless-stopped
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       OD_LOG_DIR: ${OD_LOG_DIR:-/app/logs}
       CRAWL4AI_HEADLESS: ${CRAWL4AI_HEADLESS:-true}
       CRAWL4AI_BROWSER: ${CRAWL4AI_BROWSER:-chromium}
@@ -234,7 +250,7 @@ services:
       CRAWL4AI_VIEWPORT_WIDTH: ${CRAWL4AI_VIEWPORT_WIDTH:-1512}
       CRAWL4AI_VIEWPORT_HEIGHT: ${CRAWL4AI_VIEWPORT_HEIGHT:-982}
       CRAWL4AI_LOCALE: ${CRAWL4AI_LOCALE:-en-US}
-      CRAWL4AI_TIMEZONE: ${CRAWL4AI_TIMEZONE:-}
+      CRAWL4AI_TIMEZONE: ${CRAWL4AI_TIMEZONE:-Asia/Dubai}
       CRAWL4AI_ACCEPT_LANGUAGE: ${CRAWL4AI_ACCEPT_LANGUAGE:-en-US,en;q=0.9}
       CRAWL4AI_ENABLE_STEALTH: ${CRAWL4AI_ENABLE_STEALTH:-true}
       CRAWL4AI_SIMULATE_USER: ${CRAWL4AI_SIMULATE_USER:-true}
@@ -259,6 +275,7 @@ services:
     command: ["page-fetcher"]
     restart: unless-stopped
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
       - ../../config:/app/config:ro
@@ -275,6 +292,7 @@ services:
       context: ./mock-openai
     restart: unless-stopped
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       MOCK_LLM_CATEGORY: ${MOCK_LLM_CATEGORY:-Testing}
       MOCK_LLM_SUBCATEGORY: ${MOCK_LLM_SUBCATEGORY:-LLM}
       MOCK_LLM_RISK: ${MOCK_LLM_RISK:-medium}
@@ -286,6 +304,8 @@ services:
     restart: unless-stopped
     ports:
       - "18080:80"
+    environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
     volumes:
       - ./smoke-origin:/usr/share/nginx/html:ro
 
@@ -293,6 +313,7 @@ services:
     image: docker.elastic.co/logstash/logstash:8.12.1
     restart: unless-stopped
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       LS_JAVA_OPTS: "-Xms256m -Xmx256m"
       OD_INGEST_ENDPOINT: ${OD_INGEST_ENDPOINT:-http://event-ingester:19100}
       OD_FILEBEAT_SECRET: ${OD_FILEBEAT_SECRET:-changeme-ingest}
@@ -308,6 +329,7 @@ services:
       dockerfile: deploy/docker/rust.Dockerfile
     command: ["reclass-worker"]
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
       - ../../config:/app/config:ro
@@ -328,6 +350,7 @@ services:
     ports:
       - "${OD_HAPROXY_BIND_HOST:-0.0.0.0}:${OD_HAPROXY_BIND_PORT:-3128}:3128"
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       OD_SQUID_ALLOWED_CLIENT_CIDRS: ${OD_SQUID_ALLOWED_CLIENT_CIDRS:-192.168.1.0/24}
       OD_HAPROXY_BACKEND_HOST: squid
       OD_HAPROXY_BACKEND_PORT: 3128
@@ -345,6 +368,7 @@ services:
     command:
       - sh /etc/squid/render-squid-conf.sh /etc/squid/squid.conf /tmp/squid.generated.conf && squid -N -f /tmp/squid.generated.conf
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       OD_SQUID_ALLOWED_CLIENT_CIDRS: ${OD_SQUID_ALLOWED_CLIENT_CIDRS:-192.168.1.0/24}
       OD_TRUSTED_PROXY_CIDRS: ${OD_TRUSTED_PROXY_CIDRS:-}
     volumes:
@@ -363,6 +387,8 @@ services:
     restart: unless-stopped
     ports:
       - "19001:19001"
+    environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
     volumes:
       - ./web-admin/certs:/etc/nginx/certs:ro
     depends_on:
@@ -378,6 +404,7 @@ services:
       - ../../data/filebeat:/usr/share/filebeat/data
       - ../../data/squid-logs:/var/log/squid:ro
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       OD_INGEST_ENDPOINT: ${OD_INGEST_ENDPOINT:-http://event-ingester:19100}
       OD_FILEBEAT_SECRET: ${OD_FILEBEAT_SECRET:-changeme-ingest}
     depends_on:
@@ -396,6 +423,7 @@ services:
       dockerfile: deploy/docker/rust.Dockerfile
     command: ["sleep", "infinity"]
     environment:
+      TZ: ${OD_TIMEZONE:-Asia/Dubai}
       OD_ADMIN_URL: ${OD_ADMIN_URL:-http://admin-api:19000}
       OD_POLICY_URL: ${OD_POLICY_URL:-http://policy-engine:19010}
       OD_ADMIN_TOKEN: ${OD_ADMIN_TOKEN:-changeme-admin}

@@ -21,13 +21,14 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `OD_IAM_SERVICE_TOKEN_TTL_DAYS` | Default service-account token expiry window in days (used when `expires_at` is omitted on create/rotate). |
 | `OD_OIDC_ISSUER`, `OD_OIDC_AUDIENCE`, `OD_OIDC_HS256_SECRET` | OIDC/JWT validation parameters. |
 | `OD_ADMIN_CORS_ALLOW_ORIGIN` | Browser origin allowed by Admin API CORS middleware (compose default `https://localhost:19001`). |
+| `OD_TIMEZONE` | Platform timezone baseline propagated to compose services (`TZ`) and used as default reporting timezone (`Asia/Dubai`). |
 
 ## Reporting, ingest, and telemetry
 
 | Variable | Purpose |
 | --- | --- |
 | `OD_AUDIT_ELASTIC_URL`, `OD_AUDIT_ELASTIC_INDEX`, `OD_AUDIT_ELASTIC_API_KEY` | Admin audit export destination. |
-| `OD_REPORTING_ELASTIC_URL`, `OD_REPORTING_INDEX_PATTERN`, `OD_REPORTING_ELASTIC_USERNAME`, `OD_REPORTING_ELASTIC_PASSWORD`, `OD_REPORTING_ELASTIC_API_KEY`, `OD_REPORTING_DEFAULT_RANGE` | Admin reporting query backend and defaults. |
+| `OD_REPORTING_ELASTIC_URL`, `OD_REPORTING_INDEX_PATTERN`, `OD_REPORTING_ELASTIC_USERNAME`, `OD_REPORTING_ELASTIC_PASSWORD`, `OD_REPORTING_ELASTIC_API_KEY`, `OD_REPORTING_DEFAULT_RANGE`, `OD_REPORTING_TIMEZONE` | Admin reporting query backend and defaults (`OD_REPORTING_TIMEZONE` controls histogram bucket timezone). |
 | `OD_PROMETHEUS_URL` | Prometheus base URL used by Admin API operations telemetry summary endpoint (`/api/v1/reporting/ops-summary`). |
 | `OD_REVIEW_SLA_SECONDS` | SLA threshold used by review metrics. |
 | `OD_ELASTIC_URL`, `OD_ELASTIC_INDEX_PREFIX`, `OD_ELASTIC_INDEX_PATTERN` | Event-ingester index destination/pattern. |

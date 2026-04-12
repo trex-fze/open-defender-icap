@@ -33,6 +33,7 @@
     "api_key": null,
     "username": "elastic",
     "password": null,
-    "default_range": "24h"
+    "default_range": "24h",
+    "timezone": "Asia/Dubai"
   }
 }

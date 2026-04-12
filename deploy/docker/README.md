@@ -57,6 +57,7 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
 ## Startup sequence
 1. Ensure Docker Desktop/Engine is running and ports 1344, 19000, 19001, 19005, 19010, 3128, 5432, 6379, 9200, 5601, 9090 are free.
 2. Copy `.env.example` → `.env` (edit tokens/passwords as needed).
+   - Timezone defaults to `OD_TIMEZONE=Asia/Dubai`; keep `OD_REPORTING_TIMEZONE` aligned unless you intentionally want different dashboard bucket timezone.
 3. Run `make gen-certs` once to generate Squid and web-admin certificates (`deploy/docker/squid/certs/`, `deploy/docker/web-admin/certs/`).
 4. `docker compose --env-file ../../.env up -d postgres redis` and wait for healthchecks, or just run `docker compose --env-file ../../.env up --build` / `make compose-up` to start everything.
 5. Run migrations/seeds as needed:

@@ -99,9 +99,10 @@ Before first startup:
 
 1. Create env file:
    ```bash
-   cp .env.example .env
-   ```
-   - Treat root `/.env` as canonical; avoid `deploy/docker/.env` to prevent precedence drift.
+    cp .env.example .env
+    ```
+    - Treat root `/.env` as canonical; avoid `deploy/docker/.env` to prevent precedence drift.
+   - Timezone defaults to `OD_TIMEZONE=Asia/Dubai`; keep `OD_REPORTING_TIMEZONE=Asia/Dubai` unless you intentionally want a different dashboard bucket timezone.
 2. Generate Squid certs:
    ```bash
    make gen-certs

@@ -43,6 +43,7 @@ export type DashboardCoverage = {
 export type DashboardReport = {
   range: string;
   bucket_interval: string;
+  timezone?: string;
   overview: DashboardOverview;
   hourly_usage: HourlyUsageBucket[];
   top_domains: TopEntry[];

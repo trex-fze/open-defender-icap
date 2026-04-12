@@ -161,6 +161,7 @@ flowchart LR
 | `OD_ADMIN_CORS_ALLOW_ORIGIN` | Allowed browser origin for Admin API CORS responses (default `https://localhost:19001` for local web-admin). |
 | `OD_CACHE_REDIS_URL` | Redis address for cache invalidation. |
 | `OD_CACHE_CHANNEL` | Redis pub/sub channel for cache busting. |
+| `OD_TIMEZONE` | Platform timezone propagated to compose services (`TZ`) and used as the default reporting timezone baseline (default `Asia/Dubai`). |
 | `OD_OIDC_ISSUER` / `OD_OIDC_AUDIENCE` / `OD_OIDC_HS256_SECRET` | Enables HS256 or OIDC device flow auth so AI tooling honors RBAC. |
 | `OD_REVIEW_SLA_SECONDS` | SLA threshold for review metrics (default 14,400s). |
 | `OD_ELASTIC_URL` / `OD_ELASTIC_INDEX_PREFIX` | Event-ingester destination and index prefix (default prefix `traffic-events`). |
@@ -168,6 +169,7 @@ flowchart LR
 | `OD_FILEBEAT_SECRET` | Shared secret between Filebeat and event-ingester. |
 | `OD_REPORTING_ELASTIC_URL` / `OD_REPORTING_INDEX_PATTERN` | Reporting backend used by `/api/v1/reporting/*`. |
 | `OD_REPORTING_ELASTIC_USERNAME` / `OD_REPORTING_ELASTIC_PASSWORD` / `OD_REPORTING_ELASTIC_API_KEY` | Reporting query auth (password defaults to `ELASTIC_PASSWORD` in compose). |
+| `OD_REPORTING_TIMEZONE` | Dashboard/report aggregation timezone for Elasticsearch date histograms (default `Asia/Dubai`). |
 | `OD_PROMETHEUS_URL` | Prometheus base URL used by Admin API operations telemetry rollups (`/api/v1/reporting/ops-summary`) shown in Dashboard. |
 | `OD_POLICY_ENGINE_URL` | Admin API -> Policy Engine URL override (default `http://policy-engine:19010`). |
 | `OD_HAPROXY_BIND_HOST` / `OD_HAPROXY_BIND_PORT` | External proxy listener published by HAProxy (default `0.0.0.0:3128`); clients connect to this endpoint. |
@@ -195,6 +197,8 @@ flowchart LR
 - **Filtering chain caution**: avoid placing upstream block/warning page injectors ahead of this stack for classified traffic; interstitial content can be misclassified as the destination.
 
 > See `docs/env-vars-reference.md` for the complete runtime/frontend/test variable catalog and `web-admin/.env.example` for standalone frontend defaults.
+
+Timezone migration note: Postgres init scripts set database/role timezone to `Asia/Dubai` for new volumes. Existing Postgres data directories keep prior timezone until you run `ALTER DATABASE ... SET timezone` and reconnect sessions.
 
 ## Reference Docs
 

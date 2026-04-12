@@ -14,6 +14,8 @@ pub struct ReportingConfig {
     pub password: Option<String>,
     #[serde(default = "default_range")]
     pub default_range: String,
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
 }
 
 impl Default for ReportingConfig {
@@ -25,6 +27,7 @@ impl Default for ReportingConfig {
             username: None,
             password: None,
             default_range: default_range(),
+            timezone: default_timezone(),
         }
     }
 }
@@ -51,6 +54,15 @@ impl ReportingConfig {
                 self.default_range = range.trim().to_string();
             }
         }
+        if let Ok(timezone) = env::var("OD_REPORTING_TIMEZONE") {
+            if !timezone.trim().is_empty() {
+                self.timezone = timezone.trim().to_string();
+            }
+        } else if let Ok(timezone) = env::var("OD_TIMEZONE") {
+            if !timezone.trim().is_empty() {
+                self.timezone = timezone.trim().to_string();
+            }
+        }
         self
     }
 }
@@ -63,6 +75,10 @@ fn default_range() -> String {
     "24h".into()
 }
 
+fn default_timezone() -> String {
+    "Asia/Dubai".into()
+}
+
 const EFFECTIVE_DOMAIN_SCRIPT: &str = "String host = null; if (doc.containsKey('destination.domain.keyword') && !doc['destination.domain.keyword'].empty) { host = doc['destination.domain.keyword'].value; } else if (doc.containsKey('destination.domain') && !doc['destination.domain'].empty) { host = doc['destination.domain'].value; } if (host == null || host.length() == 0) { String u = null; if (doc.containsKey('url.full.keyword') && !doc['url.full.keyword'].empty) { u = doc['url.full.keyword'].value; } else if (doc.containsKey('url.full') && !doc['url.full'].empty) { u = doc['url.full'].value; } if (u != null && u.length() > 0) { int start = u.indexOf('://'); int from = start >= 0 ? start + 3 : 0; int end = u.indexOf('/', from); host = end > from ? u.substring(from, end) : u.substring(from); int colon = host.indexOf(':'); if (colon > 0) { host = host.substring(0, colon); } } } if (host != null && host.length() > 0) { emit(host); }";
 
 #[derive(Clone)]
@@ -72,6 +88,7 @@ pub struct ElasticReportingClient {
     index_pattern: String,
     auth: ElasticAuth,
     default_range: String,
+    timezone: String,
 }
 
 #[derive(Clone)]
@@ -104,6 +121,7 @@ impl ElasticReportingClient {
             index_pattern: cfg.index_pattern.clone(),
             auth,
             default_range: cfg.default_range.clone(),
+            timezone: cfg.timezone.clone(),
         }))
     }
 
@@ -160,7 +178,16 @@ impl ElasticReportingClient {
                             "date_histogram": {
                                 "field": "@timestamp",
                                 "fixed_interval": bucket_interval.as_str(),
-                                "min_doc_count": 0
+                                "min_doc_count": 0,
+                                "time_zone": self.timezone.as_str(),
+                                "extended_bounds": {
+                                    "min": format!("now-{}", range),
+                                    "max": "now"
+                                },
+                                "hard_bounds": {
+                                    "min": format!("now-{}", range),
+                                    "max": "now"
+                                }
                             }
                         }
                     }
@@ -193,6 +220,7 @@ impl ElasticReportingClient {
         Ok(TrafficReportResponse {
             range: range.to_string(),
             bucket_interval,
+            timezone: self.timezone.clone(),
             allow_block_trend,
             top_blocked_domains,
             top_categories,
@@ -261,7 +289,16 @@ impl ElasticReportingClient {
                     "date_histogram": {
                         "field": "@timestamp",
                         "fixed_interval": bucket_interval.as_str(),
-                        "min_doc_count": 0
+                        "min_doc_count": 0,
+                        "time_zone": self.timezone.as_str(),
+                        "extended_bounds": {
+                            "min": format!("now-{}", range),
+                            "max": "now"
+                        },
+                        "hard_bounds": {
+                            "min": format!("now-{}", range),
+                            "max": "now"
+                        }
                     },
                     "aggs": {
                         "blocked": {
@@ -359,6 +396,7 @@ impl ElasticReportingClient {
         Ok(DashboardReportResponse {
             range: range.to_string(),
             bucket_interval,
+            timezone: self.timezone.clone(),
             overview: DashboardOverview {
                 total_requests,
                 allow_requests,
@@ -652,6 +690,7 @@ fn parse_bandwidth_entries(aggregations: &Value, path: &[&str]) -> Vec<TopBandwi
 pub struct TrafficReportResponse {
     pub range: String,
     pub bucket_interval: String,
+    pub timezone: String,
     pub allow_block_trend: Vec<ActionSeries>,
     pub top_blocked_domains: Vec<TopEntry>,
     pub top_categories: Vec<TopEntry>,
@@ -670,6 +709,7 @@ pub struct ReportingCoverageStatus {
 pub struct DashboardReportResponse {
     pub range: String,
     pub bucket_interval: String,
+    pub timezone: String,
     pub overview: DashboardOverview,
     pub hourly_usage: Vec<HourlyUsageBucket>,
     pub top_domains: Vec<TopEntry>,
