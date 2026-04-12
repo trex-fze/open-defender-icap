@@ -222,11 +222,11 @@ export const DashboardPage = () => {
           ) : null}
           <div className="dashboard-hourly-chart">
             <ResponsiveContainer>
-              <ComposedChart data={hourlyChart}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
-                <XAxis dataKey="label" stroke="rgba(255,255,255,0.8)" />
-                <YAxis yAxisId="req" stroke="rgba(255,255,255,0.8)" />
-                <YAxis yAxisId="bw" orientation="right" stroke="rgba(255,255,255,0.8)" />
+              <ComposedChart data={hourlyChart} margin={{ top: 8, right: 0, bottom: 4, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                <XAxis dataKey="label" stroke="rgba(255,255,255,0.72)" axisLine={false} tickLine={false} />
+                <YAxis yAxisId="req" stroke="rgba(255,255,255,0.72)" axisLine={false} tickLine={false} />
+                <YAxis yAxisId="bw" orientation="right" stroke="rgba(255,255,255,0.72)" axisLine={false} tickLine={false} />
                 <Tooltip
                   formatter={(value, name) => {
                     if (name === 'Bandwidth (MiB)') {
