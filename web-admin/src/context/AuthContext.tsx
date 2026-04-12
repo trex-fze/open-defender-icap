@@ -1,4 +1,5 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { resolveAdminApiBase } from '../utils/adminApiBase';
 
 export type Role =
   | 'policy-admin'
@@ -74,21 +75,6 @@ const normalizeRoles = (roles?: string[] | Role[]): Role[] => {
 const isLikelyJwt = (token: string): boolean => {
   const parts = token.split('.');
   return parts.length === 3 && parts.every((part) => part.length > 0);
-};
-
-const resolveAdminApiBase = (): string => {
-  const runtimeOverride =
-    typeof window !== 'undefined'
-      ? (window as Window & { __OD_ADMIN_API_URL__?: string }).__OD_ADMIN_API_URL__
-      : undefined;
-  const envUrl = (import.meta.env.VITE_ADMIN_API_URL ?? '').trim();
-  const fallbackEnv = (import.meta.env.VITE_ADMIN_API_FALLBACK ?? '').trim();
-  const fallbackBase =
-    typeof window !== 'undefined'
-      ? `${window.location.protocol}//${window.location.hostname}:19000`
-      : 'http://localhost:19000';
-  const candidate = (runtimeOverride ?? envUrl) || fallbackEnv || fallbackBase;
-  return candidate.trim();
 };
 
 const readStoredUser = (): UserProfile | null => {

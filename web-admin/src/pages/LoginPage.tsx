@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { resolveAdminApiBase } from '../utils/adminApiBase';
 
 type LoginResponse = {
   access_token: string;
@@ -14,17 +15,6 @@ type LoginResponse = {
     roles: string[];
     must_change_password?: boolean;
   };
-};
-
-const resolveAdminApiBase = (): string => {
-  const configured = (import.meta.env.VITE_ADMIN_API_URL ?? '').trim();
-  if (configured) {
-    return configured;
-  }
-  if (typeof window !== 'undefined') {
-    return `${window.location.protocol}//${window.location.hostname}:19000`;
-  }
-  return 'http://localhost:19000';
 };
 
 export const LoginPage = () => {

@@ -82,8 +82,8 @@ This file tracks environment variables consumed by runtime services, frontend, a
 
 | Variable | Purpose |
 | --- | --- |
-| `VITE_ADMIN_API_URL` | Primary Admin API base URL for browser calls. |
-| `VITE_ADMIN_API_FALLBACK` | Optional fallback Admin API URL when primary is empty. |
+| `VITE_ADMIN_API_URL` | Primary Admin API base URL for browser calls. In compose HTTPS mode, leave empty to use same-origin `/api/*` through nginx. |
+| `VITE_ADMIN_API_FALLBACK` | Optional fallback Admin API URL when primary is empty; avoid `http://...` values when UI origin is HTTPS. |
 | `VITE_ADMIN_TOKEN_MODE` | Auth header mode (`auto`, `bearer`, `token`) for browser calls. |
 | `VITE_LLM_PROVIDERS_URL` | Optional frontend override for direct provider fetch; when unset, dashboard uses Admin API proxy endpoint (`/api/v1/ops/llm/providers`). |
 | `VITE_ADMIN_API_PROXY_TARGET` | Vite dev-server proxy target for `/api/*` requests (recommended `http://localhost:19000` outside compose). |

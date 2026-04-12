@@ -305,7 +305,7 @@ INTEGRATION_BUILD=1 INTEGRATION_BUILD_RETRIES=3 tests/integration.sh
 ## FAQ
 
 **Q: How do I log in to the Admin UI?**  
-Run the stack and sign in on `/login` with local credentials (default username `admin`, password from `OD_DEFAULT_ADMIN_PASSWORD` in `/.env`). For standalone frontend dev, point `VITE_ADMIN_API_URL` to Admin API and keep `VITE_ADMIN_TOKEN_MODE=auto` unless you need explicit bearer/header behavior.
+Run the stack and sign in on `/login` with local credentials (default username `admin`, password from `OD_DEFAULT_ADMIN_PASSWORD` in `/.env`). In compose HTTPS mode (`https://localhost:19001`), keep `VITE_ADMIN_API_URL` empty so browser calls stay same-origin (`/api/*`) through nginx. For standalone frontend dev, point `VITE_ADMIN_API_URL` to Admin API and keep `VITE_ADMIN_TOKEN_MODE=auto` unless you need explicit bearer/header behavior.
 
 **Q: Why does `odctl` say "No stored session"?**  
 Run `odctl auth login --client-id ...` to trigger the device code flow, or pass `--token $OD_ADMIN_TOKEN` explicitly.

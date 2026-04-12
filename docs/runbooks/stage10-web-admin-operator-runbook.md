@@ -126,7 +126,7 @@ Store screenshots under `docs/evidence/stage10-web-admin/` using this naming con
 
 ## Troubleshooting
 
-- **UI shows mock mode unexpectedly**: verify `VITE_ADMIN_API_URL`/`VITE_ADMIN_API_FALLBACK` resolve to the live Admin API, confirm browser auth state exists in local storage (`od.admin.tokens`), and ensure `VITE_ADMIN_TOKEN_MODE` matches your token type (`auto` is recommended).
+- **UI shows mock mode unexpectedly**: in compose HTTPS mode, keep `VITE_ADMIN_API_URL`/`VITE_ADMIN_API_FALLBACK` empty so requests use same-origin `/api/*`; for standalone dev ensure they resolve to the live Admin API. Confirm browser auth state exists in local storage (`od.admin.tokens`) and `VITE_ADMIN_TOKEN_MODE` matches your token type (`auto` is recommended).
 - **Policy Version History shows `Failed to load version history: Failed to fetch`**: confirm `http://localhost:19000/health/ready` is healthy, verify `OD_ADMIN_CORS_ALLOW_ORIGIN` allows the web-admin origin (`https://localhost:19001` by default), and check browser devtools for blocked CORS/network requests.
 - **Recorded action differs from effective action in Classifications**: this is expected when overrides, policy updates, or taxonomy activation changed after persistence. Use `effective_action` and `effective_decision_source` as current enforcement truth.
 - **Unexpected block with `Review` action**: current runtime enforces `Review` as a blocked response with review-specific message text. Confirm policy intent in draft/version history before publish.

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { resolveAdminApiBase } from '../utils/adminApiBase';
 
 const TOKEN_MODE = (import.meta.env.VITE_ADMIN_TOKEN_MODE ?? 'auto').trim().toLowerCase();
 
@@ -8,27 +9,9 @@ const isLikelyJwt = (token: string): boolean => {
   return parts.length === 3 && parts.every((part) => part.length > 0);
 };
 
-const localhostFallback = () => {
-  if (typeof window !== 'undefined') {
-    return window.location.origin;
-  }
-  return 'http://localhost:19001';
-};
-
-const resolveBaseUrl = () => {
-  const runtimeOverride =
-    typeof window !== 'undefined'
-      ? (window as Window & { __OD_ADMIN_API_URL__?: string }).__OD_ADMIN_API_URL__
-      : undefined;
-  const envUrl = (import.meta.env.VITE_ADMIN_API_URL ?? '').trim();
-  const fallbackEnv = (import.meta.env.VITE_ADMIN_API_FALLBACK ?? '').trim();
-  const candidate = envUrl || fallbackEnv || localhostFallback();
-  return (runtimeOverride ?? candidate).trim();
-};
-
 export const useAdminApi = () => {
   const { tokens, expireSession } = useAuth();
-  const baseUrl = resolveBaseUrl();
+  const baseUrl = resolveAdminApiBase();
   const accessToken = tokens?.accessToken?.trim();
   const canCallApi = Boolean(baseUrl && accessToken);
 
