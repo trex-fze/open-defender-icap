@@ -2,6 +2,26 @@
 
 Open Defender is an **AI-enhanced, open-source ICAP stack** that blends deterministic policy engines with LLM-assisted investigations, automated overrides, and full observability. The repo includes Rust microservices (`services/` & `workers/`), a React admin console (`web-admin/`), k6 performance suites, and Docker Compose environments for local and CI validation.
 
+## Official project resources
+
+- Official website: https://trex.ae/products/open-defender-icap
+- Security contact: github@trex.ae
+
+## Trademark notice
+
+TREX FZE, the TREX FZE name, logo, and any associated project branding are trademarks or trade names of TREX FZE.
+
+The open source license applies to the source code and other material expressly licensed under the repository license. It does not grant rights to use TREX FZE trademarks, logos, or branding, except as permitted by applicable law or by the project's trademark guidelines in [`TRADEMARKS.md`](TRADEMARKS.md).
+
+## Contributing
+
+Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) before submitting issues or pull requests.
+
+## Security
+
+Please report security issues according to [`SECURITY.md`](SECURITY.md).
+Do not open public issues for suspected vulnerabilities.
+
 ## System Architecture
 
 ```mermaid
