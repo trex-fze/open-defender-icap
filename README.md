@@ -2,6 +2,14 @@
 
 Open Defender is an **AI-enhanced, open-source ICAP stack** that blends deterministic policy engines with LLM-assisted investigations, automated overrides, and full observability. The repo includes Rust microservices (`services/` & `workers/`), a React admin console (`web-admin/`), k6 performance suites, and Docker Compose environments for local and CI validation.
 
+## Start here
+
+- New operator path: [Quick Start (Docker Compose)](#quick-start-docker-compose)
+- Frontend HTTPS setup: [Frontend TLS (local/dev default)](#frontend-tls-localdev-default)
+- Runtime endpoints: [Useful URLs](#useful-urls)
+- Config catalog: [Key Environment Variables](#key-environment-variables)
+- Validation commands: [Testing & Quality Pipelines](#testing--quality-pipelines)
+
 ## Official project resources
 
 - Official website: https://trex.ae/products/open-defender-icap
@@ -127,14 +135,14 @@ flowchart LR
 2. **Bootstrap**:
    ```bash
    cp .env.example .env            # set secrets: OD_ADMIN_TOKEN, ELASTIC_PASSWORD, etc.
-   make gen-certs                  # one-time Squid cert generation
+   make gen-certs                  # one-time Squid + web-admin TLS cert generation
    ```
    - Canonical stack env lives at repo root (`.env`); avoid using `deploy/docker/.env`.
 3. **Start stack (policy + AI workers)**:
    ```bash
    make compose-up                 # equivalent to docker compose up --build
    ```
-   - Docker compose defaults `llm-worker` to the bundled `mock-openai` service so smoke tests are deterministic and run offline.
+   - Docker compose defaults `llm-worker` routing to local LM Studio with OpenAI fallback (see `config/llm-worker.json`).
    - To use LM Studio/Ollama/OpenAI instead, edit `config/llm-worker.json` providers/routing and restart `llm-worker`.
 4. **Run health & smoke checks**:
    ```bash
@@ -392,34 +400,15 @@ Run `odctl --help` for top-level commands, `odctl override --help` for override 
 **Q: Where is evidence tracked?**  
 Stage 7 checklists live in `docs/evidence/stage07-checklist.md`. Follow Stage 6 instructions for dashboards.
 
-## Contribution Guidelines
+## PR Readiness Checklist
 
-We welcome issues and PRs—follow the rules below to keep history clean and tests green.
+For contribution workflow, PR expectations, and governance, use [`CONTRIBUTING.md`](CONTRIBUTING.md) as the source of truth.
 
-### General
-1. **Fork & branch**: Use feature branches (`feature/<ticket>`). Never push directly to `main`.
-2. **Match formatting**: Run `cargo fmt`, `npm run lint` (if applicable), and ensure code follows existing patterns.
-3. **Tests first**: Execute `tests/unit.sh` before opening a PR. For feature work touching infra, also run `tests/integration.sh`.
-4. **Explain changes**: Update relevant docs (README, plans, RFCs) as part of your PR.
-5. **No secrets in git**: Never commit `.env` files or production credentials.
+Quick checklist before opening a PR:
 
-### Step-by-step PR checklist
-1. **Plan** – open/assign a GitHub issue (or reference the sprint ticket).
-2. **Branch** – `git checkout -b feature/my-change`.
-3. **Implement** – make targeted commits; keep history readable.
-4. **Verify** – run `tests/unit.sh`. If touching ingestion/observability, run `tests/integration.sh` and k6/perf if relevant.
-5. **Docs** – update README/RFC/implementation plan where applicable.
-6. **PR** – push, open a PR, fill out the template (summary, tests, screenshots).
-7. **Review** – address feedback promptly; re-run tests after updates.
-8. **Merge** – squash or merge per repo guidelines once approvals & CI are green.
-
-### Filing Issues
-- **Bug**: include repro steps, expected vs actual behavior, logs if available.
-- **Feature**: describe the use case, acceptance criteria, and affected components.
-- **Security**: use the private disclosure channel if sensitive.
-
-### Code of Conduct
-Be respectful, inclusive, and responsive. See `CODE_OF_CONDUCT.md` (if absent, follow standard CNCF/OSS etiquette).
+1. Run `tests/unit.sh` (and `tests/integration.sh` for infra-impacting work).
+2. Update docs/RFC/plan files for behavioral or operational changes.
+3. Confirm no secrets are committed (`.env`, credentials, API keys).
 
 ## Next Steps
 - Review `docs/testing/*.md` and `docs/deployment/rollback-plan.md` for deeper instructions.
