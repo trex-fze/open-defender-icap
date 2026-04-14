@@ -24,6 +24,7 @@ const renderLayout = (initialPath = '/dashboard') =>
           <Route element={<AppLayout />}>
             <Route path="/dashboard" element={<div>Dashboard content</div>} />
             <Route path="/policies" element={<div>Policies content</div>} />
+            <Route path="/settings/iam" element={<div>Settings IAM content</div>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -66,5 +67,11 @@ describe('AppLayout sidebar', () => {
 
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(container.querySelector('.app-shell')?.className).not.toContain('sidebar-open-mobile');
+  });
+
+  it('highlights Settings for settings sub-routes', async () => {
+    renderLayout('/settings/iam');
+    expect(await screen.findByText('Settings IAM content')).toBeInTheDocument();
+    expect(screen.getByLabelText('Settings').className).toContain('active');
   });
 });

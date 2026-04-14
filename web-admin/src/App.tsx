@@ -56,6 +56,7 @@ const App = () => {
               <Route path="/settings/iam/*" element={<ProtectedRoute roles={guard.admin}><SettingsIamPage /></ProtectedRoute>} />
               <Route path="/settings/classifications" element={<ProtectedRoute roles={guard.admin}><SettingsClassificationsPage /></ProtectedRoute>} />
               <Route path="/settings/allow-deny-exchange" element={<ProtectedRoute roles={guard.admin}><SettingsOverridesExchangePage /></ProtectedRoute>} />
+              <Route path="/settings" element={<Navigate to="/settings/iam" replace />} />
               <Route path="/settings/rbac" element={<Navigate to="/settings/iam" replace />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

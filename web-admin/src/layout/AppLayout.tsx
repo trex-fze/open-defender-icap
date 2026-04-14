@@ -34,7 +34,7 @@ const navItems: NavItem[] = [
   { label: 'Allow / Deny', path: '/overrides', glyph: 'AD', roles: ['policy-editor', 'policy-admin'] as Role[] },
   { label: 'Taxonomy', path: '/taxonomy', glyph: 'TX', roles: ['policy-editor', 'policy-admin'] as Role[] },
   { label: 'Diagnostics', path: '/diagnostics', glyph: 'DG', roles: ['policy-editor', 'policy-admin', 'policy-viewer'] as Role[] },
-  { label: 'Settings', path: '/settings/rbac', glyph: 'ST', roles: ['policy-admin'] as Role[] },
+  { label: 'Settings', path: '/settings', glyph: 'ST', roles: ['policy-admin'] as Role[] },
 ];
 
 const isMobileWidth = () => (typeof window !== 'undefined' ? window.innerWidth <= MOBILE_BREAKPOINT : false);
