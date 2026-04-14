@@ -1,8 +1,10 @@
 # Stage 11 Implementation Plan - RBAC and User/Group Management
 
-**Status**: Planned  
+**Status**: Complete  
 **Depends on**: Stage 5 and Stage 10 auth/management foundations  
 **Primary targets**: `services/admin-api`, `services/policy-engine`, `services/icap-adaptor`, `web-admin`, `cli/odctl`, docs/tests
+
+> Historical execution plan retained for traceability; final acceptance is recorded in `implementation-plan/stage-11-checklist.md`.
 
 Execution checklist: `implementation-plan/stage-11-checklist.md`
 

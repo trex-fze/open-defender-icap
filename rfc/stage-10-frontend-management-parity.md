@@ -2,7 +2,9 @@
 
 **Parent References**: `docs/engine-adaptor-spec.md` sections 13, 14, 18, 19, 23, 33  
 **Related Docs**: `docs/api-catalog.md`, `docs/architecture.md`, `docs/user-guide.md`  
-**Status**: Proposed
+**Status**: Implemented
+
+> This RFC captures the approved scope; implementation closure is tracked in `implementation-plan/stage-10-checklist.md`.
 
 ## 1) Problem Statement
 

@@ -14,7 +14,7 @@
 - [x] Review queue endpoints & SLA metrics – Spec §§14, 16. *(List + resolve endpoints wired; Prometheus `/metrics` exposes queue depth + SLA counters.)*
 - [x] Cache invalidation hooks on DB changes – Spec §11. *(Admin API purges Redis keys + publishes events; ICAP adaptor and workers subscribe and react.)*
 - [x] Audit event pipeline (DB + Elasticsearch) – Spec §17. *(Admin API writes audit_events and streams to Elasticsearch when configured.)*
-- [ ] Unit/integration tests for persistence logic – Spec §24–26.
+- [x] Unit/integration tests for persistence logic – Spec §24–26. *(Completed via Stage 3 implementation/test evidence in `implementation-plan/stage-03-persistence-overrides.md`.)*
 
 ## Traceability Plan
 | Requirement | Section | Artifact |

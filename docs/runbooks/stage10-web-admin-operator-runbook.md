@@ -80,6 +80,18 @@ Taxonomy parity validation command:
 
 - `bash tests/taxonomy-parity.sh` executes the cross-service canonicalization/activation regression set and writes evidence to `tests/artifacts/taxonomy-parity/<timestamp>/summary.tsv`.
 
+## Stage 13 Canonicalization Controls
+
+- **PSL canonicalization baseline**: canonical domain derivation uses PSL-aware parsing in `common-types`; unexpected cross-domain collapse should be treated as a defect.
+- **Collapse-ratio telemetry**: watch `classification_canonicalization_collapse_ratio` with supporting totals (`classification_canonicalization_total`, `classification_canonicalization_collapsed_total`) on ICAP metrics.
+- **Conditional tenant exception policy**: keep tenant/domain exception list disabled by default. Open an implementation task only if either (a) repeated collision incidents are confirmed for the same registrable domain family, or (b) collapse ratio anomaly persists for two release cycles with verified policy impact.
+
+## Stage 15 Cursor Performance Baseline
+
+- Capture baseline query plans for high-volume cursor endpoints before release (`EXPLAIN ANALYZE` against representative datasets).
+- Track p95 API latency trend for list routes in regression drills; investigate if p95 regresses by >25% versus prior release baseline.
+- Keep backward pagination contract explicit: `meta.prev_cursor` remains `null` until a server-side backward traversal requirement is approved.
+
 ## Stage 12 Rollout / Rollback Procedure
 
 1. **Pre-flight**

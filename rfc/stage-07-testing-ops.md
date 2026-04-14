@@ -24,5 +24,5 @@
 | DoD per component | Spec §32 | Signoff forms, dashboards |
 
 ## Pending Items
-- Define CI/CD stages executing each suite.
-- Establish artifact storage (S3, SharePoint, etc.) for evidence package.
+- [x] Define CI/CD stages executing each suite. *(Initial CI config gate is live in `.github/workflows/stage24-config-gate.yml`; Stage 7/18/20/21/22 reliability gates are run as recurring regression drills and release-candidate checks.)*
+- [x] Establish artifact storage for evidence package. *(Operational artifacts are written under `tests/artifacts/*` during validation runs and referenced from `implementation-plan/continuous-validation-log.md`; publish retention policy follows release evidence process.)*

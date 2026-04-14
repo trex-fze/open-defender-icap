@@ -1,8 +1,10 @@
 # Stage 10 Implementation Plan - Frontend Management Parity
 
-**Status**: Planned  
+**Status**: Complete  
 **Depends on**: Stage 5/6/7/9 delivered APIs and compose integration  
 **Primary Targets**: `web-admin/`, plus optional Admin API aggregation endpoints where required
+
+> Historical execution plan retained for traceability; final acceptance is recorded in `implementation-plan/stage-10-checklist.md`.
 
 Execution tracking checklist: `implementation-plan/stage-10-checklist.md`
 
@@ -76,14 +78,14 @@ Implement in five phases to reduce risk and keep a continuously usable UI:
 
 ## 4) API Mapping Checklist (UI Parity)
 
-- [ ] `GET/POST/PUT /api/v1/policies`, `POST /api/v1/policies/validate`, `POST /api/v1/policies/:id/publish`
-- [ ] `GET/POST/PUT/DELETE /api/v1/overrides`
-- [ ] `GET/POST/PUT/DELETE /api/v1/taxonomy/categories`
-- [ ] `GET/POST/PUT/DELETE /api/v1/taxonomy/subcategories`
-- [ ] `GET /api/v1/classifications/pending`, `POST /api/v1/classifications/:normalized_key/unblock`
-- [ ] `GET /api/v1/page-contents/:normalized_key`, `GET /api/v1/page-contents/:normalized_key/history`
-- [ ] `GET/DELETE /api/v1/cache-entries/:cache_key`
-- [ ] `GET /api/v1/cli-logs`
+- [x] `GET/POST/PUT /api/v1/policies`, `POST /api/v1/policies/validate`, `POST /api/v1/policies/:id/publish`
+- [x] `GET/POST/PUT/DELETE /api/v1/overrides`
+- [x] `GET/POST/PUT/DELETE /api/v1/taxonomy/categories`
+- [x] `GET/POST/PUT/DELETE /api/v1/taxonomy/subcategories`
+- [x] `GET /api/v1/classifications/pending`, `POST /api/v1/classifications/:normalized_key/unblock`
+- [x] `GET /api/v1/page-contents/:normalized_key`, `GET /api/v1/page-contents/:normalized_key/history`
+- [x] `GET/DELETE /api/v1/cache-entries/:cache_key`
+- [x] `GET /api/v1/cli-logs`
 - [x] `GET /api/v1/reporting/traffic`, `GET /api/v1/reporting/status`
 
 ## 5) Test Plan

@@ -18,9 +18,9 @@
 - [x] ICAP 204/200 responses for allow/block actions (§11 fail-open guidance).
 - [x] Metrics/trace propagation with `/metrics` endpoint (§17, §33).
 - [x] CLI smoke test exercising ICAP REQMOD flow (§27).
-- [ ] Override lookup, manual placeholder actions (§14) – pending Stage 2.
-- [ ] Event emission/audit logging (§17, §20) – pending Stage 3.
-- [ ] TLS/mTLS between Squid and adaptor (§3 TLS RFCs) – planned Stage 3.
+- [x] Override lookup, manual placeholder actions (§14) – completed in Stage 2+ policy/persistence flows.
+- [x] Event emission/audit logging (§17, §20) – completed in Stage 3/6 audit and reporting pipeline.
+- [x] TLS/mTLS between Squid and adaptor (§3 TLS RFCs) – covered by hardened deployment profiles and operator docs.
 - [x] Unit/integration tests covering parser, cache fallback, and ICAP error paths (§24–26).
 
 ## Traceability

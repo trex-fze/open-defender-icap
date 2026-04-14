@@ -1,6 +1,6 @@
 # Stage 4 Implementation Plan – Async Classification & Reclassification
 
-**Status**: Planned
+**Status**: Complete
 
 ## Objectives
 - Build queue-driven classification pipeline, LLM worker, reclassification jobs.

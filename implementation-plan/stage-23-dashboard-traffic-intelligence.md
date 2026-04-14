@@ -82,8 +82,8 @@ Implement in five phases:
 
 ## 4) Acceptance Tracking
 
-- [ ] Dashboard includes clients, bandwidth, hourly usage, top domains, blocked domains, blocked requesters (`client.ip`).
-- [ ] Endpoint latency remains acceptable for default range.
-- [ ] Existing `/reports` behavior remains unchanged.
-- [ ] Unit/e2e tests pass.
-- [ ] Docs/runbook updated and reviewed.
+- [x] Dashboard includes clients, bandwidth, hourly usage, top domains, blocked domains, blocked requesters (`client.ip`).
+- [x] Endpoint latency remains acceptable for default range.
+- [x] Existing `/reports` behavior remains unchanged.
+- [x] Unit/e2e tests pass.
+- [x] Docs/runbook updated and reviewed.

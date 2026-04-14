@@ -1,9 +1,11 @@
 # Stage 24 RFC - Reliability and Operability Hardening Program
 
-**Status**: Proposed  
+**Status**: Implemented  
 **Primary Scope**: platform-wide hardening across config, queues, diagnostics, auth, and deployment workflows  
 **Decision Owner**: Platform + Security + SRE  
 **Priority**: Critical path to production trust
+
+> This RFC remains the design record; execution and evidence are tracked in `implementation-plan/stage-24-reliability-operability-hardening.md` and `implementation-plan/stage-24-verification.md`.
 
 ## 1. Problem Statement
 

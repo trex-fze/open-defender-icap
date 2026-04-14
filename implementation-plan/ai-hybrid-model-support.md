@@ -1,7 +1,9 @@
 # Implementation Plan – AI Hybrid Model Support
 
-**Status:** Planned  
+**Status:** Superseded by `implementation-plan/stage-08-hybrid-ai.md`  
 **Epic:** Enable offline & online LLM providers for `llm-worker`.
+
+> Historical draft retained for traceability. Current execution/status lives in `implementation-plan/stage-08-hybrid-ai.md`.
 
 ## Objectives
 

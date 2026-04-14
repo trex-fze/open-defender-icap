@@ -1,6 +1,6 @@
 # Stage 1 Implementation Plan – ICAP Hot Path
 
-**Status**: In Progress
+**Status**: Complete
 
 ## Objectives
 - Deliver ICAP parsing, normalization, cache/policy integration, and ICAP response handling per RFC Stage 1 addendum.
@@ -22,4 +22,4 @@
 - Policy client errors → need retries/backoff (future task).
 
 ## Next Checkpoint
-- Complete T4/T6/T7, capture evidence, then move Stage 1 to “Complete”.
+- Stage complete. Ongoing validation is tracked in `implementation-plan/stage-plan.md` routine regression focus.

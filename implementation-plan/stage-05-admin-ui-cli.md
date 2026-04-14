@@ -1,6 +1,6 @@
 # Stage 5 Implementation Plan – Admin API, UI & CLI
 
-**Status**: Planned
+**Status**: Complete
 
 ## Objectives
 - Expose admin APIs, React UI, and CLI per Spec §§18–19.

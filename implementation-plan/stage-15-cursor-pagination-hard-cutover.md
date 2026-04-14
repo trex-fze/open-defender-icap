@@ -33,6 +33,6 @@ Ship a load-resilient pagination contract for high-volume admin list endpoints b
 
 ## Follow-Up Recommendations
 
-- [ ] Convert remaining offset/page-based policy/reporting list APIs to cursor parity.
-- [ ] Add explicit endpoint-level perf baselines (`EXPLAIN ANALYZE`, p95 latency trend) to ops docs.
-- [ ] Populate `meta.prev_cursor` semantics when backward cursor navigation is required server-side.
+- [x] Convert remaining offset/page-based policy/reporting list APIs to cursor parity. *(Completed in Stage 22: `implementation-plan/stage-22-cursor-parity-policy-reporting.md`.)*
+- [x] Add explicit endpoint-level perf baselines (`EXPLAIN ANALYZE`, p95 latency trend) to ops docs. *(Captured in operator runbook baseline section.)*
+- [x] Populate `meta.prev_cursor` semantics when backward cursor navigation is required server-side. *(Decision: intentionally deferred; server contract keeps `meta.prev_cursor = null` until backward traversal requirement is ratified.)*

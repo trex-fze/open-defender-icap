@@ -24,6 +24,6 @@ Eliminate infinite pending loops by persisting terminal crawl failures, enabling
 
 ## Follow-Up Recommendations
 
-- [ ] Migrate streams to consumer groups (`XREADGROUP` + ACK) for restart-safe backlog handling.
-- [ ] Add pending-age alerts keyed by `fetch_reason`/terminalization path.
-- [ ] Add operator UI chips for fallback provenance flags in Classifications table.
+- [x] Migrate streams to consumer groups (`XREADGROUP` + ACK) for restart-safe backlog handling. *(Completed in Stage 21: `implementation-plan/stage-21-stream-consumer-groups.md`.)*
+- [x] Add pending-age alerts keyed by `fetch_reason`/terminalization path. *(Closed by Stage 24 queue SLO alerting baseline in `deploy/docker/prometheus-rules.yml`; reason-specific drill-down uses `llm_metadata_only_reason_total` and `llm_jobs_terminalized_total{reason=...}`.)*
+- [x] Add operator UI chips for fallback provenance flags in Classifications table. *(Implemented in `web-admin/src/pages/ClassificationsPage.tsx` backed by Admin API provenance extraction in `services/admin-api/src/classifications.rs`.)*
