@@ -87,3 +87,9 @@ Implement in five phases:
 - [x] Existing `/reports` behavior remains unchanged.
 - [x] Unit/e2e tests pass.
 - [x] Docs/runbook updated and reviewed.
+
+## 5) Post-Complete Extension (LLM Outcomes Telemetry)
+
+- Added Admin API endpoint `GET /api/v1/reporting/ops-llm-series` for Prometheus-backed LLM outcome time-series.
+- Dashboard now includes LLM outcome chart lines per provider (`success`, `failures`, `timeouts`, `non_retryable_400`).
+- Dashboard range selector expanded to include short incident windows (`1m`, `5m`, `15m`) in addition to prior ranges.

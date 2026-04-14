@@ -29,7 +29,7 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | --- | --- |
 | `OD_AUDIT_ELASTIC_URL`, `OD_AUDIT_ELASTIC_INDEX`, `OD_AUDIT_ELASTIC_API_KEY` | Admin audit export destination. |
 | `OD_REPORTING_ELASTIC_URL`, `OD_REPORTING_INDEX_PATTERN`, `OD_REPORTING_ELASTIC_USERNAME`, `OD_REPORTING_ELASTIC_PASSWORD`, `OD_REPORTING_ELASTIC_API_KEY`, `OD_REPORTING_DEFAULT_RANGE`, `OD_REPORTING_TIMEZONE` | Admin reporting query backend and defaults (`OD_REPORTING_TIMEZONE` controls histogram bucket timezone). |
-| `OD_PROMETHEUS_URL` | Prometheus base URL used by Admin API operations telemetry summary endpoint (`/api/v1/reporting/ops-summary`). |
+| `OD_PROMETHEUS_URL` | Prometheus base URL used by Admin API operations telemetry endpoints (`/api/v1/reporting/ops-summary`, `/api/v1/reporting/ops-llm-series`). |
 | `OD_REVIEW_SLA_SECONDS` | SLA threshold used by review metrics. |
 | `OD_ELASTIC_URL`, `OD_ELASTIC_INDEX_PREFIX`, `OD_ELASTIC_INDEX_PATTERN` | Event-ingester index destination/pattern. |
 | `OD_ELASTIC_TEMPLATE_NAME`, `OD_ELASTIC_ILM_NAME`, `OD_ELASTIC_APPLY_TEMPLATES` | Event-ingester template/ILM behavior. |

@@ -108,10 +108,16 @@ Security: same role gate as existing reporting endpoints (`ROLE_REPORTING_VIEW`)
 
 Controls:
 
-- range selector (1h, 6h, 24h, 7d, 30d)
+- range selector (1m, 5m, 15m, 1h, 6h, 24h, 7d, 30d)
 - top-N selector
 - refresh trigger
 - drill-link to `/reports`
+
+Post-implementation dashboard extension includes Prometheus-backed LLM outcomes telemetry:
+
+- `GET /api/v1/reporting/ops-llm-series` for per-provider time-series.
+- LLM chart lines for `success`, `failures`, `timeouts`, and `non_retryable_400`.
+- Provider scope filter (`all` or specific provider) for incident triage.
 
 ## 8. Risks and Mitigations
 
