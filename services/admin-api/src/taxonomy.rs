@@ -617,6 +617,7 @@ fn db_error(err: sqlx::Error) -> (StatusCode, Json<ApiError>) {
 #[cfg(test)]
 mod support {
     use super::*;
+    use common_types::normalizer::CanonicalizationPolicy;
     use crate::{
         audit::AuditLogger,
         auth::{AdminAuth, AuthSettings},
@@ -667,6 +668,7 @@ mod support {
             prometheus_url: Some("http://prometheus:9090".to_string()),
             http_client: reqwest::Client::new(),
             classification_job_publisher: None,
+            canonicalization_policy: Arc::new(CanonicalizationPolicy::default()),
         })
     }
 }

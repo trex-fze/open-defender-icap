@@ -113,6 +113,24 @@ static LLM_PROVIDER_FAILURES: Lazy<IntCounterVec> = Lazy::new(|| {
     .unwrap()
 });
 
+static LLM_PROVIDER_SUCCESS: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_provider_success_total",
+        "LLM invocation successes by provider",
+        &["provider"]
+    )
+    .unwrap()
+});
+
+static LLM_PROVIDER_FAILURE_CLASS: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_provider_failure_class_total",
+        "LLM invocation failures by provider, class and status",
+        &["provider", "class", "status_code"]
+    )
+    .unwrap()
+});
+
 static LLM_FALLBACK_ATTEMPTS: Lazy<IntCounterVec> = Lazy::new(|| {
     prometheus::register_int_counter_vec!(
         "llm_fallback_attempts_total",
@@ -376,6 +394,19 @@ pub fn record_llm_failure() {
 
 pub fn record_provider_failure(provider: &str) {
     LLM_PROVIDER_FAILURES.with_label_values(&[provider]).inc();
+}
+
+pub fn record_provider_success(provider: &str) {
+    LLM_PROVIDER_SUCCESS.with_label_values(&[provider]).inc();
+}
+
+pub fn record_provider_failure_class(provider: &str, class: &str, status_code: Option<u16>) {
+    let status = status_code
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "none".to_string());
+    LLM_PROVIDER_FAILURE_CLASS
+        .with_label_values(&[provider, class, status.as_str()])
+        .inc();
 }
 
 pub fn record_fallback_attempt(from_provider: &str, to_provider: &str, reason: &str) {

@@ -771,6 +771,10 @@ async fn main() -> Result<()> {
         )
         .route("/api/v1/reporting/ops-summary", get(reporting::ops_summary))
         .route(
+            "/api/v1/reporting/ops-llm-series",
+            get(reporting::ops_llm_series),
+        )
+        .route(
             "/api/v1/cache-entries/:cache_key",
             get(cache_entries_api::get_entry).delete(cache_entries_api::delete_entry),
         )

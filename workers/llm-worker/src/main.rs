@@ -628,6 +628,15 @@ enum InvocationFailureClass {
     NonRetryable,
 }
 
+impl InvocationFailureClass {
+    fn as_metric_label(&self) -> &'static str {
+        match self {
+            Self::Retryable => "retryable",
+            Self::NonRetryable => "non_retryable",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct InvocationFailure {
     class: InvocationFailureClass,
@@ -2481,6 +2490,11 @@ impl JobConsumer {
                     }
                     Err(fallback_err) => {
                         let classified = classify_invocation_failure(&fallback_err, &self.failover);
+                        metrics::record_provider_failure_class(
+                            &fallback.name,
+                            classified.class.as_metric_label(),
+                            classified.status,
+                        );
                         if err.output_invalid {
                             metrics::record_online_verification("failed");
                         }
@@ -2547,6 +2561,11 @@ impl JobConsumer {
                 }
                 Err(err) => {
                     let failure = classify_invocation_failure(&err, &self.failover);
+                    metrics::record_provider_failure_class(
+                        &provider.name,
+                        failure.class.as_metric_label(),
+                        failure.status,
+                    );
                     error!(
                         target = "svc-llm-worker",
                         normalized_key = %job.normalized_key,
@@ -3145,6 +3164,7 @@ async fn invoke_llm(
             let elapsed = start.elapsed().as_secs_f64();
             metrics::observe_llm_latency(elapsed);
             metrics::observe_provider_latency(&provider.name, elapsed);
+            metrics::record_provider_success(&provider.name);
             Ok(response)
         }
         Err(err) => {

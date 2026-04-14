@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     Extension, Json,
 };
+use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use sqlx::Row;
@@ -23,6 +24,7 @@ pub struct TrafficReportQuery {
 }
 
 const DEFAULT_TOP_N: u32 = 10;
+const PROM_RANGE_STEP_SECONDS: u64 = 15;
 
 #[derive(Debug, Serialize)]
 pub struct OpsSummaryResponse {
@@ -58,6 +60,30 @@ pub struct OpsProviderMetric {
     pub latency_p95_seconds: Option<f64>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct OpsSeriesPoint {
+    pub ts_ms: i64,
+    pub value: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpsLlmProviderSeries {
+    pub provider: String,
+    pub success: Vec<OpsSeriesPoint>,
+    pub failures: Vec<OpsSeriesPoint>,
+    pub timeouts: Vec<OpsSeriesPoint>,
+    pub non_retryable_400: Vec<OpsSeriesPoint>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpsLlmSeriesResponse {
+    pub range: String,
+    pub source: String,
+    pub step_seconds: u64,
+    pub providers: Vec<OpsLlmProviderSeries>,
+    pub errors: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct PrometheusResponse {
     status: String,
@@ -73,6 +99,23 @@ struct PrometheusData {
 struct PrometheusVectorSample {
     metric: HashMap<String, String>,
     value: (f64, String),
+}
+
+#[derive(Debug, Deserialize)]
+struct PrometheusRangeResponse {
+    status: String,
+    data: PrometheusRangeData,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrometheusRangeData {
+    result: Vec<PrometheusRangeSample>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrometheusRangeSample {
+    metric: HashMap<String, String>,
+    values: Vec<(f64, String)>,
 }
 
 pub async fn traffic_summary(
@@ -352,6 +395,127 @@ pub async fn ops_summary(
     }))
 }
 
+pub async fn ops_llm_series(
+    Extension(user): Extension<UserContext>,
+    State(state): State<AppState>,
+    Query(query): Query<TrafficReportQuery>,
+) -> Result<Json<OpsLlmSeriesResponse>, StatusCode> {
+    require_roles(&user, ROLE_REPORTING_VIEW)?;
+    let range = query
+        .range
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("24h")
+        .to_string();
+
+    let Some(prometheus_base) = state.prometheus_url() else {
+        return Ok(Json(OpsLlmSeriesResponse {
+            range,
+            source: "unavailable".to_string(),
+            step_seconds: PROM_RANGE_STEP_SECONDS,
+            providers: Vec::new(),
+            errors: vec!["prometheus endpoint is not configured".to_string()],
+        }));
+    };
+
+    let range_seconds = parse_prometheus_range_seconds(&range).unwrap_or(24 * 60 * 60);
+    let end_ts = Utc::now().timestamp();
+    let start_ts = end_ts - range_seconds;
+
+    let mut errors = Vec::new();
+    let success_rows = query_prometheus_matrix(
+        &state,
+        prometheus_base,
+        &format!(
+            "sum by (provider) (increase(llm_provider_success_total[{}]))",
+            range
+        ),
+        "llm_provider_success_series",
+        start_ts,
+        end_ts,
+        PROM_RANGE_STEP_SECONDS,
+        &mut errors,
+    )
+    .await
+    .unwrap_or_default();
+    let failure_rows = query_prometheus_matrix(
+        &state,
+        prometheus_base,
+        &format!(
+            "sum by (provider) (increase(llm_provider_failures_total[{}]))",
+            range
+        ),
+        "llm_provider_failure_series",
+        start_ts,
+        end_ts,
+        PROM_RANGE_STEP_SECONDS,
+        &mut errors,
+    )
+    .await
+    .unwrap_or_default();
+    let timeout_rows = query_prometheus_matrix(
+        &state,
+        prometheus_base,
+        &format!(
+            "sum by (provider) (increase(llm_provider_timeouts_total[{}]))",
+            range
+        ),
+        "llm_provider_timeout_series",
+        start_ts,
+        end_ts,
+        PROM_RANGE_STEP_SECONDS,
+        &mut errors,
+    )
+    .await
+    .unwrap_or_default();
+    let non_retryable_400_rows = query_prometheus_matrix(
+        &state,
+        prometheus_base,
+        &format!(
+            "sum by (provider) (increase(llm_provider_failure_class_total{{class=\"non_retryable\",status_code=\"400\"}}[{}]))",
+            range
+        ),
+        "llm_provider_non_retryable_400_series",
+        start_ts,
+        end_ts,
+        PROM_RANGE_STEP_SECONDS,
+        &mut errors,
+    )
+    .await
+    .unwrap_or_default();
+
+    let mut providers_by_name: HashMap<String, OpsLlmProviderSeries> = HashMap::new();
+    merge_provider_series(&mut providers_by_name, success_rows, |row| &mut row.success);
+    merge_provider_series(&mut providers_by_name, failure_rows, |row| {
+        &mut row.failures
+    });
+    merge_provider_series(&mut providers_by_name, timeout_rows, |row| {
+        &mut row.timeouts
+    });
+    merge_provider_series(&mut providers_by_name, non_retryable_400_rows, |row| {
+        &mut row.non_retryable_400
+    });
+
+    let mut providers = providers_by_name.into_values().collect::<Vec<_>>();
+    providers.sort_by(|a, b| a.provider.cmp(&b.provider));
+
+    let source = if errors.is_empty() {
+        "live"
+    } else if !providers.is_empty() {
+        "partial"
+    } else {
+        "unavailable"
+    };
+
+    Ok(Json(OpsLlmSeriesResponse {
+        range,
+        source: source.to_string(),
+        step_seconds: PROM_RANGE_STEP_SECONDS,
+        providers,
+        errors,
+    }))
+}
+
 fn parse_sample_value(sample: &PrometheusVectorSample) -> f64 {
     sample.value.1.parse::<f64>().unwrap_or(0.0)
 }
@@ -417,6 +581,116 @@ async fn query_prometheus_vector(
             errors.push(format!("{} query decode failed: {}", metric_name, err));
             None
         }
+    }
+}
+
+async fn query_prometheus_matrix(
+    state: &AppState,
+    base: &str,
+    query: &str,
+    metric_name: &str,
+    start_ts: i64,
+    end_ts: i64,
+    step_seconds: u64,
+    errors: &mut Vec<String>,
+) -> Option<Vec<PrometheusRangeSample>> {
+    let url = format!("{}/api/v1/query_range", base.trim_end_matches('/'));
+    let response = state
+        .http_client
+        .get(&url)
+        .query(&[
+            ("query", query.to_string()),
+            ("start", start_ts.to_string()),
+            ("end", end_ts.to_string()),
+            ("step", format!("{}s", step_seconds)),
+        ])
+        .send()
+        .await;
+    let response = match response {
+        Ok(resp) => resp,
+        Err(err) => {
+            errors.push(format!("{} query failed: {}", metric_name, err));
+            return None;
+        }
+    };
+
+    if !response.status().is_success() {
+        errors.push(format!(
+            "{} query returned {}",
+            metric_name,
+            response.status()
+        ));
+        return None;
+    }
+
+    match response.json::<PrometheusRangeResponse>().await {
+        Ok(body) => {
+            if body.status != "success" {
+                errors.push(format!(
+                    "{} query response status was {}",
+                    metric_name, body.status
+                ));
+                None
+            } else {
+                Some(body.data.result)
+            }
+        }
+        Err(err) => {
+            errors.push(format!("{} query decode failed: {}", metric_name, err));
+            None
+        }
+    }
+}
+
+fn parse_prometheus_range_seconds(range: &str) -> Option<i64> {
+    let trimmed = range.trim();
+    if trimmed.len() < 2 {
+        return None;
+    }
+    let unit = trimmed.chars().last()?.to_ascii_lowercase();
+    let value: i64 = trimmed[..trimmed.len() - 1].parse().ok()?;
+    if value <= 0 {
+        return None;
+    }
+    match unit {
+        'm' => Some(value * 60),
+        'h' => Some(value * 60 * 60),
+        'd' => Some(value * 24 * 60 * 60),
+        _ => None,
+    }
+}
+
+fn parse_matrix_points(values: Vec<(f64, String)>) -> Vec<OpsSeriesPoint> {
+    values
+        .into_iter()
+        .map(|(ts_secs, value)| OpsSeriesPoint {
+            ts_ms: (ts_secs * 1000.0) as i64,
+            value: value.parse::<f64>().unwrap_or(0.0),
+        })
+        .collect()
+}
+
+fn merge_provider_series<F>(
+    providers_by_name: &mut HashMap<String, OpsLlmProviderSeries>,
+    rows: Vec<PrometheusRangeSample>,
+    target: F,
+) where
+    F: Fn(&mut OpsLlmProviderSeries) -> &mut Vec<OpsSeriesPoint>,
+{
+    for sample in rows {
+        let Some(name) = sample.metric.get("provider").cloned() else {
+            continue;
+        };
+        let item = providers_by_name
+            .entry(name.clone())
+            .or_insert_with(|| OpsLlmProviderSeries {
+                provider: name,
+                success: Vec::new(),
+                failures: Vec::new(),
+                timeouts: Vec::new(),
+                non_retryable_400: Vec::new(),
+            });
+        *target(item) = parse_matrix_points(sample.values);
     }
 }
 
@@ -553,5 +827,23 @@ mod tests {
         assert_eq!(categories[0].doc_count, 50);
         assert_eq!(categories[1].key, "unknown-unclassified");
         assert_eq!(categories[1].doc_count, 5);
+    }
+
+    #[test]
+    fn parses_prometheus_range_seconds() {
+        assert_eq!(parse_prometheus_range_seconds("1m"), Some(60));
+        assert_eq!(parse_prometheus_range_seconds("15m"), Some(900));
+        assert_eq!(parse_prometheus_range_seconds("1h"), Some(3600));
+        assert_eq!(parse_prometheus_range_seconds("7d"), Some(604800));
+        assert_eq!(parse_prometheus_range_seconds("0m"), None);
+        assert_eq!(parse_prometheus_range_seconds("abc"), None);
+    }
+
+    #[test]
+    fn matrix_points_convert_to_epoch_millis() {
+        let points = parse_matrix_points(vec![(1712707200.0, "3.5".to_string())]);
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].ts_ms, 1712707200000);
+        assert!((points[0].value - 3.5).abs() < f64::EPSILON);
     }
 }

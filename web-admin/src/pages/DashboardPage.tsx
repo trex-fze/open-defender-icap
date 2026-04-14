@@ -8,6 +8,7 @@ import {
   ComposedChart,
   Legend,
   Line,
+  LineChart,
   Tooltip,
   XAxis,
   YAxis,
@@ -15,6 +16,7 @@ import {
 import { useOpsStatus, type OpsProviderStatus } from '../hooks/useOpsStatus';
 import { useDashboardReportData } from '../hooks/useDashboardReportData';
 import { useDashboardOpsSummary } from '../hooks/useDashboardOpsSummary';
+import { useDashboardLlmSeries, type LlmProviderSeries } from '../hooks/useDashboardLlmSeries';
 import { useTheme } from '../context/ThemeContext';
 
 const formatBytes = (input: number) => {
@@ -58,12 +60,68 @@ const formatBucketLabel = (timestamp: string, timezone?: string) => {
   }).format(date);
 };
 
+const formatTimestampMsLabel = (timestampMs: number, timezone?: string) => {
+  if (!Number.isFinite(timestampMs)) return '—';
+  const date = new Date(timestampMs);
+  if (Number.isNaN(date.getTime())) return '—';
+  return formatBucketLabel(date.toISOString(), timezone);
+};
+
 const formatRate = (value?: number) => {
   if (value === undefined || !Number.isFinite(value)) return '—';
   return `${value.toFixed(3)}/s`;
 };
 
 const hasNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+type LlmChartPoint = {
+  timestamp: number;
+  success: number;
+  failures: number;
+  timeouts: number;
+  nonRetryable400: number;
+};
+
+const mergeProviderPoints = (target: Map<number, LlmChartPoint>, provider: LlmProviderSeries) => {
+  const include = (ts: number) => {
+    if (!target.has(ts)) {
+      target.set(ts, {
+        timestamp: ts,
+        success: 0,
+        failures: 0,
+        timeouts: 0,
+        nonRetryable400: 0,
+      });
+    }
+    return target.get(ts)!;
+  };
+
+  provider.success.forEach((point) => {
+    include(point.ts_ms).success += point.value;
+  });
+  provider.failures.forEach((point) => {
+    include(point.ts_ms).failures += point.value;
+  });
+  provider.timeouts.forEach((point) => {
+    include(point.ts_ms).timeouts += point.value;
+  });
+  provider.non_retryable_400.forEach((point) => {
+    include(point.ts_ms).nonRetryable400 += point.value;
+  });
+};
+
+const buildLlmChartData = (providers: LlmProviderSeries[], selectedProvider: string): LlmChartPoint[] => {
+  if (providers.length === 0) {
+    return [];
+  }
+
+  const selected = selectedProvider === 'all'
+    ? providers
+    : providers.filter((item) => item.provider === selectedProvider);
+  const bucket = new Map<number, LlmChartPoint>();
+  selected.forEach((provider) => mergeProviderPoints(bucket, provider));
+  return Array.from(bucket.values()).sort((a, b) => a.timestamp - b.timestamp);
+};
 
 type ChartPalette = {
   grid: string;
@@ -144,6 +202,7 @@ export const DashboardPage = () => {
   const { resolvedTheme } = useTheme();
   const [range, setRange] = useState('1h');
   const [topN, setTopN] = useState(20);
+  const [selectedLlmProvider, setSelectedLlmProvider] = useState<string>('all');
   const [refreshIntervalMs, setRefreshIntervalMs] = useState<number>(() => {
     if (typeof window === 'undefined') return 30_000;
     const raw = window.localStorage.getItem('od.dashboard.refresh.ms');
@@ -153,6 +212,7 @@ export const DashboardPage = () => {
   const { data: ops, loading: opsLoading, error: opsError, updatedAt: opsUpdatedAt } = useOpsStatus(refreshIntervalMs);
   const dashboard = useDashboardReportData(range, topN, undefined, refreshIntervalMs);
   const opsSummary = useDashboardOpsSummary(range, refreshIntervalMs);
+  const llmSeries = useDashboardLlmSeries(range, refreshIntervalMs);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -201,7 +261,25 @@ export const DashboardPage = () => {
   const topCategories = dashboard.data?.top_categories ?? [];
   const topCategoriesEvent = dashboard.data?.top_categories_event ?? [];
 
-  const lastUpdated = Math.max(dashboard.updatedAt ?? 0, opsUpdatedAt ?? 0, opsSummary.updatedAt ?? 0);
+  useEffect(() => {
+    if (!llmSeries.data || llmSeries.data.providers.length === 0) {
+      setSelectedLlmProvider('all');
+      return;
+    }
+    if (
+      selectedLlmProvider !== 'all'
+      && !llmSeries.data.providers.some((provider) => provider.provider === selectedLlmProvider)
+    ) {
+      setSelectedLlmProvider('all');
+    }
+  }, [llmSeries.data, selectedLlmProvider]);
+
+  const lastUpdated = Math.max(
+    dashboard.updatedAt ?? 0,
+    opsUpdatedAt ?? 0,
+    opsSummary.updatedAt ?? 0,
+    llmSeries.updatedAt ?? 0,
+  );
   const topClientsBandwidthBytes = useMemo(
     () => (dashboard.data?.top_clients_by_bandwidth ?? []).reduce((sum, row) => sum + row.bandwidth_bytes, 0),
     [dashboard.data?.top_clients_by_bandwidth],
@@ -224,6 +302,15 @@ export const DashboardPage = () => {
     () => ops.llmProviders.filter((provider) => provider.healthStatus !== 'healthy').length,
     [ops.llmProviders],
   );
+  const llmProviderOptions = llmSeries.data?.providers ?? [];
+  const llmChartData = useMemo(
+    () => buildLlmChartData(llmProviderOptions, selectedLlmProvider),
+    [llmProviderOptions, selectedLlmProvider],
+  );
+  const llmNonRetryable400Total = useMemo(
+    () => llmChartData.reduce((sum, point) => sum + point.nonRetryable400, 0),
+    [llmChartData],
+  );
 
   return (
     <div>
@@ -236,6 +323,9 @@ export const DashboardPage = () => {
         </div>
         <div className="page-header-actions dashboard-header-actions">
           <select className="search-input dashboard-header-select" value={range} onChange={(event) => setRange(event.target.value)}>
+            <option value="1m">1m</option>
+            <option value="5m">5m</option>
+            <option value="15m">15m</option>
             <option value="1h">1h</option>
             <option value="6h">6h</option>
             <option value="24h">24h</option>
@@ -510,6 +600,90 @@ export const DashboardPage = () => {
               </p>
             ) : null}
           </>
+        ) : null}
+      </div>
+
+      <div className="glass-panel" style={{ marginTop: '1.2rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <p className="section-title" style={{ marginBottom: 0 }}>LLM Outcomes (Prometheus Series)</p>
+          <select
+            className="search-input dashboard-header-select"
+            value={selectedLlmProvider}
+            onChange={(event) => setSelectedLlmProvider(event.target.value)}
+            aria-label="Select LLM provider series"
+          >
+            <option value="all">All providers</option>
+            {llmProviderOptions.map((provider) => (
+              <option key={provider.provider} value={provider.provider}>{provider.provider}</option>
+            ))}
+          </select>
+        </div>
+        {llmSeries.loading ? (
+          <p style={{ margin: '0.7rem 0 0', color: 'var(--muted)' }}>Loading LLM telemetry series…</p>
+        ) : llmSeries.data ? (
+          <>
+            <p style={{ margin: '0.45rem 0 0.65rem', color: 'var(--muted)', fontSize: '0.82rem' }}>
+              Runtime source: {llmSeries.data.source} · range: {llmSeries.data.range} · step: {llmSeries.data.step_seconds}s
+            </p>
+            <div className="chip-row" style={{ marginBottom: '0.7rem' }}>
+              <span className={`chip chip--${llmNonRetryable400Total > 0 ? 'red' : 'green'}`}>
+                Non-retryable HTTP 400: {formatCompact(llmNonRetryable400Total)}
+              </span>
+              <span className="chip chip--amber">Provider scope: {selectedLlmProvider === 'all' ? 'all' : selectedLlmProvider}</span>
+            </div>
+            <div className="dashboard-hourly-chart dashboard-llm-chart">
+              <ResponsiveContainer>
+                <LineChart data={llmChartData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartPalette.grid} />
+                  <XAxis
+                    dataKey="timestamp"
+                    stroke={chartPalette.axis}
+                    tick={{ fill: chartPalette.axis, fontSize: 12 }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(value) => formatTimestampMsLabel(Number(value), dashboard.data?.timezone)}
+                  />
+                  <YAxis
+                    stroke={chartPalette.axis}
+                    tick={{ fill: chartPalette.axis, fontSize: 12 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: chartPalette.tooltipBg,
+                      border: `1px solid ${chartPalette.tooltipBorder}`,
+                      borderRadius: '0.75rem',
+                      color: chartPalette.tooltipText,
+                    }}
+                    labelStyle={{ color: chartPalette.tooltipTitle }}
+                    formatter={(value, name) => [formatCompact(Number(value)), name]}
+                    labelFormatter={(label) => formatTimestampMsLabel(Number(label), dashboard.data?.timezone)}
+                  />
+                  <Legend wrapperStyle={{ color: chartPalette.axis }} />
+                  <Line name="Success" type="monotone" dataKey="success" stroke="#38b86f" strokeWidth={2} dot={false} />
+                  <Line name="Failures" type="monotone" dataKey="failures" stroke={chartPalette.blocked} strokeWidth={2} dot={false} />
+                  <Line name="Timeouts" type="monotone" dataKey="timeouts" stroke="#f0ad4e" strokeWidth={2} dot={false} />
+                  <Line name="NonRetryable 400" type="monotone" dataKey="nonRetryable400" stroke="#fb4f68" strokeWidth={2.2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            {llmChartData.length === 0 ? (
+              <p style={{ margin: '0.7rem 0 0', color: 'var(--muted)', fontSize: '0.82rem' }}>
+                No LLM provider series found for this range.
+              </p>
+            ) : null}
+            {llmSeries.data.errors.length > 0 ? (
+              <p style={{ marginTop: '0.65rem', color: 'var(--status-warning)', fontSize: '0.8rem' }}>
+                Partial telemetry: {llmSeries.data.errors[0]}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+        {llmSeries.error ? (
+          <p style={{ marginTop: '0.65rem', color: 'var(--status-error)', fontSize: '0.8rem' }}>
+            Failed to load LLM telemetry series: {llmSeries.error}
+          </p>
         ) : null}
       </div>
 

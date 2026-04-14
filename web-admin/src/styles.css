@@ -1003,6 +1003,10 @@ tr:hover td {
   padding: 0.5rem 0 0.25rem;
 }
 
+.dashboard-llm-chart {
+  height: 360px;
+}
+
 .scroll-table-panel {
   height: 620px;
   display: flex;
@@ -1151,6 +1155,10 @@ tr:hover td {
 
   .dashboard-hourly-chart {
     height: 300px;
+  }
+
+  .dashboard-llm-chart {
+    height: 260px;
   }
 
   .dashboard-domain-panel--compact {

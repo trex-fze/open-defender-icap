@@ -73,10 +73,30 @@ describe('Dashboard analytics', () => {
       },
     }).as('dashboardReport');
 
+    cy.intercept('GET', '**/api/v1/reporting/ops-llm-series**', {
+      statusCode: 200,
+      body: {
+        range: '1h',
+        source: 'live',
+        step_seconds: 15,
+        providers: [
+          {
+            provider: 'local-lmstudio',
+            success: [{ ts_ms: 1712707200000, value: 30 }],
+            failures: [{ ts_ms: 1712707200000, value: 4 }],
+            timeouts: [{ ts_ms: 1712707200000, value: 1 }],
+            non_retryable_400: [{ ts_ms: 1712707200000, value: 2 }],
+          },
+        ],
+        errors: [],
+      },
+    }).as('llmSeries');
+
     cy.visit('/dashboard', { onBeforeLoad: seedDashboardAuth });
     cy.wait('@whoami');
     cy.wait('@pending');
     cy.wait('@dashboardReport');
+    cy.wait('@llmSeries');
   });
 
   it('renders rich dashboard analytics panels', () => {
@@ -86,6 +106,11 @@ describe('Dashboard analytics', () => {
     cy.contains('Top 10 clients shown').should('be.visible');
     cy.contains('Blocked Domains').should('be.visible');
     cy.contains('Top Requesters of Blocked Domains').should('be.visible');
+    cy.contains('LLM Outcomes (Prometheus Series)').should('be.visible');
+    cy.contains('Non-retryable HTTP 400').should('be.visible');
+    cy.get('select').contains('1m').should('exist');
+    cy.get('select').contains('5m').should('exist');
+    cy.get('select').contains('15m').should('exist');
     cy.contains('192.168.1.253').should('be.visible');
   });
 
