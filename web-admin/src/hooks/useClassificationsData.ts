@@ -16,6 +16,7 @@ export type ClassificationRecord = {
   effective_action?: string;
   effective_decision_source?: string;
   confidence?: number;
+  fallback_provenance?: string[];
   status: string;
   updated_at: string;
 };

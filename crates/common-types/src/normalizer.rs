@@ -1,3 +1,4 @@
+use addr::parse_domain_name;
 use anyhow::{anyhow, Context, Result};
 use idna::domain_to_ascii;
 use url::Url;
@@ -58,6 +59,12 @@ pub fn normalize_target(host: &str, path: &str, scheme: Option<&str>) -> Result<
 }
 
 pub fn derive_registered_domain(hostname: &str) -> String {
+    if let Ok(parsed) = parse_domain_name(hostname) {
+        if let Some(root) = parsed.root() {
+            return root.to_ascii_lowercase();
+        }
+    }
+
     let labels: Vec<&str> = hostname.split('.').collect();
     if labels.len() <= 2 {
         hostname.to_string()
@@ -152,5 +159,17 @@ mod tests {
         let result = normalize_target("[2001:db8::1]:443", "/", Some("https"))
             .expect("normalize ipv6 with port");
         assert_eq!(result.hostname, "2001:db8::1");
+    }
+
+    #[test]
+    fn derives_registered_domain_with_public_suffixes() {
+        assert_eq!(
+            derive_registered_domain("api.service.example.co.uk"),
+            "example.co.uk"
+        );
+        assert_eq!(
+            derive_registered_domain("portal.example.com.au"),
+            "example.com.au"
+        );
     }
 }

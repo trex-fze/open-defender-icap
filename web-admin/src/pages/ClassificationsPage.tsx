@@ -227,6 +227,7 @@ export const ClassificationsPage = () => {
                   <th>Subcategory</th>
                   <th>Effective Action</th>
                   <th>Recorded Action</th>
+                  <th>Fallback</th>
                   <th>Updated</th>
                   <th></th>
                 </tr>
@@ -234,7 +235,7 @@ export const ClassificationsPage = () => {
               <tbody>
                 {data.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', color: 'var(--muted)' }}>
+                    <td colSpan={9} style={{ textAlign: 'center', color: 'var(--muted)' }}>
                       No matching sites.
                     </td>
                   </tr>
@@ -250,6 +251,28 @@ export const ClassificationsPage = () => {
                         {item.effective_decision_source ? ` (${item.effective_decision_source})` : ''}
                       </td>
                       <td>{item.recommended_action ?? '—'}</td>
+                      <td>
+                        {item.fallback_provenance && item.fallback_provenance.length > 0 ? (
+                          <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                            {item.fallback_provenance.map((value) => (
+                              <span
+                                key={`${item.normalized_key}-${value}`}
+                                style={{
+                                  padding: '0.1rem 0.4rem',
+                                  borderRadius: 999,
+                                  border: '1px solid var(--border-strong)',
+                                  fontSize: '0.72rem',
+                                  color: 'var(--muted)',
+                                }}
+                              >
+                                {value}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td>{item.updated_at}</td>
                       <td style={{ textAlign: 'right' }}>
                         <button

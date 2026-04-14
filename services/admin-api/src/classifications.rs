@@ -41,6 +41,7 @@ pub struct ClassificationListRecord {
     pub effective_action: Option<PolicyAction>,
     pub effective_decision_source: Option<String>,
     pub confidence: Option<f32>,
+    pub fallback_provenance: Vec<String>,
     pub status: String,
     pub updated_at: DateTime<Utc>,
 }
@@ -236,6 +237,7 @@ pub async fn list(
                       risk_level,
                       recommended_action,
                       confidence::float8 AS confidence,
+                      flags,
                       status,
                       updated_at
                FROM classifications
@@ -250,6 +252,7 @@ pub async fn list(
                       NULL::text AS risk_level,
                       NULL::text AS recommended_action,
                       NULL::float8 AS confidence,
+                      NULL::jsonb AS flags,
                       cr.status,
                       cr.updated_at
                FROM classification_requests cr
@@ -264,11 +267,12 @@ pub async fn list(
                   state,
                   primary_category,
                   subcategory,
-                  risk_level,
-                  recommended_action,
-                  confidence,
-                  status,
-                  updated_at
+                   risk_level,
+                   recommended_action,
+                   confidence,
+                   flags,
+                   status,
+                   updated_at
            FROM combined
            WHERE ($3::timestamptz IS NULL OR (updated_at, normalized_key) < ($3, $4))
            ORDER BY updated_at DESC, normalized_key DESC
@@ -304,6 +308,12 @@ pub async fn list(
                 .ok()
                 .flatten()
                 .map(|v| v as f32),
+            fallback_provenance: row
+                .try_get::<Option<Value>, _>("flags")
+                .ok()
+                .flatten()
+                .map(provenance_from_flags)
+                .unwrap_or_default(),
             status: row.get("status"),
             updated_at: row.get("updated_at"),
         })
@@ -1017,6 +1027,34 @@ fn parse_policy_action(value: &str) -> Option<PolicyAction> {
         "ContentPending" => Some(PolicyAction::ContentPending),
         _ => None,
     }
+}
+
+fn provenance_from_flags(flags: Value) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let Some(obj) = flags.as_object() else {
+        return out;
+    };
+
+    if obj
+        .get("metadata_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        out.push("metadata-only".to_string());
+    }
+
+    if let Some(reason) = obj.get("metadata_only_reason").and_then(Value::as_str) {
+        if reason.starts_with("local_output_invalid_online_") {
+            out.push("output-invalid-fallback".to_string());
+        }
+        out.push(format!("metadata:{reason}"));
+    }
+
+    if let Some(reason) = obj.get("taxonomy_fallback_reason").and_then(Value::as_str) {
+        out.push(format!("taxonomy:{reason}"));
+    }
+
+    out
 }
 
 fn default_recompute_policy_fields() -> bool {

@@ -131,6 +131,7 @@ async fn handle_connection(
     let normalized = normalize_target(http_host, http_path, icap_req.http_scheme.as_deref())?;
     let classification_key = canonical_classification_key(&normalized.normalized_key)
         .unwrap_or_else(|| normalized.normalized_key.clone());
+    metrics::record_canonicalization(&normalized.normalized_key, &classification_key);
     if let Some(trace_id) = &icap_req.trace_id {
         tracing::Span::current().record("trace_id", &tracing::field::display(trace_id));
     }

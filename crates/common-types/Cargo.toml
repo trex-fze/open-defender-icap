@@ -10,3 +10,4 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 idna = { workspace = true }
 url = { workspace = true }
+addr = "0.15"
