@@ -262,13 +262,17 @@ export const PoliciesPage = () => {
           limit={limit}
           loading={loading}
           hasMore={Boolean(paginationMeta.next_cursor) && paginationMeta.has_more}
-          canGoBack={cursorStack.length > 0}
+          canGoBack={Boolean(paginationMeta.prev_cursor) || cursorStack.length > 0}
           onLimitChange={(nextLimit) => {
             setLimit(nextLimit);
             setCursor(undefined);
             setCursorStack([]);
           }}
           onPrev={() => {
+            if (paginationMeta.prev_cursor) {
+              setCursor(paginationMeta.prev_cursor);
+              return;
+            }
             if (cursorStack.length === 0) return;
             const stack = [...cursorStack];
             const prev = stack.pop();

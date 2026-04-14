@@ -1,6 +1,7 @@
 use addr::parse_domain_name;
 use anyhow::{anyhow, Context, Result};
 use idna::domain_to_ascii;
+use std::collections::{HashMap, HashSet};
 use url::Url;
 
 use crate::{EntityLevel, NormalizedTarget};
@@ -87,6 +88,76 @@ pub fn canonical_classification_key(normalized_key: &str) -> Option<String> {
     Some(format!("domain:{}", registered))
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct CanonicalizationPolicy {
+    tenant_domain_exceptions: HashMap<String, HashSet<String>>,
+}
+
+impl CanonicalizationPolicy {
+    pub fn from_tenant_exceptions(input: HashMap<String, Vec<String>>) -> Self {
+        let mut tenant_domain_exceptions: HashMap<String, HashSet<String>> = HashMap::new();
+        for (tenant, domains) in input {
+            let key = normalize_tenant_key(&tenant);
+            let set = tenant_domain_exceptions.entry(key).or_default();
+            for domain in domains {
+                let normalized = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+                if normalized.is_empty() {
+                    continue;
+                }
+                set.insert(derive_registered_domain(&normalized));
+            }
+        }
+        Self {
+            tenant_domain_exceptions,
+        }
+    }
+
+    pub fn keeps_subdomain_granularity(&self, tenant: Option<&str>, host: &str) -> bool {
+        if self.tenant_domain_exceptions.is_empty() {
+            return false;
+        }
+        let registered = derive_registered_domain(host);
+        let registered = registered.trim().trim_end_matches('.').to_ascii_lowercase();
+        if registered.is_empty() {
+            return false;
+        }
+        let tenant_key = tenant.map(normalize_tenant_key);
+        let matches = |key: &str| {
+            self.tenant_domain_exceptions
+                .get(key)
+                .map(|set| set.contains(&registered))
+                .unwrap_or(false)
+        };
+
+        tenant_key.as_deref().map(matches).unwrap_or(false) || matches("*") || matches("default")
+    }
+}
+
+pub fn canonical_classification_key_with_policy(
+    normalized_key: &str,
+    policy: &CanonicalizationPolicy,
+    tenant: Option<&str>,
+) -> Option<String> {
+    let host = normalized_key
+        .strip_prefix("domain:")
+        .or_else(|| normalized_key.strip_prefix("subdomain:"))?
+        .trim()
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if host.is_empty() {
+        return None;
+    }
+    if policy.keeps_subdomain_granularity(tenant, &host) {
+        return Some(format!("domain:{}", host));
+    }
+    let registered = derive_registered_domain(&host);
+    Some(format!("domain:{}", registered))
+}
+
+fn normalize_tenant_key(raw: &str) -> String {
+    raw.trim().to_ascii_lowercase()
+}
+
 fn sanitize_host(input: &str) -> String {
     let trimmed = input.trim();
     if trimmed.starts_with('[') {
@@ -170,6 +241,45 @@ mod tests {
         assert_eq!(
             derive_registered_domain("portal.example.com.au"),
             "example.com.au"
+        );
+    }
+
+    #[test]
+    fn canonicalization_policy_keeps_granularity_for_configured_tenant_domain() {
+        let policy = CanonicalizationPolicy::from_tenant_exceptions(HashMap::from([
+            (
+                "tenant-acme".to_string(),
+                vec!["example.co.uk".to_string(), "example.com".to_string()],
+            ),
+            ("*".to_string(), vec!["global.example".to_string()]),
+        ]));
+
+        assert_eq!(
+            canonical_classification_key_with_policy(
+                "subdomain:api.example.co.uk",
+                &policy,
+                Some("tenant-acme")
+            )
+            .as_deref(),
+            Some("domain:api.example.co.uk")
+        );
+        assert_eq!(
+            canonical_classification_key_with_policy(
+                "subdomain:cdn.global.example",
+                &policy,
+                Some("tenant-foo")
+            )
+            .as_deref(),
+            Some("domain:cdn.global.example")
+        );
+        assert_eq!(
+            canonical_classification_key_with_policy(
+                "subdomain:api.other.co.uk",
+                &policy,
+                Some("tenant-acme")
+            )
+            .as_deref(),
+            Some("domain:other.co.uk")
         );
     }
 }

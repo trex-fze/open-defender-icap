@@ -24,4 +24,4 @@ Deduplicate classification workload by canonicalizing subdomain traffic into reg
 
 - [x] Add PSL-based registrable domain derivation (replace simple last-two-label reduction). *(Implemented in `crates/common-types/src/normalizer.rs` via PSL-aware parsing with heuristic fallback.)*
 - [x] Add metrics for canonicalization collapse ratio (subdomain requests -> domain key). *(Added `classification_canonicalization_total`, `classification_canonicalization_collapsed_total`, and `classification_canonicalization_collapse_ratio` in `services/icap-adaptor/src/metrics.rs`.)*
-- [x] Add optional tenant-domain exception list if operational telemetry shows collisions. *(Decision: conditionally deferred; implement only when collision telemetry crosses documented trigger thresholds in runbook.)*
+- [x] Add optional tenant-domain exception list if operational telemetry shows collisions. *(Implemented as config-driven `tenant_domain_exceptions` policy in ICAP + Admin API canonicalization paths; defaults remain empty.)*

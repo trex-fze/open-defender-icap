@@ -86,11 +86,13 @@ Taxonomy parity validation command:
 - **Collapse-ratio telemetry**: watch `classification_canonicalization_collapse_ratio` with supporting totals (`classification_canonicalization_total`, `classification_canonicalization_collapsed_total`) on ICAP metrics.
 - **Conditional tenant exception policy**: keep tenant/domain exception list disabled by default. Open an implementation task only if either (a) repeated collision incidents are confirmed for the same registrable domain family, or (b) collapse ratio anomaly persists for two release cycles with verified policy impact.
 
+Tenant/domain exceptions are now supported via `canonicalization.tenant_domain_exceptions` in `config/icap.json` and `config/admin-api.json`. Keys are tenant identifiers (or `default`/`*`), values are registrable domains that must retain subdomain-level granularity.
+
 ## Stage 15 Cursor Performance Baseline
 
 - Capture baseline query plans for high-volume cursor endpoints before release (`EXPLAIN ANALYZE` against representative datasets).
 - Track p95 API latency trend for list routes in regression drills; investigate if p95 regresses by >25% versus prior release baseline.
-- Keep backward pagination contract explicit: `meta.prev_cursor` remains `null` until a server-side backward traversal requirement is approved.
+- Keep backward pagination contract explicit: cursor endpoints now emit directional `next_cursor`/`prev_cursor`; clients should prefer server-provided `prev_cursor` for reverse traversal.
 
 ## Stage 12 Rollout / Rollback Procedure
 

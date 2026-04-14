@@ -35,5 +35,10 @@
     "password": null,
     "default_range": "24h",
     "timezone": "Asia/Dubai"
+  },
+  "canonicalization": {
+    "tenant_domain_exceptions": {
+      "default": []
+    }
   }
 }

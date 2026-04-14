@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct IcapConfig {
@@ -24,6 +25,8 @@ pub struct IcapConfig {
     pub page_fetch_queue: Option<PageFetchQueueConfig>,
     #[serde(default)]
     pub admin_api: Option<AdminApiConfig>,
+    #[serde(default)]
+    pub canonicalization: CanonicalizationConfig,
 }
 
 pub fn load() -> anyhow::Result<IcapConfig> {
@@ -88,4 +91,10 @@ pub struct AdminApiConfig {
     pub base_url: String,
     #[serde(default)]
     pub admin_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct CanonicalizationConfig {
+    #[serde(default)]
+    pub tenant_domain_exceptions: HashMap<String, Vec<String>>,
 }

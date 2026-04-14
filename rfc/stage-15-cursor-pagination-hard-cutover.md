@@ -10,7 +10,7 @@ High-volume list endpoints were using mixed response shapes (array, limit-only, 
 ## Goals
 
 1. Standardize targeted list APIs on cursor pagination using `limit` + `cursor`.
-2. Standardize responses to `{ data, meta }` with `has_more` and `next_cursor`.
+2. Standardize responses to `{ data, meta }` with `has_more`, `next_cursor`, and `prev_cursor`.
 3. Use deterministic keyset ordering with tie-breakers to avoid page drift.
 4. Cut over backend, web-admin, and odctl in one delivery to avoid dual contracts.
 5. Add DB indexes aligned with seek predicates and sort order.
@@ -29,7 +29,7 @@ High-volume list endpoints were using mixed response shapes (array, limit-only, 
    - `meta.limit`: effective page size
    - `meta.has_more`: whether another page exists
    - `meta.next_cursor`: opaque token for the next page when `has_more=true`
-   - `meta.prev_cursor`: reserved (currently `null`)
+   - `meta.prev_cursor`: opaque token for backward traversal when available
 3. Invalid cursor values return `400` (`INVALID_CURSOR` where endpoint uses `ApiError`; generic `400` for status-only handlers).
 4. All converted routes use deterministic ordering with a stable tie-breaker (e.g., `(updated_at, normalized_key)` or `(created_at, id)`).
 

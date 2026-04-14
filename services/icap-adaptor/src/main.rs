@@ -15,7 +15,9 @@ use tracing::{error, info, instrument, warn, Level};
 
 use cache::CacheClient;
 use common_types::{
-    normalizer::{canonical_classification_key, normalize_target},
+    normalizer::{
+        canonical_classification_key_with_policy, normalize_target, CanonicalizationPolicy,
+    },
     ClassificationVerdict, EntityLevel, NormalizedTarget, PageFetchJob, PolicyAction,
     PolicyDecision, PolicyDecisionRequest,
 };
@@ -34,6 +36,9 @@ async fn main() -> Result<()> {
 
     let cfg = config::load()?;
     let addr = format!("{}:{}", cfg.host, cfg.port);
+    let canonicalization_policy = Arc::new(CanonicalizationPolicy::from_tenant_exceptions(
+        cfg.canonicalization.tenant_domain_exceptions.clone(),
+    ));
     let listener = TcpListener::bind(&addr).await?;
     info!(target = "svc-icap", %addr, preview_size = cfg.preview_size, "ICAP adaptor listening");
 
@@ -78,6 +83,7 @@ async fn main() -> Result<()> {
         let job_publisher = job_publisher.clone();
         let page_fetch_publisher = page_fetch_publisher.clone();
         let pending_client = pending_client.clone();
+        let canonicalization_policy = canonicalization_policy.clone();
         info!(target = "svc-icap", ?peer, "accepted connection");
         tokio::spawn(async move {
             if let Err(err) = handle_connection(
@@ -88,6 +94,7 @@ async fn main() -> Result<()> {
                 job_publisher,
                 page_fetch_publisher,
                 pending_client,
+                canonicalization_policy,
             )
             .await
             {
@@ -106,6 +113,7 @@ async fn handle_connection(
     job_publisher: Option<JobPublisher>,
     page_fetch_publisher: Option<PageFetchPublisher>,
     pending_client: Option<PendingClient>,
+    canonicalization_policy: Arc<CanonicalizationPolicy>,
 ) -> Result<()> {
     let roundtrip_start = tokio::time::Instant::now();
     let mut buf = vec![0u8; cfg.preview_size.max(1024)];
@@ -129,8 +137,16 @@ async fn handle_connection(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("HTTP path missing"))?;
     let normalized = normalize_target(http_host, http_path, icap_req.http_scheme.as_deref())?;
-    let classification_key = canonical_classification_key(&normalized.normalized_key)
-        .unwrap_or_else(|| normalized.normalized_key.clone());
+    let tenant_hint = icap_req
+        .headers
+        .get("x-authenticated-tenant")
+        .map(|value| value.as_str());
+    let classification_key = canonical_classification_key_with_policy(
+        &normalized.normalized_key,
+        canonicalization_policy.as_ref(),
+        tenant_hint,
+    )
+    .unwrap_or_else(|| normalized.normalized_key.clone());
     metrics::record_canonicalization(&normalized.normalized_key, &classification_key);
     if let Some(trace_id) = &icap_req.trace_id {
         tracing::Span::current().record("trace_id", &tracing::field::display(trace_id));

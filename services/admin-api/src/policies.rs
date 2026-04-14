@@ -16,7 +16,10 @@ use uuid::Uuid;
 
 use crate::{
     auth::{require_roles, UserContext, ROLE_POLICY_EDIT, ROLE_POLICY_PUBLISH, ROLE_POLICY_VIEW},
-    pagination::{cursor_limit, decode_cursor, encode_cursor, CursorPaged},
+    pagination::{
+        cursor_limit, decode_cursor_with_direction, encode_directional_cursor, CursorDirection,
+        CursorPaged,
+    },
     ApiError, AppState, PolicyEngineRuntimeSummary,
 };
 
@@ -154,11 +157,15 @@ pub async fn list_policies(
     let cursor = params
         .cursor
         .as_deref()
-        .map(decode_cursor::<PolicyCursor>)
+        .map(decode_cursor_with_direction::<PolicyCursor>)
         .transpose()
         .map_err(|_| StatusCode::BAD_REQUEST)?;
-    let cursor_created_at = cursor.as_ref().map(|c| c.created_at);
-    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+    let (cursor_direction, cursor_anchor) = cursor
+        .as_ref()
+        .map(|(direction, anchor)| (*direction, Some(anchor)))
+        .unwrap_or((CursorDirection::Next, None));
+    let cursor_created_at = cursor_anchor.map(|c| c.created_at);
+    let cursor_id = cursor_anchor.map(|c| c.id).unwrap_or_else(Uuid::nil);
 
     let mut qb = QueryBuilder::new(
         "SELECT p.id, p.name, p.version, p.status, p.created_by, p.created_at,
@@ -168,13 +175,24 @@ pub async fn list_policies(
     apply_filters(&mut qb, &params);
     qb.push(" AND (")
         .push_bind(cursor_created_at)
-        .push(" IS NULL OR (p.created_at, p.id) < (")
+        .push(" IS NULL OR (p.created_at, p.id) ");
+    if cursor_direction == CursorDirection::Prev {
+        qb.push(">");
+    } else {
+        qb.push("<");
+    }
+    qb.push(" (")
         .push_bind(cursor_created_at)
         .push(", ")
         .push_bind(cursor_id)
         .push("))")
-        .push(" ORDER BY p.created_at DESC, p.id DESC LIMIT ")
-        .push_bind((limit + 1) as i64);
+        .push(" ORDER BY p.created_at ");
+    if cursor_direction == CursorDirection::Prev {
+        qb.push("ASC, p.id ASC LIMIT ");
+    } else {
+        qb.push("DESC, p.id DESC LIMIT ");
+    }
+    qb.push_bind((limit + 1) as i64);
 
     if params.cursor.is_none() && legacy_page > 1 {
         qb.push(" OFFSET ")
@@ -200,24 +218,45 @@ pub async fn list_policies(
             rule_count: row.get("rule_count"),
         })
         .collect();
+    if cursor_direction == CursorDirection::Prev {
+        data.reverse();
+    }
 
     let next_cursor = if has_more {
         data.last().and_then(|item| {
-            encode_cursor(&PolicyCursor {
-                created_at: item.created_at,
-                id: item.id,
-            })
+            encode_directional_cursor(
+                CursorDirection::Next,
+                &PolicyCursor {
+                    created_at: item.created_at,
+                    id: item.id,
+                },
+            )
+            .ok()
+        })
+    } else {
+        None
+    };
+    let prev_cursor = if params.cursor.is_some() && !data.is_empty() {
+        data.first().and_then(|item| {
+            encode_directional_cursor(
+                CursorDirection::Prev,
+                &PolicyCursor {
+                    created_at: item.created_at,
+                    id: item.id,
+                },
+            )
             .ok()
         })
     } else {
         None
     };
 
-    Ok(Json(CursorPaged::new(
+    Ok(Json(CursorPaged::new_with_prev(
         std::mem::take(&mut data),
         limit,
         has_more,
         next_cursor,
+        prev_cursor,
     )))
 }
 

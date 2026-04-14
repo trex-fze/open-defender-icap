@@ -21,5 +21,10 @@
   "admin_api": {
     "base_url": "http://admin-api:19000",
     "admin_token": "changeme-admin"
+  },
+  "canonicalization": {
+    "tenant_domain_exceptions": {
+      "default": []
+    }
   }
 }

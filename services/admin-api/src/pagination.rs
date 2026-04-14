@@ -1,5 +1,5 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy)]
 pub struct PageOptions {
@@ -64,16 +64,39 @@ pub struct CursorPaged<T> {
 
 impl<T> CursorPaged<T> {
     pub fn new(data: Vec<T>, limit: u32, has_more: bool, next_cursor: Option<String>) -> Self {
+        Self::new_with_prev(data, limit, has_more, next_cursor, None)
+    }
+
+    pub fn new_with_prev(
+        data: Vec<T>,
+        limit: u32,
+        has_more: bool,
+        next_cursor: Option<String>,
+        prev_cursor: Option<String>,
+    ) -> Self {
         Self {
             data,
             meta: CursorMeta {
                 limit,
                 has_more,
                 next_cursor,
-                prev_cursor: None,
+                prev_cursor,
             },
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorDirection {
+    Next,
+    Prev,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DirectionalCursor<T> {
+    direction: CursorDirection,
+    anchor: T,
 }
 
 pub fn cursor_limit(limit: Option<u32>) -> u32 {
@@ -90,4 +113,25 @@ pub fn decode_cursor<T: DeserializeOwned>(cursor: &str) -> Result<T, String> {
         .decode(cursor)
         .map_err(|_| "invalid cursor encoding".to_string())?;
     serde_json::from_slice::<T>(&decoded).map_err(|_| "invalid cursor payload".to_string())
+}
+
+pub fn decode_cursor_with_direction<T: DeserializeOwned>(
+    cursor: &str,
+) -> Result<(CursorDirection, T), String> {
+    let decoded = URL_SAFE_NO_PAD
+        .decode(cursor)
+        .map_err(|_| "invalid cursor encoding".to_string())?;
+    if let Ok(payload) = serde_json::from_slice::<DirectionalCursor<T>>(&decoded) {
+        return Ok((payload.direction, payload.anchor));
+    }
+    let anchor =
+        serde_json::from_slice::<T>(&decoded).map_err(|_| "invalid cursor payload".to_string())?;
+    Ok((CursorDirection::Next, anchor))
+}
+
+pub fn encode_directional_cursor<T: Serialize>(
+    direction: CursorDirection,
+    anchor: &T,
+) -> Result<String, serde_json::Error> {
+    encode_cursor(&DirectionalCursor { direction, anchor })
 }

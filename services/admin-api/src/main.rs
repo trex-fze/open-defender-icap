@@ -47,8 +47,12 @@ use uuid::Uuid;
 
 use ::taxonomy::{CanonicalTaxonomy, TaxonomyStore};
 use cache::CacheInvalidator;
+use common_types::normalizer::{canonical_classification_key_with_policy, CanonicalizationPolicy};
 use metrics::ReviewMetrics;
-use pagination::{cursor_limit, decode_cursor, encode_cursor, CursorPaged};
+use pagination::{
+    cursor_limit, decode_cursor_with_direction, encode_directional_cursor, CursorDirection,
+    CursorPaged,
+};
 use reporting_es::{ElasticReportingClient, ReportingConfig};
 
 fn check_config_mode_enabled() -> bool {
@@ -111,6 +115,14 @@ struct AdminApiConfig {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub reporting: ReportingConfig,
+    #[serde(default)]
+    pub canonicalization: CanonicalizationConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct CanonicalizationConfig {
+    #[serde(default)]
+    pub tenant_domain_exceptions: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -182,6 +194,7 @@ pub struct AppState {
     prometheus_url: Option<String>,
     http_client: reqwest::Client,
     classification_job_publisher: Option<Arc<ClassificationJobPublisher>>,
+    canonicalization_policy: Arc<CanonicalizationPolicy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -475,6 +488,15 @@ impl AppState {
         self.cache_invalidator.as_deref()
     }
 
+    pub fn canonicalize_key(&self, normalized_key: &str, tenant: Option<&str>) -> String {
+        canonical_classification_key_with_policy(
+            normalized_key,
+            self.canonicalization_policy.as_ref(),
+            tenant,
+        )
+        .unwrap_or_else(|| normalized_key.to_string())
+    }
+
     pub async fn log_iam_event<T>(
         &self,
         action: &str,
@@ -663,6 +685,9 @@ async fn main() -> Result<()> {
         prometheus_url,
         http_client: reqwest::Client::new(),
         classification_job_publisher,
+        canonicalization_policy: Arc::new(CanonicalizationPolicy::from_tenant_exceptions(
+            cfg.canonicalization.tenant_domain_exceptions.clone(),
+        )),
     };
 
     let auth_layer = {
@@ -995,28 +1020,51 @@ async fn list_overrides(
     let cursor = query
         .cursor
         .as_deref()
-        .map(decode_cursor::<OverrideCursor>)
+        .map(decode_cursor_with_direction::<OverrideCursor>)
         .transpose()
         .map_err(|_| StatusCode::BAD_REQUEST)?;
-    let cursor_created_at = cursor.as_ref().map(|c| c.created_at);
-    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+    let (cursor_direction, cursor_anchor) = cursor
+        .as_ref()
+        .map(|(direction, anchor)| (*direction, Some(anchor)))
+        .unwrap_or((CursorDirection::Next, None));
+    let cursor_created_at = cursor_anchor.map(|c| c.created_at);
+    let cursor_id = cursor_anchor.map(|c| c.id).unwrap_or_else(Uuid::nil);
 
-    let rows = sqlx::query(
-        r#"SELECT id, scope_type, scope_value, action, reason, created_by, expires_at, status, created_at, updated_at
+    let rows = if cursor_direction == CursorDirection::Prev {
+        sqlx::query(
+            r#"SELECT id, scope_type, scope_value, action, reason, created_by, expires_at, status, created_at, updated_at
+        FROM overrides
+        WHERE ($1::timestamptz IS NULL OR (created_at, id) > ($1, $2))
+        ORDER BY created_at ASC, id ASC
+        LIMIT $3"#,
+        )
+        .bind(cursor_created_at)
+        .bind(cursor_id)
+        .bind((limit + 1) as i64)
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|err| {
+            error!(target = "svc-admin", %err, "list_overrides failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+    } else {
+        sqlx::query(
+            r#"SELECT id, scope_type, scope_value, action, reason, created_by, expires_at, status, created_at, updated_at
         FROM overrides
         WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2))
         ORDER BY created_at DESC, id DESC
         LIMIT $3"#,
-    )
-    .bind(cursor_created_at)
-    .bind(cursor_id)
-    .bind((limit + 1) as i64)
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|err| {
-        error!(target = "svc-admin", %err, "list_overrides failed");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+        )
+        .bind(cursor_created_at)
+        .bind(cursor_id)
+        .bind((limit + 1) as i64)
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|err| {
+            error!(target = "svc-admin", %err, "list_overrides failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+    };
 
     let mut overrides = Vec::with_capacity(rows.len());
     for row in rows {
@@ -1030,23 +1078,44 @@ async fn list_overrides(
     if has_more {
         overrides.truncate(limit as usize);
     }
+    if cursor_direction == CursorDirection::Prev {
+        overrides.reverse();
+    }
     let next_cursor = if has_more {
         overrides.last().and_then(|row| {
-            encode_cursor(&OverrideCursor {
-                created_at: row.created_at,
-                id: row.id,
-            })
+            encode_directional_cursor(
+                CursorDirection::Next,
+                &OverrideCursor {
+                    created_at: row.created_at,
+                    id: row.id,
+                },
+            )
+            .ok()
+        })
+    } else {
+        None
+    };
+    let prev_cursor = if query.cursor.is_some() && !overrides.is_empty() {
+        overrides.first().and_then(|row| {
+            encode_directional_cursor(
+                CursorDirection::Prev,
+                &OverrideCursor {
+                    created_at: row.created_at,
+                    id: row.id,
+                },
+            )
             .ok()
         })
     } else {
         None
     };
 
-    Ok(Json(CursorPaged::new(
+    Ok(Json(CursorPaged::new_with_prev(
         overrides,
         limit,
         has_more,
         next_cursor,
+        prev_cursor,
     )))
 }
 

@@ -1,6 +1,9 @@
 use crate::{
     auth::{require_roles, UserContext, ROLE_POLICY_EDIT, ROLE_POLICY_VIEW},
-    pagination::{cursor_limit, decode_cursor, encode_cursor, CursorPaged},
+    pagination::{
+        cursor_limit, decode_cursor_with_direction, encode_directional_cursor, CursorDirection,
+        CursorPaged,
+    },
     ApiError, AppState,
 };
 use ::taxonomy::FallbackReason;
@@ -10,7 +13,7 @@ use axum::{
     Extension, Json,
 };
 use chrono::{DateTime, Utc};
-use common_types::{normalizer::canonical_classification_key, PolicyAction, PolicyDecision};
+use common_types::{PolicyAction, PolicyDecision};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgPool, Row};
@@ -147,7 +150,7 @@ pub async fn list_pending(
     let cursor = query
         .cursor
         .as_deref()
-        .map(decode_cursor::<PendingCursor>)
+        .map(decode_cursor_with_direction::<PendingCursor>)
         .transpose()
         .map_err(|message| {
             (
@@ -156,27 +159,50 @@ pub async fn list_pending(
             )
         })?;
 
-    let cursor_updated_at = cursor.as_ref().map(|c| c.updated_at);
+    let (cursor_direction, cursor_anchor) = cursor
+        .as_ref()
+        .map(|(direction, anchor)| (*direction, Some(anchor)))
+        .unwrap_or((CursorDirection::Next, None));
+
+    let cursor_updated_at = cursor_anchor.map(|c| c.updated_at);
     let cursor_key = cursor
         .as_ref()
-        .map(|c| c.normalized_key.clone())
+        .map(|(_, c)| c.normalized_key.clone())
         .unwrap_or_default();
 
-    let rows = sqlx::query(
-        r#"SELECT normalized_key, status, base_url, last_error, requested_at, updated_at
+    let rows = if cursor_direction == CursorDirection::Prev {
+        sqlx::query(
+            r#"SELECT normalized_key, status, base_url, last_error, requested_at, updated_at
+           FROM classification_requests
+           WHERE ($1::text IS NULL OR status = $1)
+             AND ($2::timestamptz IS NULL OR (updated_at, normalized_key) > ($2, $3))
+           ORDER BY updated_at ASC, normalized_key ASC
+           LIMIT $4"#,
+        )
+        .bind(query.status.as_deref())
+        .bind(cursor_updated_at)
+        .bind(&cursor_key)
+        .bind((limit + 1) as i64)
+        .fetch_all(state.pool())
+        .await
+        .map_err(db_error)?
+    } else {
+        sqlx::query(
+            r#"SELECT normalized_key, status, base_url, last_error, requested_at, updated_at
            FROM classification_requests
            WHERE ($1::text IS NULL OR status = $1)
              AND ($2::timestamptz IS NULL OR (updated_at, normalized_key) < ($2, $3))
            ORDER BY updated_at DESC, normalized_key DESC
            LIMIT $4"#,
-    )
-    .bind(query.status.as_deref())
-    .bind(cursor_updated_at)
-    .bind(&cursor_key)
-    .bind((limit + 1) as i64)
-    .fetch_all(state.pool())
-    .await
-    .map_err(db_error)?;
+        )
+        .bind(query.status.as_deref())
+        .bind(cursor_updated_at)
+        .bind(&cursor_key)
+        .bind((limit + 1) as i64)
+        .fetch_all(state.pool())
+        .await
+        .map_err(db_error)?
+    };
 
     let mut records: Vec<PendingClassificationRecord> = rows
         .into_iter()
@@ -193,22 +219,43 @@ pub async fn list_pending(
     if has_more {
         records.truncate(limit as usize);
     }
+    if cursor_direction == CursorDirection::Prev {
+        records.reverse();
+    }
     let next_cursor = if has_more {
         records.last().and_then(|last| {
-            encode_cursor(&PendingCursor {
-                updated_at: last.updated_at,
-                normalized_key: last.normalized_key.clone(),
-            })
+            encode_directional_cursor(
+                CursorDirection::Next,
+                &PendingCursor {
+                    updated_at: last.updated_at,
+                    normalized_key: last.normalized_key.clone(),
+                },
+            )
             .ok()
         })
     } else {
         None
     };
-    Ok(Json(CursorPaged::new(
+    let prev_cursor = if query.cursor.is_some() && !records.is_empty() {
+        records.first().and_then(|first| {
+            encode_directional_cursor(
+                CursorDirection::Prev,
+                &PendingCursor {
+                    updated_at: first.updated_at,
+                    normalized_key: first.normalized_key.clone(),
+                },
+            )
+            .ok()
+        })
+    } else {
+        None
+    };
+    Ok(Json(CursorPaged::new_with_prev(
         records,
         limit,
         has_more,
         next_cursor,
+        prev_cursor,
     )))
 }
 
@@ -230,8 +277,7 @@ pub async fn manual_unblock(
         ));
     }
 
-    let applied_key =
-        canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+    let applied_key = state.canonicalize_key(&normalized_key, None);
 
     let taxonomy_store = state.taxonomy_store();
     let sub_input = if payload.subcategory.trim().is_empty() {
@@ -326,8 +372,7 @@ pub async fn manual_classify(
         )
     })?;
 
-    let applied_key =
-        canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+    let applied_key = state.canonicalize_key(&normalized_key, None);
     let (entity_level, hostname) = parse_normalized_key(&applied_key).ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,
@@ -441,8 +486,7 @@ pub async fn upsert_pending(
         .filter(|value| !value.is_empty())
         .unwrap_or("waiting_content");
 
-    let applied_key =
-        canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+    let applied_key = state.canonicalize_key(&normalized_key, None);
 
     sqlx::query(
         r#"
@@ -485,8 +529,7 @@ pub async fn metadata_classify(
         ));
     }
 
-    let applied_key =
-        canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+    let applied_key = state.canonicalize_key(&normalized_key, None);
     let (entity_level, hostname) = parse_normalized_key(&applied_key).ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,
@@ -621,8 +664,7 @@ pub async fn clear_pending(
         ));
     }
 
-    let applied_key =
-        canonical_classification_key(&normalized_key).unwrap_or_else(|| normalized_key.clone());
+    let applied_key = state.canonicalize_key(&normalized_key, None);
 
     sqlx::query("DELETE FROM classification_requests WHERE normalized_key = $1")
         .bind(&applied_key)

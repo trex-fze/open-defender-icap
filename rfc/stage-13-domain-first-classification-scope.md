@@ -17,9 +17,12 @@ Classifying each observed subdomain independently created avoidable queue duplic
 
 ## Non-Goals
 
-- Introducing tenant-domain exception lists in v1.
 - Removing subdomain overrides from operator workflows.
 - Changing override precedence rules.
+
+## Post-Implementation Extension
+
+- Tenant/domain exception support is now available as a config-driven canonicalization policy (`tenant_domain_exceptions`) in ICAP + Admin API to preserve subdomain granularity for selected registrable domains.
 
 ## Architecture Changes
 

@@ -1,6 +1,9 @@
 use crate::{
     auth::{require_roles, UserContext, ROLE_POLICY_EDIT, ROLE_POLICY_VIEW},
-    pagination::{cursor_limit, decode_cursor, encode_cursor, CursorPaged},
+    pagination::{
+        cursor_limit, decode_cursor_with_direction, encode_directional_cursor, CursorDirection,
+        CursorPaged,
+    },
     ApiError, AppState,
 };
 use axum::{
@@ -9,7 +12,7 @@ use axum::{
     Extension, Json,
 };
 use chrono::{DateTime, Utc};
-use common_types::{normalizer::canonical_classification_key, PolicyAction, PolicyDecision};
+use common_types::{PolicyAction, PolicyDecision};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::Row;
@@ -213,7 +216,7 @@ pub async fn list(
     let cursor = query
         .cursor
         .as_deref()
-        .map(decode_cursor::<ClassificationCursor>)
+        .map(decode_cursor_with_direction::<ClassificationCursor>)
         .transpose()
         .map_err(|message| {
             (
@@ -222,14 +225,79 @@ pub async fn list(
             )
         })?;
 
-    let cursor_updated_at = cursor.as_ref().map(|c| c.updated_at);
+    let (cursor_direction, cursor_anchor) = cursor
+        .as_ref()
+        .map(|(direction, anchor)| (*direction, Some(anchor)))
+        .unwrap_or((CursorDirection::Next, None));
+
+    let cursor_updated_at = cursor_anchor.map(|c| c.updated_at);
     let cursor_key = cursor
         .as_ref()
-        .map(|c| c.normalized_key.clone())
+        .map(|(_, c)| c.normalized_key.clone())
         .unwrap_or_default();
 
-    let rows = sqlx::query(
-        r#"WITH combined AS (
+    let rows = if cursor_direction == CursorDirection::Prev {
+        sqlx::query(
+            r#"WITH combined AS (
+               SELECT normalized_key,
+                      'classified'::text AS state,
+                      primary_category,
+                      subcategory,
+                      risk_level,
+                      recommended_action,
+                      confidence::float8 AS confidence,
+                      flags,
+                      status,
+                      updated_at
+               FROM classifications
+               WHERE status = 'active'
+                 AND LOWER(normalized_key) LIKE $1
+                 AND ($2 = 'all' OR $2 = 'classified')
+               UNION ALL
+               SELECT cr.normalized_key,
+                      'unclassified'::text AS state,
+                      NULL::text AS primary_category,
+                      NULL::text AS subcategory,
+                      NULL::text AS risk_level,
+                      NULL::text AS recommended_action,
+                      NULL::float8 AS confidence,
+                      NULL::jsonb AS flags,
+                      cr.status,
+                      cr.updated_at
+               FROM classification_requests cr
+               LEFT JOIN classifications c
+                 ON c.normalized_key = cr.normalized_key
+                AND c.status = 'active'
+               WHERE c.normalized_key IS NULL
+                 AND LOWER(cr.normalized_key) LIKE $1
+                 AND ($2 = 'all' OR $2 = 'unclassified')
+           )
+           SELECT normalized_key,
+                  state,
+                  primary_category,
+                  subcategory,
+                  risk_level,
+                  recommended_action,
+                  confidence,
+                  flags,
+                  status,
+                  updated_at
+           FROM combined
+           WHERE ($3::timestamptz IS NULL OR (updated_at, normalized_key) > ($3, $4))
+           ORDER BY updated_at ASC, normalized_key ASC
+           LIMIT $5"#,
+        )
+        .bind(&q_like)
+        .bind(&state_filter)
+        .bind(cursor_updated_at)
+        .bind(&cursor_key)
+        .bind((limit + 1) as i64)
+        .fetch_all(state.pool())
+        .await
+        .map_err(db_error)?
+    } else {
+        sqlx::query(
+            r#"WITH combined AS (
                SELECT normalized_key,
                       'classified'::text AS state,
                       primary_category,
@@ -277,15 +345,16 @@ pub async fn list(
            WHERE ($3::timestamptz IS NULL OR (updated_at, normalized_key) < ($3, $4))
            ORDER BY updated_at DESC, normalized_key DESC
            LIMIT $5"#,
-    )
-    .bind(&q_like)
-    .bind(&state_filter)
-    .bind(cursor_updated_at)
-    .bind(&cursor_key)
-    .bind((limit + 1) as i64)
-    .fetch_all(state.pool())
-    .await
-    .map_err(db_error)?;
+        )
+        .bind(&q_like)
+        .bind(&state_filter)
+        .bind(cursor_updated_at)
+        .bind(&cursor_key)
+        .bind((limit + 1) as i64)
+        .fetch_all(state.pool())
+        .await
+        .map_err(db_error)?
+    };
 
     let mut out: Vec<ClassificationListRecord> = rows
         .into_iter()
@@ -323,21 +392,46 @@ pub async fn list(
     if has_more {
         out.truncate(limit as usize);
     }
+    if cursor_direction == CursorDirection::Prev {
+        out.reverse();
+    }
     enrich_effective_decisions(&state, &mut out).await;
     let next_cursor = if has_more {
         out.last().and_then(|last| {
-            encode_cursor(&ClassificationCursor {
-                updated_at: last.updated_at,
-                normalized_key: last.normalized_key.clone(),
-            })
+            encode_directional_cursor(
+                CursorDirection::Next,
+                &ClassificationCursor {
+                    updated_at: last.updated_at,
+                    normalized_key: last.normalized_key.clone(),
+                },
+            )
             .ok()
         })
     } else {
         None
     };
-    Ok(Json(CursorPaged::new(out, limit, has_more, next_cursor)))
+    let prev_cursor = if query.cursor.is_some() && !out.is_empty() {
+        out.first().and_then(|first| {
+            encode_directional_cursor(
+                CursorDirection::Prev,
+                &ClassificationCursor {
+                    updated_at: first.updated_at,
+                    normalized_key: first.normalized_key.clone(),
+                },
+            )
+            .ok()
+        })
+    } else {
+        None
+    };
+    Ok(Json(CursorPaged::new_with_prev(
+        out,
+        limit,
+        has_more,
+        next_cursor,
+        prev_cursor,
+    )))
 }
-
 pub async fn export_bundle(
     Extension(user): Extension<UserContext>,
     State(state): State<AppState>,
@@ -410,18 +504,17 @@ pub async fn import_bundle(
 
     for (index, entry) in payload.bundle.entries.iter().enumerate() {
         let raw_entry = serde_json::to_value(entry).unwrap_or(Value::Null);
-        let canonical = match canonical_classification_key(&entry.normalized_key) {
-            Some(value) => value,
-            None => {
-                invalid_rows.push(InvalidImportRow {
-                    index,
-                    normalized_key: Some(entry.normalized_key.clone()),
-                    error_code: "invalid_normalized_key".to_string(),
-                    error_message: "normalized_key must be canonicalizable to domain:*".to_string(),
-                    raw_entry,
-                });
-                continue;
-            }
+        let canonical = if parse_normalized_key(&entry.normalized_key).is_some() {
+            state.canonicalize_key(&entry.normalized_key, None)
+        } else {
+            invalid_rows.push(InvalidImportRow {
+                index,
+                normalized_key: Some(entry.normalized_key.clone()),
+                error_code: "invalid_normalized_key".to_string(),
+                error_message: "normalized_key must be canonicalizable to domain:*".to_string(),
+                raw_entry,
+            });
+            continue;
         };
 
         let sub_input = if entry.subcategory.trim().is_empty() {
@@ -736,8 +829,8 @@ pub async fn flush(
             }
             let mut canonical = Vec::new();
             for value in provided {
-                if let Some(key) = canonical_classification_key(&value) {
-                    canonical.push(key);
+                if parse_normalized_key(&value).is_some() {
+                    canonical.push(state.canonicalize_key(&value, None));
                 } else {
                     invalid_keys.push(value);
                 }

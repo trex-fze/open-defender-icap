@@ -3,7 +3,6 @@ use axum::{
     http::StatusCode,
     Extension, Json,
 };
-use common_types::normalizer::canonical_classification_key;
 use serde::Deserialize;
 use serde::Serialize;
 use sqlx::Row;
@@ -435,7 +434,7 @@ async fn hydrate_mapped_categories(
         .map(|entry| {
             let host = entry.key.trim().to_ascii_lowercase();
             let raw_key = format!("domain:{}", host);
-            let canonical = canonical_classification_key(&raw_key).unwrap_or(raw_key);
+            let canonical = state.canonicalize_key(&raw_key, None);
             (entry.key.clone(), canonical)
         })
         .collect::<HashMap<_, _>>();

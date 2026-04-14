@@ -1,6 +1,9 @@
 use crate::auth::{require_roles, PrincipalType, UserContext, ROLE_IAM_ADMIN, ROLE_IAM_VIEW};
 use crate::{
-    pagination::{cursor_limit, decode_cursor, encode_cursor, CursorPaged},
+    pagination::{
+        cursor_limit, decode_cursor_with_direction, encode_directional_cursor, CursorDirection,
+        CursorPaged,
+    },
     ApiError, AppState,
 };
 use argon2::{
@@ -1686,7 +1689,7 @@ pub async fn list_users_route(
     let cursor = query
         .cursor
         .as_deref()
-        .map(decode_cursor::<UserCursor>)
+        .map(decode_cursor_with_direction::<UserCursor>)
         .transpose()
         .map_err(|message| {
             (
@@ -1695,30 +1698,56 @@ pub async fn list_users_route(
             )
         })?;
 
-    let cursor_created_at = cursor.as_ref().map(|c| c.created_at);
-    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+    let (cursor_direction, cursor_anchor) = cursor
+        .as_ref()
+        .map(|(direction, anchor)| (*direction, Some(anchor)))
+        .unwrap_or((CursorDirection::Next, None));
+
+    let cursor_created_at = cursor_anchor.map(|c| c.created_at);
+    let cursor_id = cursor_anchor.map(|c| c.id).unwrap_or_else(Uuid::nil);
 
     let iam = state.iam();
-    let users = sqlx::query_as::<_, IamUserRecord>(
-        r#"
+    let users = if cursor_direction == CursorDirection::Prev {
+        sqlx::query_as::<_, IamUserRecord>(
+            r#"
+        SELECT id, username, subject, email, display_name, status, is_protected, last_login_at, created_at, updated_at
+        FROM iam_users
+        WHERE ($1::timestamptz IS NULL OR (created_at, id) > ($1, $2))
+        ORDER BY created_at ASC, id ASC
+        LIMIT $3
+    "#,
+        )
+        .bind(cursor_created_at)
+        .bind(cursor_id)
+        .bind((limit + 1) as i64)
+        .fetch_all(iam.pool())
+        .await
+        .map_err(|err| map_iam_error(map_db_error(err)))?
+    } else {
+        sqlx::query_as::<_, IamUserRecord>(
+            r#"
         SELECT id, username, subject, email, display_name, status, is_protected, last_login_at, created_at, updated_at
         FROM iam_users
         WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2))
         ORDER BY created_at DESC, id DESC
         LIMIT $3
     "#,
-    )
-    .bind(cursor_created_at)
-    .bind(cursor_id)
-    .bind((limit + 1) as i64)
-    .fetch_all(iam.pool())
-    .await
-    .map_err(|err| map_iam_error(map_db_error(err)))?;
+        )
+        .bind(cursor_created_at)
+        .bind(cursor_id)
+        .bind((limit + 1) as i64)
+        .fetch_all(iam.pool())
+        .await
+        .map_err(|err| map_iam_error(map_db_error(err)))?
+    };
 
     let has_more = users.len() > limit as usize;
     let mut users = users;
     if has_more {
         users.truncate(limit as usize);
+    }
+    if cursor_direction == CursorDirection::Prev {
+        users.reverse();
     }
 
     let mut results = Vec::with_capacity(users.len());
@@ -1746,21 +1775,39 @@ pub async fn list_users_route(
 
     let next_cursor = if has_more {
         results.last().and_then(|last| {
-            encode_cursor(&UserCursor {
-                created_at: last.user.created_at,
-                id: last.user.id,
-            })
+            encode_directional_cursor(
+                CursorDirection::Next,
+                &UserCursor {
+                    created_at: last.user.created_at,
+                    id: last.user.id,
+                },
+            )
+            .ok()
+        })
+    } else {
+        None
+    };
+    let prev_cursor = if query.cursor.is_some() && !results.is_empty() {
+        results.first().and_then(|first| {
+            encode_directional_cursor(
+                CursorDirection::Prev,
+                &UserCursor {
+                    created_at: first.user.created_at,
+                    id: first.user.id,
+                },
+            )
             .ok()
         })
     } else {
         None
     };
 
-    Ok(Json(CursorPaged::new(
+    Ok(Json(CursorPaged::new_with_prev(
         results,
         limit,
         has_more,
         next_cursor,
+        prev_cursor,
     )))
 }
 
@@ -2046,7 +2093,7 @@ pub async fn list_groups_route(
     let cursor = query
         .cursor
         .as_deref()
-        .map(decode_cursor::<GroupCursor>)
+        .map(decode_cursor_with_direction::<GroupCursor>)
         .transpose()
         .map_err(|message| {
             (
@@ -2054,29 +2101,54 @@ pub async fn list_groups_route(
                 Json(ApiError::new("INVALID_CURSOR", message)),
             )
         })?;
-    let cursor_name = cursor.as_ref().map(|c| c.name.clone()).unwrap_or_default();
-    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+    let (cursor_direction, cursor_anchor) = cursor
+        .as_ref()
+        .map(|(direction, anchor)| (*direction, Some(anchor)))
+        .unwrap_or((CursorDirection::Next, None));
+    let cursor_name = cursor_anchor.map(|c| c.name.clone()).unwrap_or_default();
+    let cursor_id = cursor_anchor.map(|c| c.id).unwrap_or_else(Uuid::nil);
 
     let iam = state.iam();
-    let groups = sqlx::query_as::<_, IamGroupRecord>(
-        r#"
+    let groups = if cursor_direction == CursorDirection::Prev {
+        sqlx::query_as::<_, IamGroupRecord>(
+            r#"
+        SELECT id, name, description, status, created_at, updated_at
+        FROM iam_groups
+        WHERE ($1::text = '' OR (name, id) < ($1, $2))
+        ORDER BY name DESC, id DESC
+        LIMIT $3
+    "#,
+        )
+        .bind(&cursor_name)
+        .bind(cursor_id)
+        .bind((limit + 1) as i64)
+        .fetch_all(iam.pool())
+        .await
+        .map_err(|err| map_iam_error(map_db_error(err)))?
+    } else {
+        sqlx::query_as::<_, IamGroupRecord>(
+            r#"
         SELECT id, name, description, status, created_at, updated_at
         FROM iam_groups
         WHERE ($1::text = '' OR (name, id) > ($1, $2))
         ORDER BY name ASC, id ASC
         LIMIT $3
     "#,
-    )
-    .bind(&cursor_name)
-    .bind(cursor_id)
-    .bind((limit + 1) as i64)
-    .fetch_all(iam.pool())
-    .await
-    .map_err(|err| map_iam_error(map_db_error(err)))?;
+        )
+        .bind(&cursor_name)
+        .bind(cursor_id)
+        .bind((limit + 1) as i64)
+        .fetch_all(iam.pool())
+        .await
+        .map_err(|err| map_iam_error(map_db_error(err)))?
+    };
     let has_more = groups.len() > limit as usize;
     let mut groups = groups;
     if has_more {
         groups.truncate(limit as usize);
+    }
+    if cursor_direction == CursorDirection::Prev {
+        groups.reverse();
     }
     let mut results = Vec::with_capacity(groups.len());
     for group in groups {
@@ -2094,21 +2166,39 @@ pub async fn list_groups_route(
 
     let next_cursor = if has_more {
         results.last().and_then(|last| {
-            encode_cursor(&GroupCursor {
-                name: last.group.name.clone(),
-                id: last.group.id,
-            })
+            encode_directional_cursor(
+                CursorDirection::Next,
+                &GroupCursor {
+                    name: last.group.name.clone(),
+                    id: last.group.id,
+                },
+            )
+            .ok()
+        })
+    } else {
+        None
+    };
+    let prev_cursor = if query.cursor.is_some() && !results.is_empty() {
+        results.first().and_then(|first| {
+            encode_directional_cursor(
+                CursorDirection::Prev,
+                &GroupCursor {
+                    name: first.group.name.clone(),
+                    id: first.group.id,
+                },
+            )
             .ok()
         })
     } else {
         None
     };
 
-    Ok(Json(CursorPaged::new(
+    Ok(Json(CursorPaged::new_with_prev(
         results,
         limit,
         has_more,
         next_cursor,
+        prev_cursor,
     )))
 }
 
@@ -2385,7 +2475,7 @@ pub async fn list_service_accounts_route(
     let cursor = query
         .cursor
         .as_deref()
-        .map(decode_cursor::<ServiceAccountCursor>)
+        .map(decode_cursor_with_direction::<ServiceAccountCursor>)
         .transpose()
         .map_err(|message| {
             (
@@ -2393,29 +2483,54 @@ pub async fn list_service_accounts_route(
                 Json(ApiError::new("INVALID_CURSOR", message)),
             )
         })?;
-    let cursor_name = cursor.as_ref().map(|c| c.name.clone()).unwrap_or_default();
-    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+    let (cursor_direction, cursor_anchor) = cursor
+        .as_ref()
+        .map(|(direction, anchor)| (*direction, Some(anchor)))
+        .unwrap_or((CursorDirection::Next, None));
+    let cursor_name = cursor_anchor.map(|c| c.name.clone()).unwrap_or_default();
+    let cursor_id = cursor_anchor.map(|c| c.id).unwrap_or_else(Uuid::nil);
 
     let iam = state.iam();
-    let accounts = sqlx::query_as::<_, ServiceAccountRecord>(
-        r#"
+    let accounts = if cursor_direction == CursorDirection::Prev {
+        sqlx::query_as::<_, ServiceAccountRecord>(
+            r#"
+        SELECT id, name, description, status, token_hint, created_at, last_rotated_at, expires_at
+        FROM iam_service_accounts
+        WHERE ($1::text = '' OR (name, id) < ($1, $2))
+        ORDER BY name DESC, id DESC
+        LIMIT $3
+    "#,
+        )
+        .bind(&cursor_name)
+        .bind(cursor_id)
+        .bind((limit + 1) as i64)
+        .fetch_all(iam.pool())
+        .await
+        .map_err(|err| map_iam_error(map_db_error(err)))?
+    } else {
+        sqlx::query_as::<_, ServiceAccountRecord>(
+            r#"
         SELECT id, name, description, status, token_hint, created_at, last_rotated_at, expires_at
         FROM iam_service_accounts
         WHERE ($1::text = '' OR (name, id) > ($1, $2))
         ORDER BY name ASC, id ASC
         LIMIT $3
     "#,
-    )
-    .bind(&cursor_name)
-    .bind(cursor_id)
-    .bind((limit + 1) as i64)
-    .fetch_all(iam.pool())
-    .await
-    .map_err(|err| map_iam_error(map_db_error(err)))?;
+        )
+        .bind(&cursor_name)
+        .bind(cursor_id)
+        .bind((limit + 1) as i64)
+        .fetch_all(iam.pool())
+        .await
+        .map_err(|err| map_iam_error(map_db_error(err)))?
+    };
     let has_more = accounts.len() > limit as usize;
     let mut accounts = accounts;
     if has_more {
         accounts.truncate(limit as usize);
+    }
+    if cursor_direction == CursorDirection::Prev {
+        accounts.reverse();
     }
     let mut results = Vec::with_capacity(accounts.len());
     for account in accounts {
@@ -2428,21 +2543,39 @@ pub async fn list_service_accounts_route(
 
     let next_cursor = if has_more {
         results.last().and_then(|last| {
-            encode_cursor(&ServiceAccountCursor {
-                name: last.account.name.clone(),
-                id: last.account.id,
-            })
+            encode_directional_cursor(
+                CursorDirection::Next,
+                &ServiceAccountCursor {
+                    name: last.account.name.clone(),
+                    id: last.account.id,
+                },
+            )
+            .ok()
+        })
+    } else {
+        None
+    };
+    let prev_cursor = if query.cursor.is_some() && !results.is_empty() {
+        results.first().and_then(|first| {
+            encode_directional_cursor(
+                CursorDirection::Prev,
+                &ServiceAccountCursor {
+                    name: first.account.name.clone(),
+                    id: first.account.id,
+                },
+            )
             .ok()
         })
     } else {
         None
     };
 
-    Ok(Json(CursorPaged::new(
+    Ok(Json(CursorPaged::new_with_prev(
         results,
         limit,
         has_more,
         next_cursor,
+        prev_cursor,
     )))
 }
 
@@ -2593,7 +2726,7 @@ pub async fn list_audit_route(
     let cursor = query
         .cursor
         .as_deref()
-        .map(decode_cursor::<AuditCursor>)
+        .map(decode_cursor_with_direction::<AuditCursor>)
         .transpose()
         .map_err(|message| {
             (
@@ -2601,44 +2734,93 @@ pub async fn list_audit_route(
                 Json(ApiError::new("INVALID_CURSOR", message)),
             )
         })?;
-    let cursor_created_at = cursor.as_ref().map(|c| c.created_at);
-    let cursor_id = cursor.as_ref().map(|c| c.id).unwrap_or_else(Uuid::nil);
+    let (cursor_direction, cursor_anchor) = cursor
+        .as_ref()
+        .map(|(direction, anchor)| (*direction, Some(anchor)))
+        .unwrap_or((CursorDirection::Next, None));
+    let cursor_created_at = cursor_anchor.map(|c| c.created_at);
+    let cursor_id = cursor_anchor.map(|c| c.id).unwrap_or_else(Uuid::nil);
 
-    let events = sqlx::query_as::<_, IamAuditRecord>(
-        r#"
+    let events = if cursor_direction == CursorDirection::Prev {
+        sqlx::query_as::<_, IamAuditRecord>(
+            r#"
+        SELECT id, actor, action, target_type, target_id, payload, created_at
+        FROM iam_audit_events
+        WHERE ($1::timestamptz IS NULL OR (created_at, id) > ($1, $2))
+        ORDER BY created_at ASC, id ASC
+        LIMIT $3
+    "#,
+        )
+        .bind(cursor_created_at)
+        .bind(cursor_id)
+        .bind((limit + 1) as i64)
+        .fetch_all(state.iam().pool())
+        .await
+        .map_err(|err| map_iam_error(map_db_error(err)))?
+    } else {
+        sqlx::query_as::<_, IamAuditRecord>(
+            r#"
         SELECT id, actor, action, target_type, target_id, payload, created_at
         FROM iam_audit_events
         WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1, $2))
         ORDER BY created_at DESC, id DESC
         LIMIT $3
     "#,
-    )
-    .bind(cursor_created_at)
-    .bind(cursor_id)
-    .bind((limit + 1) as i64)
-    .fetch_all(state.iam().pool())
-    .await
-    .map_err(|err| map_iam_error(map_db_error(err)))?;
+        )
+        .bind(cursor_created_at)
+        .bind(cursor_id)
+        .bind((limit + 1) as i64)
+        .fetch_all(state.iam().pool())
+        .await
+        .map_err(|err| map_iam_error(map_db_error(err)))?
+    };
 
     let has_more = events.len() > limit as usize;
     let mut events = events;
     if has_more {
         events.truncate(limit as usize);
     }
+    if cursor_direction == CursorDirection::Prev {
+        events.reverse();
+    }
 
     let next_cursor = if has_more {
         events.last().and_then(|last| {
-            encode_cursor(&AuditCursor {
-                created_at: last.created_at,
-                id: last.id,
-            })
+            encode_directional_cursor(
+                CursorDirection::Next,
+                &AuditCursor {
+                    created_at: last.created_at,
+                    id: last.id,
+                },
+            )
             .ok()
         })
     } else {
         None
     };
 
-    Ok(Json(CursorPaged::new(events, limit, has_more, next_cursor)))
+    let prev_cursor = if query.cursor.is_some() && !events.is_empty() {
+        events.first().and_then(|first| {
+            encode_directional_cursor(
+                CursorDirection::Prev,
+                &AuditCursor {
+                    created_at: first.created_at,
+                    id: first.id,
+                },
+            )
+            .ok()
+        })
+    } else {
+        None
+    };
+
+    Ok(Json(CursorPaged::new_with_prev(
+        events,
+        limit,
+        has_more,
+        next_cursor,
+        prev_cursor,
+    )))
 }
 
 #[derive(Debug, Deserialize)]
