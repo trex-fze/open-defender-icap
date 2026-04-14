@@ -41,7 +41,7 @@ Migrations will reside in `services/policy-engine/migrations/` and run via `odct
 - DB-managed policies are authoritative in runtime; file-based DSL remains bootstrap/test support.
 - Simulation output is JSON-first and aligned with API/CLI tooling and auditability requirements.
 
-This addendum will track completion of the remaining checklist items before Stage 2 is marked complete.
+This addendum tracked Stage 2 execution and is retained as a historical design record now that Stage 2 is complete.
 
 ## Traceability Plan
 | Requirement | Source Section | Implementation Artifact |

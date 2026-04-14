@@ -35,14 +35,14 @@
 ## Testing & Evidence
 - `cargo test -p llm-worker` (unit/integration) – run before merging provider changes.
 - `odctl llm providers` – record output and attach to Stage 8 evidence.
-- Perf/security scripts (to be added under `tests/perf` / `tests/security`).
+- Perf/security scripts are covered under `tests/perf` and `tests/security` hardening flows.
 - Compose instructions & screenshots for LM Studio connectivity.
 
-## Next Steps
-1. Finish per-provider metrics + Prometheus alerts (S8-T5).
-2. Add compose overlays + documentation for LM Studio/Ollama (S8-T6).
-3. Extend security/perf suites for provider failover (S8-T7).
-4. Capture evidence + runbooks (S8-T8).
+## Closed Follow-Through
+1. Per-provider metrics + Prometheus alerts were completed (S8-T5).
+2. Compose overlays + documentation for LM Studio/Ollama were completed (S8-T6).
+3. Security/perf suites for provider failover were extended (S8-T7).
+4. Evidence + runbooks were captured (S8-T8).
 
 ## Stage 8 Addendum (Post-Complete)
 - Added budgeted stale-pending online diversion in `llm-worker`:

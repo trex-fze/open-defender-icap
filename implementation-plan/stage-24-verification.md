@@ -33,7 +33,7 @@ Date: 2026-04-10
 - `PROFILE=golden-local bash tests/ops/golden-profile.sh down` -> PASS
 - `PROFILE=golden-prodlike bash tests/ops/golden-profile.sh down` -> PASS
 
-## 5) Follow-up Actions
+## 5) Ongoing Regression Cadence (Non-Blocking)
 
 1. Keep `RUNS=10` reliability burn-in as a periodic regression gate in CI/nightly.
 2. Tune smoke-stage timeout defaults only if future infra profiles materially increase latency.

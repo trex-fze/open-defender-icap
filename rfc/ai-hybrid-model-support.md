@@ -109,10 +109,10 @@ Environment variables take precedence for secrets (e.g., `OPENAI_API_KEY`).
 | Incompatible JSON schemas | Transform responses to internal `LlmResponse` struct with adapters. |
 | Model drift between providers | Store provider + model metadata in classification record for audit. |
 
-## 7. Open Questions
+## 7. Resolved Questions (Historical)
 
-- Do we need synchronous admin toggles (e.g., disable online providers at runtime)?
-- Should we persist provider selection decisions for analytics (ES index)?
+- Runtime provider controls are handled through config/routing policy and health-aware failover behavior; no separate synchronous admin toggle was added in Stage 8.
+- Provider-level decisions and outcomes are captured through metrics and operational telemetry paths; dedicated ES persistence for provider-selection events is not a Stage 8 requirement.
 
 ## 8. Acceptance Criteria
 

@@ -3,7 +3,7 @@
 **Status:** Superseded by `implementation-plan/stage-08-hybrid-ai.md`  
 **Epic:** Enable offline & online LLM providers for `llm-worker`.
 
-> Historical draft retained for traceability. Current execution/status lives in `implementation-plan/stage-08-hybrid-ai.md`.
+> Historical draft retained for traceability. Current execution/status lives in `implementation-plan/stage-08-hybrid-ai.md`, and Stage 8 completion evidence lives in `docs/evidence/stage08-hybrid-ai.md`.
 
 ## Objectives
 
@@ -15,14 +15,14 @@
 
 | Task ID | Description | Owner | Dependencies | Status |
 | --- | --- | --- | --- | --- |
-| AI-H1 | Config schema refactor (`providers` + `routing`, env override support) | Backend Eng | Current `llm-worker` config | ⬜ |
-| AI-H2 | Provider abstraction layer (`LlmProvider` trait + adapters for LM Studio, Ollama, vLLM, OpenAI, Claude) | Backend Eng | AI-H1 | ⬜ |
-| AI-H3 | Routing/fallback logic + metrics labels (provider, outcome) | Backend Eng | AI-H2 | ⬜ |
-| AI-H4 | Compose overlays + docs for offline providers (LM Studio/Ollama containers) | DevOps | AI-H2 | ⬜ |
-| AI-H5 | CLI/Admin tooling (`odctl llm check`, optional Admin API endpoint) | CLI/Backend | AI-H2 | ⬜ |
-| AI-H6 | Security review (prompt sanitization audit, credential guidance) | Security Eng | AI-H2 | ⬜ |
-| AI-H7 | Testing suite (unit, integration against mock providers, perf & failover) | QA/Perf Eng | AI-H2 | ⬜ |
-| AI-H8 | Documentation updates (README, Stage plans, runbooks) | Tech Writer | AI-H1–H7 | ⬜ |
+| AI-H1 | Config schema refactor (`providers` + `routing`, env override support) | Backend Eng | Current `llm-worker` config | Closed via Stage 8 |
+| AI-H2 | Provider abstraction layer (`LlmProvider` trait + adapters for LM Studio, Ollama, vLLM, OpenAI, Claude) | Backend Eng | AI-H1 | Closed via Stage 8 |
+| AI-H3 | Routing/fallback logic + metrics labels (provider, outcome) | Backend Eng | AI-H2 | Closed via Stage 8 |
+| AI-H4 | Compose overlays + docs for offline providers (LM Studio/Ollama containers) | DevOps | AI-H2 | Closed via Stage 8 |
+| AI-H5 | CLI/Admin tooling (`odctl llm check`, optional Admin API endpoint) | CLI/Backend | AI-H2 | Closed via Stage 8 |
+| AI-H6 | Security review (prompt sanitization audit, credential guidance) | Security Eng | AI-H2 | Closed via Stage 8 |
+| AI-H7 | Testing suite (unit, integration against mock providers, perf & failover) | QA/Perf Eng | AI-H2 | Closed via Stage 8 |
+| AI-H8 | Documentation updates (README, Stage plans, runbooks) | Tech Writer | AI-H1–H7 | Closed via Stage 8 |
 
 ## Task Details
 
@@ -62,8 +62,8 @@
 
 ### AI-H8 Documentation
 - README: mention hybrid AI support in Quick Start/FAQ.
-- Stage 6/7 plans: note future tasks or update status when implemented.
-- Runbooks: add provider troubleshooting commands.
+- Stage 6/7 references were reconciled during Stage 8 closure and follow-on stage tracker updates.
+- Runbooks include provider troubleshooting commands.
 
 ## Milestones
 
@@ -92,4 +92,4 @@
 - Updated documentation references (README, security plan, runbooks).
 - Test results (unit, integration, perf, security).
 
-Once all tasks reach ✅, link evidence in `docs/evidence/stage08-hybrid-ai.md` (to be created during execution).
+Execution evidence is linked in `docs/evidence/stage08-hybrid-ai.md`.

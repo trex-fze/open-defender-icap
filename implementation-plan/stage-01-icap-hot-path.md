@@ -18,8 +18,8 @@
 | S1-T8 | Unit/integration tests for parser/cache/error paths | QA/Dev Leads | S1-T1–T5 | ✅ | `cargo test -p icap-adaptor` exercises parser + cache invalidation/TTL |
 
 ## Risks & Mitigations
-- Redis unavailable → fallback memory cache but needs alerting (T4 follow-up).
-- Policy client errors → need retries/backoff (future task).
+- Redis unavailable -> fallback memory cache with alerting and operational coverage captured in later observability/ops stages.
+- Policy client errors -> retries/backoff behavior and runtime hardening were incorporated in subsequent platform reliability stages.
 
 ## Next Checkpoint
 - Stage complete. Ongoing validation is tracked in `implementation-plan/stage-plan.md` routine regression focus.
