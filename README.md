@@ -410,8 +410,8 @@ Quick checklist before opening a PR:
 2. Update docs/RFC/plan files for behavioral or operational changes.
 3. Confirm no secrets are committed (`.env`, credentials, API keys).
 
-## Next Steps
-- Review `docs/testing/*.md` and `docs/deployment/rollback-plan.md` for deeper instructions.
-- Generate evidence artifacts (tests/logs/screenshots) per `docs/evidence/stage07-checklist.md` when preparing a release.
+## Personal Note
 
-Happy building! 🛡️
+John 3:16 - "For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life."
+
+`><>`
