@@ -43,10 +43,10 @@
 - Operators run LM Studio/Ollama on separate hosts or docker instances; the core compose stack remains unchanged.
 - Online providers require API keys stored in `.env` or secret manager.
 
-## Open Questions
-- Should provider selection be dynamic (per taxonomy) via Admin API?
-- Do we need real-time health checks (keepalive) to pre-emptively switch providers?
-- Where should evidence/log storage live for hybrid runs (Elasticsearch index?).
+## Resolved Decisions
+- Provider selection is config/routing driven; dynamic per-taxonomy routing remains a future enhancement rather than stage-completion scope.
+- Real-time provider checks are implemented through metrics/health probing and runtime fallback behavior.
+- Evidence/log artifacts are stored in the standard project evidence locations (`docs/evidence/`, `tests/artifacts/`) and existing observability backends.
 
 ## Acceptance Criteria
 1. Operator can configure at least one offline and one online provider, switch via config, and run `llm-worker` without redeploying code.

@@ -10,7 +10,7 @@
 
 ## Checklist
 - [x] Schema + migrations for entities listed in Spec §20 (`classifications`, `overrides`, etc.). *(Added taxonomy tables, cache entries, reclassification jobs, CLI/UI audit logs, reporting aggregates.)*
-- [x] Override APIs (create/update/delete, scope validation) – Spec §23.4. *(Admin API now validates scopes/actions, supports PUT + DELETE, and emits cache invalidations; CLI/UI follow-ups pending.)*
+- [x] Override APIs (create/update/delete, scope validation) – Spec §23.4. *(Admin API validates scopes/actions, supports PUT + DELETE, emits cache invalidations, and Stage 10/11 UI+CLI flows are complete.)*
 - [x] Review queue endpoints & SLA metrics – Spec §§14, 16. *(List + resolve endpoints wired; Prometheus `/metrics` exposes queue depth + SLA counters.)*
 - [x] Cache invalidation hooks on DB changes – Spec §11. *(Admin API purges Redis keys + publishes events; ICAP adaptor and workers subscribe and react.)*
 - [x] Audit event pipeline (DB + Elasticsearch) – Spec §17. *(Admin API writes audit_events and streams to Elasticsearch when configured.)*
@@ -23,6 +23,6 @@
 | Reclassification queue | Spec §11, §16 | Worker jobs, schema |
 | Evidence retention | Spec §20, §29 | Migration logs, audit records |
 
-## Pending Decisions
-- Choose migration tooling (sqlx vs refinery).
-- Finalize retention policies (90d hot vs cold storage).
+## Resolved Decisions
+- Migration tooling: SQLx migrations are the standard for services in this repo.
+- Retention policy: hot retention and lifecycle controls are enforced through checked-in index/ILM configs and stage hardening runbooks.

@@ -1,8 +1,10 @@
 # RFC – AI Hybrid Model Support (Offline + Online)
 
-**Status:** Draft  
+**Status:** Superseded by `rfc/stage-08-hybrid-ai.md`  
 **Authors:** Open Defender ICAP Team  
 **Related Specs:** `docs/engine-adaptor-spec.md` §§16, 24, 29–34
+
+> Historical draft retained for context. Canonical approved scope and completion status are tracked in `rfc/stage-08-hybrid-ai.md` and `implementation-plan/stage-08-hybrid-ai.md`.
 
 ## 1. Overview
 

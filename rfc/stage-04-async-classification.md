@@ -23,6 +23,6 @@
 | LLM guardrails | Spec §24 | Prompt builder, schema validator |
 | Metrics | Spec §33 | Prometheus exporters, Kibana dashboards |
 
-## TBD
-- Decide on queue technology (Redis Streams vs Kafka) for production.
-- Determine LLM provider integration (OpenAI vs internal) and secret handling.
+## Resolved Decisions
+- Queue technology: Redis Streams is the implemented production path in this repo.
+- LLM provider integration and secret handling are resolved through hybrid provider support with env-backed credentials and documented operator controls.

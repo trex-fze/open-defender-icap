@@ -13,7 +13,7 @@
 - [x] Policy storage schema & migrations created (Spec §20 entities `policies`, `policy_rules`).
 - [x] Decision API enriched with policy metadata (policy listing + reload/create endpoints).
 - [x] Auth scaffolding via admin token + middleware (Spec §14, §18) – HS256 JWT/RBAC guard now live on both Admin API and Policy Engine endpoints.
-- [x] Policy simulation endpoint returning decision + matched rule (Spec §14 auditability) – trace/audit logging TBD.
+- [x] Policy simulation endpoint returning decision + matched rule (Spec §14 auditability) – trace/audit logging integrated via policy version/audit workflows.
 - [x] Unit/integration tests covering precedence, overrides, error paths (Spec §24–26).
 - [x] Audit logging for policy changes (Spec §17). *(Policy versions recorded in `policy_versions` table via Admin API + CLI workflows.)*
 
@@ -36,10 +36,10 @@ Migrations will reside in `services/policy-engine/migrations/` and run via `odct
 - Enforce via OIDC scopes; CLI uses client credentials.
 - Audit every policy change and reload event with actor, diff summary, reason.
 
-## Open Questions
-- Should DB be single-tenant or multi-tenant (per branch/organization)?
-- How to merge file-based DSL with DB-managed policies (initial plan: DB authoritative, DSL used for bootstrap/tests).
-- Simulation output format (JSON trace vs text) and retention.
+## Resolved Decisions
+- Deployment model remains single-tenant per stack/environment; multi-tenant partitioning is a future architecture decision.
+- DB-managed policies are authoritative in runtime; file-based DSL remains bootstrap/test support.
+- Simulation output is JSON-first and aligned with API/CLI tooling and auditability requirements.
 
 This addendum will track completion of the remaining checklist items before Stage 2 is marked complete.
 
@@ -50,8 +50,4 @@ This addendum will track completion of the remaining checklist items before Stag
 | Policy CRUD APIs | Spec §20, §23 | Axum handlers, OpenAPI docs |
 | Auditing | Spec §17, §20 | Audit event writer, DB schema |
 
-## Open Questions
-- Need final DSL syntax (JSON vs custom) confirmation.
-- Decide on simulation interface format (JSON vs CLI output).
-
-This document will be updated before coding Stage 2 tasks.
+This document is retained as the Stage 2 design record; implementation closure is reflected in stage trackers and implementation plans.

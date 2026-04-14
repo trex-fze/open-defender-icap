@@ -93,6 +93,6 @@ Design language:
 | RBAC enforcement | Spec §14, §18 | Auth middleware, Jest/Cypress tests |
 | Reporting & cache inspection | Spec §23 | API routes + OpenAPI snippets |
 
-## Pending Decisions
-- Component library: default to custom tokens + Headless UI; optionally adopt Elastic UI data grid for dense tables.
-- CLI auth fallback: prefer OIDC device flow; retain API token mode for air-gapped deployments with manual rotation guidance.
+## Resolved Decisions
+- Component library: custom design tokens with lightweight primitives remains the default; no framework-level grid migration is required.
+- CLI auth fallback: OIDC device flow is primary, with API token mode retained for air-gapped/bootstrap scenarios.

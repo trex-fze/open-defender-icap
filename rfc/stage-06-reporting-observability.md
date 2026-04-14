@@ -25,6 +25,6 @@
 | Observability metrics | Spec §33 | Prometheus exporters, alert configs |
 | Evidence retention | Spec §29 | Dashboard screenshots, log samples |
 
-## Pending Workflows
-- Define data masking for PII in logs/dashboards.
-- Align alert routing with SOC on-call structure.
+## Operational Workflows
+- Data masking for PII in logs/dashboards is treated as a recurring compliance control and maintained via runbooks/release checks.
+- Alert routing follows SOC/on-call procedures as an operational ownership process, not a stage implementation blocker.
