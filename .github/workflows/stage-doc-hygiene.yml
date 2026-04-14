@@ -1,0 +1,25 @@
+name: stage-doc-hygiene
+
+on:
+  pull_request:
+    paths:
+      - "rfc/**/*.md"
+      - "implementation-plan/**/*.md"
+      - "scripts/check_stage_docs.py"
+      - ".github/workflows/stage-doc-hygiene.yml"
+  workflow_dispatch:
+
+jobs:
+  stage-doc-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate stage doc hygiene
+        run: python scripts/check_stage_docs.py

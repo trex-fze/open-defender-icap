@@ -29,6 +29,8 @@ This roadmap mirrors the RFC tracker and captures actionable work items, owners,
 
 ## Current Focus
 
+Operational gate ownership, cadence, thresholds, and evidence locations are tracked in `docs/runbooks/operational-completion-matrix.md`.
+
 1. Keep Stage 18 reliability gate green in routine regression runs (`RUNS=10`).
 2. Keep Stage 20 diagnostics collector/runbook path validated in on-call drills.
 3. Periodically run `tests/taxonomy-parity.sh` to guard cross-service taxonomy canonicalization parity.
