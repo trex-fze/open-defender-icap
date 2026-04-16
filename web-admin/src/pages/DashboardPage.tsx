@@ -307,6 +307,10 @@ export const DashboardPage = () => {
     () => buildLlmChartData(llmProviderOptions, selectedLlmProvider),
     [llmProviderOptions, selectedLlmProvider],
   );
+  const manualRefreshLoading = dashboard.loading || opsSummary.loading || llmSeries.loading;
+  const handleManualRefresh = () => {
+    void Promise.all([dashboard.refresh(), opsSummary.refresh(), llmSeries.refresh()]);
+  };
   const llmNonRetryable400Total = useMemo(
     () => llmChartData.reduce((sum, point) => sum + point.nonRetryable400, 0),
     [llmChartData],
@@ -351,8 +355,8 @@ export const DashboardPage = () => {
               <option value={60000}>60s</option>
             </select>
           </div>
-          <button className="cta-button" onClick={() => dashboard.refresh()} disabled={dashboard.loading}>
-            {dashboard.loading ? 'Refreshing...' : 'Refresh'}
+          <button className="cta-button" onClick={handleManualRefresh} disabled={manualRefreshLoading}>
+            {manualRefreshLoading ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
       </div>

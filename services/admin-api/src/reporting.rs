@@ -25,6 +25,7 @@ pub struct TrafficReportQuery {
 
 const DEFAULT_TOP_N: u32 = 10;
 const PROM_RANGE_STEP_SECONDS: u64 = 15;
+const LLM_SERIES_SHORT_WINDOW_SECONDS: i64 = 60;
 
 #[derive(Debug, Serialize)]
 pub struct OpsSummaryResponse {
@@ -421,6 +422,7 @@ pub async fn ops_llm_series(
     let range_seconds = parse_prometheus_range_seconds(&range).unwrap_or(24 * 60 * 60);
     let end_ts = Utc::now().timestamp();
     let start_ts = end_ts - range_seconds;
+    let lookback_window = llm_series_lookback_window(&range);
 
     let mut errors = Vec::new();
     let success_rows = query_prometheus_matrix(
@@ -428,7 +430,7 @@ pub async fn ops_llm_series(
         prometheus_base,
         &format!(
             "sum by (provider) (increase(llm_provider_success_total[{}]))",
-            range
+            lookback_window
         ),
         "llm_provider_success_series",
         start_ts,
@@ -443,7 +445,7 @@ pub async fn ops_llm_series(
         prometheus_base,
         &format!(
             "sum by (provider) (increase(llm_provider_failures_total[{}]))",
-            range
+            lookback_window
         ),
         "llm_provider_failure_series",
         start_ts,
@@ -458,7 +460,7 @@ pub async fn ops_llm_series(
         prometheus_base,
         &format!(
             "sum by (provider) (increase(llm_provider_timeouts_total[{}]))",
-            range
+            lookback_window
         ),
         "llm_provider_timeout_series",
         start_ts,
@@ -473,7 +475,7 @@ pub async fn ops_llm_series(
         prometheus_base,
         &format!(
             "sum by (provider) (increase(llm_provider_failure_class_total{{class=\"non_retryable\",status_code=\"400\"}}[{}]))",
-            range
+            lookback_window
         ),
         "llm_provider_non_retryable_400_series",
         start_ts,
@@ -657,6 +659,13 @@ fn parse_prometheus_range_seconds(range: &str) -> Option<i64> {
         'h' => Some(value * 60 * 60),
         'd' => Some(value * 24 * 60 * 60),
         _ => None,
+    }
+}
+
+fn llm_series_lookback_window(range: &str) -> &'static str {
+    match parse_prometheus_range_seconds(range) {
+        Some(seconds) if seconds <= LLM_SERIES_SHORT_WINDOW_SECONDS => "1m",
+        _ => "5m",
     }
 }
 
@@ -845,5 +854,19 @@ mod tests {
         assert_eq!(points.len(), 1);
         assert_eq!(points[0].ts_ms, 1712707200000);
         assert!((points[0].value - 3.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn llm_series_lookback_uses_short_window_for_1m() {
+        assert_eq!(llm_series_lookback_window("1m"), "1m");
+    }
+
+    #[test]
+    fn llm_series_lookback_defaults_to_5m_for_longer_or_invalid_ranges() {
+        assert_eq!(llm_series_lookback_window("5m"), "5m");
+        assert_eq!(llm_series_lookback_window("15m"), "5m");
+        assert_eq!(llm_series_lookback_window("1h"), "5m");
+        assert_eq!(llm_series_lookback_window("24h"), "5m");
+        assert_eq!(llm_series_lookback_window("bogus"), "5m");
     }
 }
