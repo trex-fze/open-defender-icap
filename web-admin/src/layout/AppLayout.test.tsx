@@ -74,4 +74,12 @@ describe('AppLayout sidebar', () => {
     expect(await screen.findByText('Settings IAM content')).toBeInTheDocument();
     expect(screen.getByLabelText('Settings').className).toContain('active');
   });
+
+  it('renders company website link with safe new-tab attributes', () => {
+    renderLayout('/dashboard');
+    const companyLink = screen.getByRole('link', { name: /open trex website/i });
+    expect(companyLink).toHaveAttribute('href', 'https://trex.ae/');
+    expect(companyLink).toHaveAttribute('target', '_blank');
+    expect(companyLink).toHaveAttribute('rel', 'noopener noreferrer');
+  });
 });

@@ -17,6 +17,8 @@ type LoginResponse = {
   };
 };
 
+const COMPANY_WEBSITE_URL = 'https://trex.ae/';
+
 export const LoginPage = () => {
   const { login, authNotice, clearAuthNotice } = useAuth();
   const navigate = useNavigate();
@@ -99,6 +101,16 @@ export const LoginPage = () => {
         <div className="login-brand-wrap">
           <img src="/brand/logo.png" alt="Open Defender ICAP" className="login-brand-logo" />
         </div>
+        <a
+          className="login-company-link"
+          href={COMPANY_WEBSITE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open TREX website (new tab)"
+          title="Open TREX website (new tab)"
+        >
+          <img src="/brand/company/trex-logo.png" alt="TREX" className="login-company-logo" />
+        </a>
         <p className="section-title">Local Sign-in</p>
         <h2 style={{ marginTop: 0 }}>Welcome back</h2>
         <p style={{ color: 'var(--muted)' }}>Sign in using your local username or email and password.</p>

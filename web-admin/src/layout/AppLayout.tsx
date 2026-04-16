@@ -5,6 +5,7 @@ import { ThemePreference, useTheme } from '../context/ThemeContext';
 
 const MOBILE_BREAKPOINT = 960;
 const SIDEBAR_COLLAPSE_KEY = 'od.sidebar.collapsed';
+const COMPANY_WEBSITE_URL = 'https://trex.ae/';
 
 type NavItem = {
   label: string;
@@ -162,6 +163,16 @@ const AppLayout = () => {
               </NavLink>
             ))}
         </nav>
+        <a
+          className="sidebar-company-link"
+          href={COMPANY_WEBSITE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open TREX website (new tab)"
+          title="Open TREX website (new tab)"
+        >
+          <img className="sidebar-company-logo" src="/brand/company/trex-logo.png" alt="TREX" />
+        </a>
         <UserBadge>
           {isSidebarCollapsed ? (
             <div className="user-collapsed-controls">
