@@ -286,6 +286,10 @@ export const SettingsOverridesExchangePage = () => {
           <p style={{ color: 'var(--muted)', marginTop: '0.35rem' }}>
             Manage portable line-by-line imports and exports for domain allow/deny overrides.
           </p>
+          <p style={{ color: 'var(--muted)', marginTop: '0.35rem' }}>
+            Exact scopes are mutually exclusive between Allow and Deny. Importing or creating the opposite action
+            for the same domain replaces the current active action.
+          </p>
         </div>
       </div>
 

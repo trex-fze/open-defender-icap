@@ -26,7 +26,13 @@ use models::{
 };
 use policy_dsl::PolicyDocument;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use std::{env, net::SocketAddr, path::Path as FsPath, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+    net::SocketAddr,
+    path::Path as FsPath,
+    sync::Arc,
+};
 use store::PolicyStore;
 use taxonomy::{ActivationState, TaxonomyStore};
 use tokio::net::TcpListener;
@@ -228,6 +234,9 @@ impl AppState {
         .ok()?;
 
         let mut best: Option<(usize, OverrideRecord)> = None;
+        let mut seen_exact_actions: HashMap<String, String> = HashMap::new();
+        let mut conflicting_scopes: HashSet<String> = HashSet::new();
+
         for row in rows {
             let scope_value = row
                 .try_get::<String, _>("scope_value")
@@ -237,6 +246,15 @@ impl AppState {
                 continue;
             }
             let action = row.try_get::<String, _>("action").ok()?;
+            let normalized_action = normalize_override_action(&action);
+            if let Some(previous_action) = seen_exact_actions.get(&scope_value) {
+                if previous_action != &normalized_action {
+                    conflicting_scopes.insert(scope_value.clone());
+                }
+            } else {
+                seen_exact_actions.insert(scope_value.clone(), normalized_action.clone());
+            }
+
             let specificity = domain_scope_specificity(&scope_value);
             let record = OverrideRecord {
                 scope_value,
@@ -244,9 +262,27 @@ impl AppState {
             };
             match &best {
                 Some((best_specificity, _)) if *best_specificity > specificity => {}
-                Some((best_specificity, _)) if *best_specificity == specificity => {}
+                Some((best_specificity, best_record)) if *best_specificity == specificity => {
+                    let best_rank = override_action_rank(&best_record.action);
+                    let candidate_rank = override_action_rank(&record.action);
+                    if candidate_rank > best_rank {
+                        best = Some((specificity, record));
+                    }
+                }
                 _ => best = Some((specificity, record)),
             }
+        }
+
+        if !conflicting_scopes.is_empty() {
+            let mut scopes: Vec<String> = conflicting_scopes.into_iter().collect();
+            scopes.sort();
+            warn!(
+                target = "svc-policy",
+                normalized_key = %request.normalized_key,
+                conflicting_scope_count = scopes.len(),
+                conflicting_scopes = %scopes.join(","),
+                "detected conflicting active override actions for exact scopes"
+            );
         }
 
         let (_, matched) = best?;
@@ -315,6 +351,18 @@ fn domain_scope_specificity(scope_value: &str) -> usize {
     normalize_scope_host(scope_value)
         .map(|host| host.len())
         .unwrap_or(0)
+}
+
+fn normalize_override_action(action: &str) -> String {
+    action.trim().to_ascii_lowercase()
+}
+
+fn override_action_rank(action: &str) -> u8 {
+    match normalize_override_action(action).as_str() {
+        "block" => 2,
+        "allow" => 1,
+        _ => 0,
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1179,6 +1227,18 @@ mod tests {
             domain_scope_specificity("support.mozilla.org")
                 > domain_scope_specificity("mozilla.org")
         );
+    }
+
+    #[test]
+    fn block_action_wins_tie_break() {
+        assert!(override_action_rank("block") > override_action_rank("allow"));
+        assert_eq!(override_action_rank("unknown"), 0);
+    }
+
+    #[test]
+    fn detects_conflicting_actions_after_normalization() {
+        assert_eq!(normalize_override_action(" BLOCK "), "block");
+        assert_ne!(normalize_override_action("allow"), normalize_override_action("block"));
     }
 
     #[test]

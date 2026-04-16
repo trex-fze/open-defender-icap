@@ -1212,13 +1212,11 @@ async fn import_overrides(
     let parsed = parse_override_exchange_lines(&payload.content);
 
     let existing_rows = sqlx::query(
-        r#"SELECT id, scope_value, status
+        r#"SELECT id, scope_value, action, status
            FROM overrides
            WHERE scope_type = 'domain'
-             AND action = $1
-           ORDER BY scope_value ASC, updated_at DESC"#,
+           ORDER BY scope_value ASC, updated_at DESC, created_at DESC, id DESC"#,
     )
-    .bind(&action)
     .fetch_all(&state.pool)
     .await
     .map_err(|err| {
@@ -1228,8 +1226,11 @@ async fn import_overrides(
         )
     })?;
 
-    let mut existing_by_scope: HashMap<String, OverrideExistingMeta> = HashMap::new();
-    let mut active_scope_values: HashSet<String> = HashSet::new();
+    let mut active_by_scope: HashMap<String, (Uuid, String)> = HashMap::new();
+    let mut latest_by_scope_action: HashMap<(String, String), Uuid> = HashMap::new();
+    let mut active_scope_values_by_action: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut duplicate_active_ids = Vec::new();
+
     for row in existing_rows {
         let id: Uuid = row.try_get("id").map_err(|err| {
             (
@@ -1243,6 +1244,12 @@ async fn import_overrides(
                 Json(ApiError::new("DB_ERROR", err.to_string())),
             )
         })?;
+        let row_action: String = row.try_get("action").map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("DB_ERROR", err.to_string())),
+            )
+        })?;
         let status: String = row.try_get("status").map_err(|err| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1250,44 +1257,43 @@ async fn import_overrides(
             )
         })?;
 
-        let is_active = status.eq_ignore_ascii_case("active");
-        if is_active {
-            active_scope_values.insert(scope_value.clone());
-        }
+        latest_by_scope_action
+            .entry((scope_value.clone(), row_action.clone()))
+            .or_insert(id);
 
-        existing_by_scope
-            .entry(scope_value)
-            .and_modify(|entry| {
-                entry.has_active = entry.has_active || is_active;
-            })
-            .or_insert(OverrideExistingMeta {
-                latest_id: id,
-                has_active: is_active,
-            });
+        if status.eq_ignore_ascii_case("active") {
+            if active_by_scope.contains_key(&scope_value) {
+                duplicate_active_ids.push(id);
+                continue;
+            }
+            active_scope_values_by_action
+                .entry(row_action.clone())
+                .or_default()
+                .insert(scope_value.clone());
+            active_by_scope.insert(scope_value, (id, row_action));
+        }
     }
 
-    let imported_would = parsed
-        .scopes
-        .iter()
-        .filter(|scope| !existing_by_scope.contains_key(*scope))
-        .count() as u32;
-    let updated_would = parsed
-        .scopes
-        .iter()
-        .filter(|scope| {
-            if let Some(meta) = existing_by_scope.get(*scope) {
-                !meta.has_active
-            } else {
-                false
-            }
-        })
-        .count() as u32;
-    let skipped_would = parsed.scopes.len() as u32 - imported_would - updated_would;
+    let mut imported_would = 0_u32;
+    let mut updated_would = 0_u32;
+    let skipped_would = 0_u32;
+    for scope_value in &parsed.scopes {
+        if active_by_scope.contains_key(scope_value)
+            || latest_by_scope_action.contains_key(&(scope_value.clone(), action.clone()))
+        {
+            updated_would += 1;
+        } else {
+            imported_would += 1;
+        }
+    }
+
     let imported_scope_set: HashSet<&str> =
         parsed.scopes.iter().map(|scope| scope.as_str()).collect();
     let deleted_would = if matches!(mode, OverrideImportMode::Replace) {
-        active_scope_values
-            .iter()
+        active_scope_values_by_action
+            .get(&action)
+            .into_iter()
+            .flatten()
             .filter(|scope| !imported_scope_set.contains(scope.as_str()))
             .count() as u32
     } else {
@@ -1311,19 +1317,40 @@ async fn import_overrides(
         updated = 0;
         skipped = 0;
 
+        if !duplicate_active_ids.is_empty() {
+            sqlx::query(
+                r#"UPDATE overrides
+                   SET status = 'revoked',
+                       updated_at = NOW()
+                   WHERE id = ANY($1::uuid[])"#,
+            )
+            .bind(&duplicate_active_ids)
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiError::new("DB_ERROR", err.to_string())),
+                )
+            })?;
+        }
+
         for scope_value in &parsed.scopes {
-            if let Some(meta) = existing_by_scope.get(scope_value) {
-                if meta.has_active {
-                    skipped += 1;
-                    continue;
-                }
+            if let Some((active_id, _active_action)) = active_by_scope.get(scope_value).cloned() {
                 sqlx::query(
                     r#"UPDATE overrides
-                       SET status = 'active',
+                       SET action = $1,
+                           reason = $2,
+                           created_by = $3,
+                           expires_at = NULL,
+                           status = 'active',
                            updated_at = NOW()
-                       WHERE id = $1"#,
+                       WHERE id = $4"#,
                 )
-                .bind(meta.latest_id)
+                .bind(&action)
+                .bind("Imported via Allow / Deny Exchange")
+                .bind(&user.actor)
+                .bind(active_id)
                 .execute(&mut *tx)
                 .await
                 .map_err(|err| {
@@ -1333,12 +1360,41 @@ async fn import_overrides(
                     )
                 })?;
                 updated += 1;
+                active_by_scope.insert(scope_value.clone(), (active_id, action.clone()));
+            } else if let Some(existing_id) =
+                latest_by_scope_action.get(&(scope_value.clone(), action.clone())).copied()
+            {
+                sqlx::query(
+                    r#"UPDATE overrides
+                       SET action = $1,
+                           reason = $2,
+                           created_by = $3,
+                           expires_at = NULL,
+                           status = 'active',
+                           updated_at = NOW()
+                       WHERE id = $4"#,
+                )
+                .bind(&action)
+                .bind("Imported via Allow / Deny Exchange")
+                .bind(&user.actor)
+                .bind(existing_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|err| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiError::new("DB_ERROR", err.to_string())),
+                    )
+                })?;
+                updated += 1;
+                active_by_scope.insert(scope_value.clone(), (existing_id, action.clone()));
             } else {
+                let new_id = Uuid::new_v4();
                 sqlx::query(
                     r#"INSERT INTO overrides (id, scope_type, scope_value, action, reason, created_by, status)
                        VALUES ($1, 'domain', $2, $3, $4, $5, 'active')"#,
                 )
-                .bind(Uuid::new_v4())
+                .bind(new_id)
                 .bind(scope_value)
                 .bind(&action)
                 .bind("Imported via Allow / Deny Exchange")
@@ -1352,6 +1408,12 @@ async fn import_overrides(
                     )
                 })?;
                 imported += 1;
+                latest_by_scope_action.insert((scope_value.clone(), action.clone()), new_id);
+                active_by_scope.insert(scope_value.clone(), (new_id, action.clone()));
+            }
+
+            if let Some((id, _)) = active_by_scope.get(scope_value).cloned() {
+                latest_by_scope_action.insert((scope_value.clone(), action.clone()), id);
             }
 
             state.invalidate_override("domain", scope_value).await;
@@ -1467,40 +1529,144 @@ async fn create_override(
         status,
     } = validated;
 
-    let id = Uuid::new_v4();
     let status_value = status.unwrap_or_else(|| "active".to_string());
-    sqlx::query(
-        r#"INSERT INTO overrides (id, scope_type, scope_value, action, reason, created_by, expires_at, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
-    )
-    .bind(id)
-    .bind(&scope_type)
-    .bind(&scope_value)
-    .bind(&action)
-    .bind(&reason)
-    .bind(&created_by)
-    .bind(expires_at)
-    .bind(&status_value)
-    .execute(&state.pool)
-    .await
-    .map_err(|err| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiError::new("DB_ERROR", err.to_string())),
-    ))?;
+    let mut tx = state.pool.begin().await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("DB_ERROR", err.to_string())),
+        )
+    })?;
 
-    let record = sqlx::query(
-        r#"SELECT id, scope_type, scope_value, action, reason, created_by, expires_at, status, created_at, updated_at
-        FROM overrides WHERE id = $1"#,
-    )
-    .bind(id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|err| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiError::new("DB_ERROR", err.to_string())),
-    ))?;
+    let row = if status_value.eq_ignore_ascii_case("active") {
+        let active_rows = sqlx::query(
+            r#"SELECT id
+               FROM overrides
+               WHERE scope_type = $1
+                 AND scope_value = $2
+                 AND status = 'active'
+               ORDER BY updated_at DESC, created_at DESC, id DESC"#,
+        )
+        .bind(&scope_type)
+        .bind(&scope_value)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("DB_ERROR", err.to_string())),
+            )
+        })?;
 
-    let mapped = map_override_row(&record).map_err(|err| {
+        let primary_active_id = active_rows
+            .first()
+            .and_then(|row| row.try_get::<Uuid, _>("id").ok());
+        if active_rows.len() > 1 {
+            let mut duplicate_ids = Vec::with_capacity(active_rows.len() - 1);
+            for row in active_rows.iter().skip(1) {
+                if let Ok(duplicate_id) = row.try_get::<Uuid, _>("id") {
+                    duplicate_ids.push(duplicate_id);
+                }
+            }
+            if !duplicate_ids.is_empty() {
+                sqlx::query(
+                    r#"UPDATE overrides
+                       SET status = 'revoked',
+                           updated_at = NOW()
+                       WHERE id = ANY($1::uuid[])"#,
+                )
+                .bind(&duplicate_ids)
+                .execute(&mut *tx)
+                .await
+                .map_err(|err| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiError::new("DB_ERROR", err.to_string())),
+                    )
+                })?;
+            }
+        }
+
+        if let Some(active_id) = primary_active_id {
+            sqlx::query(
+                r#"UPDATE overrides
+                   SET action = $1,
+                       reason = $2,
+                       created_by = $3,
+                       expires_at = $4,
+                       status = $5,
+                       updated_at = NOW()
+                   WHERE id = $6
+                   RETURNING id, scope_type, scope_value, action, reason, created_by, expires_at, status, created_at, updated_at"#,
+            )
+            .bind(&action)
+            .bind(&reason)
+            .bind(&created_by)
+            .bind(expires_at)
+            .bind(&status_value)
+            .bind(active_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|err| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiError::new("DB_ERROR", err.to_string())),
+                )
+            })?
+        } else {
+            sqlx::query(
+                r#"INSERT INTO overrides (id, scope_type, scope_value, action, reason, created_by, expires_at, status)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                   RETURNING id, scope_type, scope_value, action, reason, created_by, expires_at, status, created_at, updated_at"#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(&scope_type)
+            .bind(&scope_value)
+            .bind(&action)
+            .bind(&reason)
+            .bind(&created_by)
+            .bind(expires_at)
+            .bind(&status_value)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|err| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiError::new("DB_ERROR", err.to_string())),
+                )
+            })?
+        }
+    } else {
+        sqlx::query(
+            r#"INSERT INTO overrides (id, scope_type, scope_value, action, reason, created_by, expires_at, status)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+               RETURNING id, scope_type, scope_value, action, reason, created_by, expires_at, status, created_at, updated_at"#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&scope_type)
+        .bind(&scope_value)
+        .bind(&action)
+        .bind(&reason)
+        .bind(&created_by)
+        .bind(expires_at)
+        .bind(&status_value)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("DB_ERROR", err.to_string())),
+            )
+        })?
+    };
+
+    tx.commit().await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("DB_ERROR", err.to_string())),
+        )
+    })?;
+
+    let mapped = map_override_row(&row).map_err(|err| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiError::new("DB_ERROR", err.to_string())),
@@ -1602,9 +1768,16 @@ async fn update_override(
         status,
     } = validated;
 
-    let existing = sqlx::query("SELECT scope_type, scope_value FROM overrides WHERE id = $1")
+    let mut tx = state.pool.begin().await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("DB_ERROR", err.to_string())),
+        )
+    })?;
+
+    let existing = sqlx::query("SELECT scope_type, scope_value, status FROM overrides WHERE id = $1")
         .bind(id)
-        .fetch_optional(&state.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|err| {
             (
@@ -1632,6 +1805,36 @@ async fn update_override(
             Json(ApiError::new("DB_ERROR", err.to_string())),
         )
     })?;
+    let existing_status: String = existing_row.try_get("status").map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("DB_ERROR", err.to_string())),
+        )
+    })?;
+    let next_status = status.unwrap_or(existing_status);
+
+    if next_status.eq_ignore_ascii_case("active") {
+        sqlx::query(
+            r#"UPDATE overrides
+               SET status = 'revoked',
+                   updated_at = NOW()
+               WHERE scope_type = $1
+                 AND scope_value = $2
+                 AND status = 'active'
+                 AND id <> $3"#,
+        )
+        .bind(&scope_type)
+        .bind(&scope_value)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("DB_ERROR", err.to_string())),
+            )
+        })?;
+    }
 
     let row = sqlx::query(
         r#"UPDATE overrides
@@ -1641,7 +1844,7 @@ async fn update_override(
                 reason = $4,
                 created_by = $5,
                 expires_at = $6,
-                status = COALESCE($7, status),
+                status = $7,
                 updated_at = NOW()
           WHERE id = $8
           RETURNING id, scope_type, scope_value, action, reason, created_by, expires_at, status, created_at, updated_at"#,
@@ -1652,9 +1855,9 @@ async fn update_override(
     .bind(&reason)
     .bind(&created_by)
     .bind(expires_at)
-    .bind(&status)
+    .bind(&next_status)
     .bind(id)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|err| (
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -1667,6 +1870,13 @@ async fn update_override(
             Json(ApiError::new("NOT_FOUND", "override not found")),
         ));
     };
+
+    tx.commit().await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("DB_ERROR", err.to_string())),
+        )
+    })?;
 
     let mapped = map_override_row(&row).map_err(|err| {
         (
@@ -1801,12 +2011,6 @@ impl OverrideImportMode {
             OverrideImportMode::Replace => "replace",
         }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct OverrideExistingMeta {
-    latest_id: Uuid,
-    has_active: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
