@@ -618,11 +618,12 @@ fn db_error(err: sqlx::Error) -> (StatusCode, Json<ApiError>) {
 mod support {
     use super::*;
     use common_types::normalizer::CanonicalizationPolicy;
-    use crate::{
+use crate::{
         audit::AuditLogger,
         auth::{AdminAuth, AuthSettings},
         iam::IamService,
         metrics::ReviewMetrics,
+        ops_health,
     };
     use ::taxonomy::TaxonomyStore;
     use anyhow::Result;
@@ -669,6 +670,9 @@ mod support {
             http_client: reqwest::Client::new(),
             classification_job_publisher: None,
             canonicalization_policy: Arc::new(CanonicalizationPolicy::default()),
+            redis_url: None,
+            ops_health_config: ops_health::OpsHealthConfig::from_env(),
+            ops_health_cache: Arc::new(tokio::sync::RwLock::new(None)),
         })
     }
 }

@@ -27,5 +27,6 @@ export const queryKeys = {
   reportingOpsSummary: (baseUrl: string, range: string) => ['reporting-ops-summary', baseUrl, range] as const,
   reportingOpsLlmSeries: (baseUrl: string, range: string) => ['reporting-ops-llm-series', baseUrl, range] as const,
   opsStatus: (baseUrl: string, providersUrl: string) => ['ops-status', baseUrl, providersUrl] as const,
+  platformHealth: (baseUrl: string) => ['platform-health', baseUrl] as const,
   llmProviders: (baseUrl: string) => ['llm-providers', baseUrl] as const,
 };

@@ -199,6 +199,7 @@ flowchart LR
 | `OD_REPORTING_ELASTIC_USERNAME` / `OD_REPORTING_ELASTIC_PASSWORD` / `OD_REPORTING_ELASTIC_API_KEY` | Reporting query auth (password defaults to `ELASTIC_PASSWORD` in compose). |
 | `OD_REPORTING_TIMEZONE` | Dashboard/report aggregation timezone for Elasticsearch date histograms (default `Asia/Dubai`). |
 | `OD_PROMETHEUS_URL` | Prometheus base URL used by Admin API operations telemetry rollups (`/api/v1/reporting/ops-summary`) shown in Dashboard. |
+| `OD_OPS_HEALTH_ENABLED` / `OD_OPS_HEALTH_TTL_SECS` / `OD_OPS_HEALTH_TIMEOUT_MS` | Controls Admin API aggregated platform-health endpoint (`/api/v1/ops/platform-health`) used by Dashboard component availability panel. |
 | `OD_POLICY_ENGINE_URL` | Admin API -> Policy Engine URL override (default `http://policy-engine:19010`). |
 | `OD_HAPROXY_BIND_HOST` / `OD_HAPROXY_BIND_PORT` | External proxy listener published by HAProxy (default `0.0.0.0:3128`); clients connect to this endpoint. |
 | `OD_SQUID_ALLOWED_CLIENT_CIDRS` | Comma-separated client CIDRs allowed at the HAProxy edge before forwarding to Squid. On Docker Desktop/macOS, container-visible peer IP can be rewritten; in that dev profile use `0.0.0.0/0` with LAN firewall restrictions on port `3128`. |

@@ -24,3 +24,7 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["reclass-worker:19016"]
+  - job_name: "page-fetcher"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["page-fetcher:19025"]

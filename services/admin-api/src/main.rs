@@ -7,6 +7,7 @@ mod classifications;
 mod cli_logs;
 mod iam;
 mod metrics;
+mod ops_health;
 mod page_contents;
 mod pagination;
 mod policies;
@@ -42,6 +43,7 @@ use std::{
     sync::Arc,
 };
 use tokio::net::TcpListener;
+use tokio::sync::RwLock;
 use tracing::{error, info, warn, Level};
 use uuid::Uuid;
 
@@ -195,6 +197,9 @@ pub struct AppState {
     http_client: reqwest::Client,
     classification_job_publisher: Option<Arc<ClassificationJobPublisher>>,
     canonicalization_policy: Arc<CanonicalizationPolicy>,
+    redis_url: Option<String>,
+    ops_health_config: ops_health::OpsHealthConfig,
+    ops_health_cache: Arc<RwLock<Option<ops_health::CachedPlatformHealth>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -488,6 +493,30 @@ impl AppState {
         self.cache_invalidator.as_deref()
     }
 
+    pub fn policy_engine_url(&self) -> &str {
+        &self.policy_engine_url
+    }
+
+    pub fn llm_providers_url(&self) -> &str {
+        &self.llm_providers_url
+    }
+
+    pub fn redis_url(&self) -> Option<&str> {
+        self.redis_url.as_deref()
+    }
+
+    pub fn http_client(&self) -> &reqwest::Client {
+        &self.http_client
+    }
+
+    pub fn ops_health_config(&self) -> &ops_health::OpsHealthConfig {
+        &self.ops_health_config
+    }
+
+    pub fn ops_health_cache(&self) -> Arc<RwLock<Option<ops_health::CachedPlatformHealth>>> {
+        self.ops_health_cache.clone()
+    }
+
     pub fn canonicalize_key(&self, normalized_key: &str, tenant: Option<&str>) -> String {
         canonical_classification_key_with_policy(
             normalized_key,
@@ -688,6 +717,9 @@ async fn main() -> Result<()> {
         canonicalization_policy: Arc::new(CanonicalizationPolicy::from_tenant_exceptions(
             cfg.canonicalization.tenant_domain_exceptions.clone(),
         )),
+        redis_url: redis_url.clone(),
+        ops_health_config: ops_health::OpsHealthConfig::from_env(),
+        ops_health_cache: Arc::new(RwLock::new(None)),
     };
 
     let auth_layer = {
@@ -907,6 +939,7 @@ async fn main() -> Result<()> {
             get(page_contents::list_page_content_history),
         )
         .route("/api/v1/ops/llm/providers", get(list_llm_providers))
+        .route("/api/v1/ops/platform-health", get(ops_health::platform_health))
         .with_state(state.clone())
         .layer(auth_layer);
 

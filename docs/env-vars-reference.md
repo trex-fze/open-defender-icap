@@ -73,6 +73,7 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | --- | --- |
 | `OD_PAGE_FETCH_REDIS_URL`, `OD_PAGE_FETCH_STREAM`, `OD_PAGE_FETCH_TTL_SECONDS` | Page fetch queue and content TTL controls. |
 | `OD_PAGE_FETCH_STREAM_GROUP`, `OD_PAGE_FETCH_STREAM_CONSUMER`, `OD_PAGE_FETCH_STREAM_GROUP_START_ID`, `OD_PAGE_FETCH_STREAM_DEAD_LETTER`, `OD_PAGE_FETCH_STREAM_CLAIM_IDLE_MS`, `OD_PAGE_FETCH_STREAM_CLAIM_BATCH` | Page fetcher Redis Stream group/claim tuning. |
+| `OD_PAGE_FETCH_METRICS_URL`, `OD_RECLASS_METRICS_URL`, `OD_ICAP_METRICS_URL`, `OD_CRAWL4AI_HEALTH_URL`, `OD_EVENT_INGESTER_URL`, `OD_KIBANA_STATUS_URL` | Optional admin-api platform-health probe endpoint overrides for non-default deployments. |
 | `CRAWL4AI_HEADLESS`, `CRAWL4AI_BROWSER`, `CRAWL4AI_USER_AGENT` | Crawl browser runtime mode and UA. |
 | `CRAWL4AI_VIEWPORT_WIDTH`, `CRAWL4AI_VIEWPORT_HEIGHT`, `CRAWL4AI_LOCALE`, `CRAWL4AI_TIMEZONE`, `CRAWL4AI_ACCEPT_LANGUAGE` | Crawl rendering locale and viewport settings. |
 | `CRAWL4AI_ENABLE_STEALTH`, `CRAWL4AI_SIMULATE_USER`, `CRAWL4AI_OVERRIDE_NAVIGATOR`, `CRAWL4AI_VERBOSE` | Anti-bot and runtime behavior toggles. |
@@ -98,6 +99,7 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `OD_CANONICAL_TAXONOMY_PATH` | Override canonical taxonomy JSON file path. |
 | `OD_CONFIG_JSON` | JSON payload used by `config-core` when config files are absent. |
 | `OD_TAXONOMY_MUTATION_ENABLED` | Temporarily allow taxonomy mutation endpoint (off by default). |
+| `OD_OPS_HEALTH_ENABLED`, `OD_OPS_HEALTH_TTL_SECS`, `OD_OPS_HEALTH_TIMEOUT_MS` | Admin-api platform-health aggregation toggle, cache TTL, and per-probe timeout controls. Elasticsearch probe uses `OD_REPORTING_ELASTIC_URL` and `OD_REPORTING_ELASTIC_API_KEY` or (`OD_REPORTING_ELASTIC_USERNAME` + `OD_REPORTING_ELASTIC_PASSWORD`). |
 
 ## Test and smoke-script controls (selected)
 

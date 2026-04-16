@@ -1,5 +1,8 @@
 use once_cell::sync::Lazy;
-use prometheus::{register_int_counter, Encoder, IntCounter, TextEncoder};
+use prometheus::{
+    register_histogram_vec, register_int_counter, register_int_counter_vec, Encoder, HistogramVec,
+    IntCounter, IntCounterVec, TextEncoder,
+};
 
 static TAXONOMY_ACTIVATION_CHANGES: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
@@ -57,6 +60,32 @@ static AUTH_LOGOUT: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+static OPS_HEALTH_PROBE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "admin_ops_health_probe_total",
+        "Count of platform health probes by component and status",
+        &["component", "status"]
+    )
+    .unwrap()
+});
+
+static OPS_HEALTH_PROBE_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
+    register_histogram_vec!(
+        "admin_ops_health_probe_duration_seconds",
+        "Platform health probe latency by component",
+        &["component"]
+    )
+    .unwrap()
+});
+
+static OPS_HEALTH_CACHE_HITS: Lazy<IntCounter> = Lazy::new(|| {
+    register_int_counter!(
+        "admin_ops_health_cache_hits_total",
+        "Count of platform health responses served from cache"
+    )
+    .unwrap()
+});
+
 #[derive(Clone)]
 pub struct ReviewMetrics {
     #[allow(dead_code)]
@@ -102,4 +131,20 @@ pub fn record_auth_refresh_failure() {
 
 pub fn record_auth_logout() {
     AUTH_LOGOUT.inc();
+}
+
+pub fn record_ops_health_probe(component: &str, status: &str) {
+    OPS_HEALTH_PROBE_TOTAL
+        .with_label_values(&[component, status])
+        .inc();
+}
+
+pub fn observe_ops_health_probe_duration(component: &str, seconds: f64) {
+    OPS_HEALTH_PROBE_DURATION
+        .with_label_values(&[component])
+        .observe(seconds);
+}
+
+pub fn record_ops_health_cache_hit() {
+    OPS_HEALTH_CACHE_HITS.inc();
 }

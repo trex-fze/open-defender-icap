@@ -14,6 +14,7 @@ import {
   YAxis,
 } from 'recharts';
 import { useOpsStatus, type OpsProviderStatus } from '../hooks/useOpsStatus';
+import { usePlatformHealth, type PlatformHealthState } from '../hooks/usePlatformHealth';
 import { useDashboardReportData } from '../hooks/useDashboardReportData';
 import { useDashboardOpsSummary } from '../hooks/useDashboardOpsSummary';
 import { useDashboardLlmSeries, type LlmProviderSeries } from '../hooks/useDashboardLlmSeries';
@@ -67,8 +68,8 @@ const formatTimestampMsLabel = (timestampMs: number, timezone?: string) => {
   return formatBucketLabel(date.toISOString(), timezone);
 };
 
-const formatRate = (value?: number) => {
-  if (value === undefined || !Number.isFinite(value)) return '—';
+const formatRate = (value?: number | null) => {
+  if (value === undefined || value === null || !Number.isFinite(value)) return '—';
   return `${value.toFixed(3)}/s`;
 };
 
@@ -162,7 +163,7 @@ const CHART_PALETTE_LIGHT: ChartPalette = {
   tooltipText: '#46566f',
 };
 
-const renderDomainTooltip = (valueLabel: string, palette: ChartPalette) => ({ active, payload }: { active?: boolean; payload?: Array<{ value?: number; payload?: { domain?: string } }> }) => {
+const renderDomainTooltip = (valueLabel: string, palette: ChartPalette) => ({ active, payload }: { active?: boolean; payload?: ReadonlyArray<{ value?: unknown; payload?: { domain?: string } }> }) => {
   if (!active || !payload || payload.length === 0) return null;
   const point = payload[0];
   const domain = point?.payload?.domain?.trim() || '(unknown domain)';
@@ -198,6 +199,21 @@ const providerHealthChipClass = (provider: OpsProviderStatus) => {
   }
 };
 
+const platformHealthChipClass = (status: PlatformHealthState) => {
+  switch (status) {
+    case 'healthy':
+      return 'chip--green';
+    case 'degraded':
+    case 'unknown':
+      return 'chip--amber';
+    case 'unreachable':
+    case 'misconfigured':
+      return 'chip--red';
+    default:
+      return 'chip--amber';
+  }
+};
+
 export const DashboardPage = () => {
   const { resolvedTheme } = useTheme();
   const [range, setRange] = useState('1h');
@@ -210,6 +226,7 @@ export const DashboardPage = () => {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 30_000;
   });
   const { data: ops, loading: opsLoading, error: opsError, updatedAt: opsUpdatedAt } = useOpsStatus(refreshIntervalMs);
+  const platformHealth = usePlatformHealth(refreshIntervalMs);
   const dashboard = useDashboardReportData(range, topN, undefined, refreshIntervalMs);
   const opsSummary = useDashboardOpsSummary(range, refreshIntervalMs);
   const llmSeries = useDashboardLlmSeries(range, refreshIntervalMs);
@@ -542,6 +559,68 @@ export const DashboardPage = () => {
       </div>
 
       <div className="glass-panel" style={{ marginTop: '1.2rem' }}>
+        <p className="section-title">Platform Health</p>
+        {platformHealth.loading ? (
+          <p style={{ margin: 0, color: 'var(--muted)' }}>Checking component availability…</p>
+        ) : platformHealth.data ? (
+          <>
+            <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: '0.82rem' }}>
+              Source: {platformHealth.data.source} · checked {formatTimestampMsLabel(platformHealth.data.checked_at_ms)}
+            </p>
+            <div className="chip-row" style={{ marginBottom: '0.7rem' }}>
+              <span className={`chip ${platformHealthChipClass(platformHealth.data.overall_status)}`}>
+                overall: {platformHealth.data.overall_status}
+              </span>
+              <span className="chip chip--green">healthy {formatCompact(platformHealth.data.summary.healthy)}</span>
+              <span className="chip chip--amber">
+                degraded {formatCompact(platformHealth.data.summary.degraded + platformHealth.data.summary.unknown)}
+              </span>
+              <span className="chip chip--red">
+                down {formatCompact(platformHealth.data.summary.unreachable + platformHealth.data.summary.misconfigured)}
+              </span>
+              <span className="chip chip--slate">total {formatCompact(platformHealth.data.summary.total)}</span>
+            </div>
+            <div className="table-wrapper dashboard-domain-table" role="region" tabIndex={0} aria-label="Platform component health">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Component</th>
+                    <th>Category</th>
+                    <th>Status</th>
+                    <th>Latency</th>
+                    <th>Detail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {platformHealth.data.components.map((component) => (
+                    <tr key={component.name}>
+                      <td>{component.name}</td>
+                      <td>{component.category}</td>
+                      <td>
+                        <span className={`chip ${platformHealthChipClass(component.status)}`}>{component.status}</span>
+                      </td>
+                      <td>{component.latency_ms}ms</td>
+                      <td>{component.detail ?? (component.http_status ? `HTTP ${component.http_status}` : '—')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {platformHealth.data.errors.length > 0 ? (
+              <p style={{ marginTop: '0.65rem', color: 'var(--status-warning)', fontSize: '0.8rem' }}>
+                Partial health: {platformHealth.data.errors[0]}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+        {platformHealth.error ? (
+          <p style={{ marginTop: '0.65rem', color: 'var(--status-error)', fontSize: '0.8rem' }}>
+            Failed to load platform health: {platformHealth.error}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="glass-panel" style={{ marginTop: '1.2rem' }}>
         <p className="section-title">Operations Telemetry (Prometheus)</p>
         {opsSummary.loading ? (
           <p style={{ margin: 0, color: 'var(--muted)' }}>Loading operations telemetry…</p>
@@ -587,8 +666,8 @@ export const DashboardPage = () => {
                     {opsSummary.data.providers.map((item) => (
                       <tr key={item.provider}>
                         <td>{item.provider}</td>
-                        <td>{formatCompact(item.failures_5m)}</td>
-                        <td>{formatCompact(item.timeouts_5m)}</td>
+                        <td>{formatCompact(item.failures_5m ?? 0)}</td>
+                        <td>{formatCompact(item.timeouts_5m ?? 0)}</td>
                         <td>{hasNumber(item.latency_p95_seconds) ? `${item.latency_p95_seconds.toFixed(2)}s` : '—'}</td>
                       </tr>
                     ))}
