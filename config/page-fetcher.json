@@ -10,6 +10,7 @@
   "max_html_context_chars": 120000,
   "max_html_bytes": 524288,
   "ttl_seconds": 21600,
+  "page_content_max_versions_per_key": 30,
   "fetch_timeout_seconds": 60,
   "database_pool_size": 5,
   "terminal_retry_cooldown_seconds": 1200,

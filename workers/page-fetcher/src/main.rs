@@ -40,6 +40,8 @@ struct WorkerConfig {
     pub max_html_bytes: usize,
     #[serde(default = "default_ttl_seconds")]
     pub ttl_seconds: i32,
+    #[serde(default = "default_page_content_max_versions_per_key")]
+    pub page_content_max_versions_per_key: i64,
     #[serde(default = "default_fetch_timeout")]
     pub fetch_timeout_seconds: u64,
     #[serde(default = "default_idempotency_ttl_seconds")]
@@ -90,6 +92,10 @@ const fn default_max_html_bytes() -> usize {
 
 const fn default_ttl_seconds() -> i32 {
     21_600 // 6 hours
+}
+
+const fn default_page_content_max_versions_per_key() -> i64 {
+    30
 }
 
 const fn default_fetch_timeout() -> u64 {
@@ -160,7 +166,13 @@ fn validate_config(cfg: &WorkerConfig) -> Result<()> {
         Some(cfg.database_url.as_str()),
         "set database_url in config/page-fetcher.json",
     );
-    validator.finish()
+    validator.finish()?;
+    if cfg.page_content_max_versions_per_key < 1 {
+        return Err(anyhow!(
+            "page_content_max_versions_per_key must be >= 1"
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,6 +247,7 @@ async fn main() -> Result<()> {
         target = "svc-page-fetcher",
         stream = %cfg.stream,
         queue = %cfg.queue_name,
+        page_content_max_versions_per_key = cfg.page_content_max_versions_per_key,
         "page fetcher initialized"
     );
 
@@ -751,7 +764,9 @@ impl PageFetcher {
         failure: &FetchFailure,
         attempts: &[CrawlAttempt],
     ) -> Result<()> {
-        let version = self.next_version(&job.normalized_key).await?;
+        let mut tx = self.pool.begin().await?;
+        self.lock_page_content_key(&mut tx, &job.normalized_key).await?;
+        let version = self.next_version_tx(&mut tx, &job.normalized_key).await?;
         let attempt_summary = serde_json::to_string(attempts)?;
         sqlx::query(
             r#"INSERT INTO page_contents
@@ -768,8 +783,22 @@ impl PageFetcher {
         .bind(ttl_seconds)
         .bind(&job.url)
         .bind(&attempt_summary)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        let pruned = self
+            .prune_page_content_versions(&mut tx, &job.normalized_key)
+            .await?;
+        if pruned > 0 {
+            self.metrics.record_page_content_prune(pruned);
+            info!(
+                target = "svc-page-fetcher",
+                normalized_key = %job.normalized_key,
+                pruned,
+                keep = self.cfg.page_content_max_versions_per_key,
+                "pruned older page content versions"
+            );
+        }
+        tx.commit().await?;
         Ok(())
     }
 
@@ -792,7 +821,9 @@ impl PageFetcher {
         let excerpt_bytes = text_excerpt.as_bytes();
         let hash = Sha256::digest(text_excerpt.as_bytes());
         let hash_hex = format!("{:x}", hash);
-        let version = self.next_version(&job.normalized_key).await?;
+        let mut tx = self.pool.begin().await?;
+        self.lock_page_content_key(&mut tx, &job.normalized_key).await?;
+        let version = self.next_version_tx(&mut tx, &job.normalized_key).await?;
         let attempt_summary = serde_json::to_string(attempts)?;
         let resolved_host = Url::parse(resolved_url)
             .ok()
@@ -819,19 +850,71 @@ impl PageFetcher {
         .bind(&job.url)
         .bind(resolved_url)
         .bind(&attempt_summary)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        let pruned = self
+            .prune_page_content_versions(&mut tx, &job.normalized_key)
+            .await?;
+        if pruned > 0 {
+            self.metrics.record_page_content_prune(pruned);
+            info!(
+                target = "svc-page-fetcher",
+                normalized_key = %job.normalized_key,
+                pruned,
+                keep = self.cfg.page_content_max_versions_per_key,
+                "pruned older page content versions"
+            );
+        }
+        tx.commit().await?;
         Ok(())
     }
 
-    async fn next_version(&self, normalized_key: &str) -> Result<i64> {
+    async fn lock_page_content_key(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        normalized_key: &str,
+    ) -> Result<()> {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+            .bind(normalized_key)
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
+    }
+
+    async fn next_version_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        normalized_key: &str,
+    ) -> Result<i64> {
         let current: Option<i32> = sqlx::query_scalar::<_, Option<i32>>(
             "SELECT MAX(fetch_version) FROM page_contents WHERE normalized_key = $1",
         )
         .bind(normalized_key)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut **tx)
         .await?;
         Ok(current.unwrap_or(0) as i64 + 1)
+    }
+
+    async fn prune_page_content_versions(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        normalized_key: &str,
+    ) -> Result<u64> {
+        let result = sqlx::query(
+            r#"DELETE FROM page_contents
+               WHERE id IN (
+                   SELECT id
+                   FROM page_contents
+                   WHERE normalized_key = $1
+                   ORDER BY fetch_version DESC, fetched_at DESC, id DESC
+                   OFFSET $2
+               )"#,
+        )
+        .bind(normalized_key)
+        .bind(self.cfg.page_content_max_versions_per_key)
+        .execute(&mut **tx)
+        .await?;
+        Ok(result.rows_affected())
     }
 }
 
@@ -1196,5 +1279,10 @@ mod tests {
         assert!(!mixed_attempts
             .iter()
             .all(|attempt| attempt.reason == "dns_unresolvable"));
+    }
+
+    #[test]
+    fn default_page_content_versions_cap_is_30() {
+        assert_eq!(default_page_content_max_versions_per_key(), 30);
     }
 }

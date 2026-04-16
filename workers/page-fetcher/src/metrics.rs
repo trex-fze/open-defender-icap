@@ -120,6 +120,22 @@ static FETCH_LATENCY: Lazy<Histogram> = Lazy::new(|| {
     prometheus::register_histogram!(opts).unwrap()
 });
 
+static PAGE_CONTENT_PRUNE_RUNS: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_content_prune_runs_total",
+        "Number of page-content retention prune runs"
+    )
+    .unwrap()
+});
+
+static PAGE_CONTENT_PRUNED_ROWS: Lazy<IntCounter> = Lazy::new(|| {
+    prometheus::register_int_counter!(
+        "page_content_pruned_rows_total",
+        "Number of page-content rows pruned by retention cap"
+    )
+    .unwrap()
+});
+
 #[derive(Clone)]
 pub struct MetricsServer;
 
@@ -178,6 +194,11 @@ impl MetricsServer {
 
     pub fn observe_fetch_latency(&self, seconds: f64) {
         FETCH_LATENCY.observe(seconds);
+    }
+
+    pub fn record_page_content_prune(&self, rows_pruned: u64) {
+        PAGE_CONTENT_PRUNE_RUNS.inc();
+        PAGE_CONTENT_PRUNED_ROWS.inc_by(rows_pruned);
     }
 
     pub async fn run(&self, host: String, port: u16) -> Result<()> {
