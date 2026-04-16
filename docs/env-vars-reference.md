@@ -108,5 +108,6 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `COMPOSE_FILE`, `COMPOSE_ENV_FILE` | Override compose file/env path in scripts. |
 | `ADMIN_API_URL`, `ADMIN_TOKEN`, `ADMIN_BEARER` | API endpoint and auth for smoke scripts. |
 | `INTEGRATION_BUILD`, `INTEGRATION_BUILD_RETRIES`, `INTEGRATION_PRUNE_ON_RETRY`, `INTEGRATION_RETRY_DELAY_SECONDS` | Integration script build strategy/retry controls. |
+| `PROFILE`, `RUN_ID`, `ARTIFACT_ROOT`, `AUTO_TEARDOWN`, `RELIABILITY_*`, `RUNBOOK_EVIDENCE_FILE` | `tests/release-gate.sh` controls for profile selection, artifact locations, reliability tuning, teardown behavior, and optional manual evidence check. |
 | `EXPECTED_CLIENT_IP`, `VERIFY_TRUSTED_XFF_PROMOTION` | Proxy identity validation script controls. |
 | `ADMIN_TEST_DATABASE_URL`, `TEST_DOCKER_HOST` | Test-only service integration controls. |

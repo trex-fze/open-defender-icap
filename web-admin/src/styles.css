@@ -1092,7 +1092,7 @@ tr:hover td {
 .login-company-link {
   display: flex;
   justify-content: center;
-  margin: -0.1rem 0 0.8rem;
+  margin: 0 0 0.8rem;
 }
 
 .login-company-link:focus-visible {

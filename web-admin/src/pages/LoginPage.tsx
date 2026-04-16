@@ -98,9 +98,6 @@ export const LoginPage = () => {
           boxShadow: 'var(--auth-shadow)',
         }}
       >
-        <div className="login-brand-wrap">
-          <img src="/brand/logo.png" alt="Open Defender ICAP" className="login-brand-logo" />
-        </div>
         <a
           className="login-company-link"
           href={COMPANY_WEBSITE_URL}
@@ -111,6 +108,9 @@ export const LoginPage = () => {
         >
           <img src="/brand/company/trex-logo.png" alt="TREX" className="login-company-logo" />
         </a>
+        <div className="login-brand-wrap">
+          <img src="/brand/logo.png" alt="Open Defender ICAP" className="login-brand-logo" />
+        </div>
         <p className="section-title">Local Sign-in</p>
         <h2 style={{ marginTop: 0 }}>Welcome back</h2>
         <p style={{ color: 'var(--muted)' }}>Sign in using your local username or email and password.</p>
