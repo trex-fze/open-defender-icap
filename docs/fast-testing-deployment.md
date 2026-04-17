@@ -376,7 +376,8 @@ Use `down -v` only when you explicitly need a clean local data state.
 - When changing `deploy/docker/squid/squid.conf`, apply safely with:
   1. `docker compose --env-file .env -f deploy/docker/docker-compose.yml down`
   2. `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --build`
-  3. `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl migrate run all`
+  3. Shared DB default (`.env.example`): `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl migrate run admin`
+  4. Use `odctl migrate run all` only when `OD_ADMIN_DATABASE_URL` and `OD_POLICY_DATABASE_URL` point to different databases.
 - If integration fails, isolate by stage:
   1. `odctl smoke --profile compose`
   2. `tests/stage06_ingest.sh`

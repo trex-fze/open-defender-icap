@@ -19,7 +19,7 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 1. **Clone repo** and review `docs/engine-adaptor-spec.md` + `docs/architecture.md` for context.
 2. **Install prerequisites**: Rust stable (>=1.80), Node LTS, Docker, docker-compose.
 3. **Bootstrap workspace**: `cargo check`, `npm install` inside `web-admin`, then `make compose-up` (or `docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build` from repo root).
-4. **Run migrations**: `odctl migrate run all` (or `--target admin|policy`) to apply Postgres schema updates before starting services.
+4. **Run migrations**: for the shared-DB default in `.env.example`, use `odctl migrate run admin`; use `odctl migrate run all` only when admin and policy databases are separate.
 5. **Review canonical taxonomy**: `config/canonical-taxonomy.json` now defines the complete category/subcategory tree (including `advertisements/general-advertising`). Operators only toggle allow/deny state via the Admin UI/API; no CLI seeding is required post-Stage 12.
 
 ## 3. Operating the ICAP Adaptor

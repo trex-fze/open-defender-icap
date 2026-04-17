@@ -173,14 +173,21 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    ```bash
    docker compose --env-file .env -f deploy/docker/docker-compose.yml logs --tail=100 llm-worker
    ```
-6. **Run health & smoke checks**:
+6. **Run DB migrations (shared DB default in `.env.example`)**:
+   ```bash
+   docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl migrate run admin
+   ```
+   - `.env.example` defaults `OD_ADMIN_DATABASE_URL` and `OD_POLICY_DATABASE_URL` to the same database (`defender_admin`).
+   - In shared-DB mode, use `odctl migrate run admin`.
+   - Use `odctl migrate run all` only when admin and policy databases are separate.
+7. **Run health & smoke checks**:
    ```bash
    tests/unit.sh                   # workspace + React unit tests
    tests/integration.sh            # docker-compose smoke (odctl + ingest)
    tests/security/authz-smoke.sh   # optional authZ verification
    odctl policy validate --file config/policies.json
    ```
-7. **Stop stack**:
+8. **Stop stack**:
    ```bash
    make compose-down               # docker compose down
    ```

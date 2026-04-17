@@ -66,9 +66,10 @@ This document records the design for the next iteration of the containerized dev
 - **Kibana/Elasticsearch**: built-in health endpoints.
 - Compose docs describe running:
   1. `docker compose up -d postgres redis` → wait for health.
-  2. `docker compose run --rm odctl-runner odctl migrate run all` and `... odctl seed policies config/policies.json default compose`.
-  3. `docker compose up icap-adaptor policy-engine admin-api`.
-  4. `docker compose run --rm odctl-runner odctl smoke icap-adaptor:1344`.
+  2. Shared DB default (`.env.example`): `docker compose run --rm odctl-runner odctl migrate run admin`, then `... odctl seed policies config/policies.json default compose`.
+  3. Use `odctl migrate run all` only when admin and policy DB URLs are different.
+  4. `docker compose up icap-adaptor policy-engine admin-api`.
+  5. `docker compose run --rm odctl-runner odctl smoke icap-adaptor:1344`.
 
 ## Open Questions / Future Work
 - Do we need Squid in the initial stack or can ICAP adaptor be called directly? (Assumption: include Squid now to align with spec.)
