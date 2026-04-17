@@ -13,6 +13,7 @@ Open Defender is an **AI-enhanced, open-source ICAP stack** that blends determin
 - Client proxy manual setup: [Manual Proxy Setup (Linux, macOS, Windows)](docs/deployment/manual-proxy-setup-clients.md)
 - Runtime config deep dive: [Config Files Reference](docs/config-files-reference.md)
 - Infra/deployment config deep dive: [Infra Config Reference](docs/infra-config-reference.md)
+- Linux kernel/sysctl + runtime tuning: [Infra Config Reference - tuning section](docs/infra-config-reference.md#7-linux-host-kernel-and-sysctl-tuning-linux)
 - Validation commands: [Testing & Quality Pipelines](#testing--quality-pipelines)
 
 ## Official project resources
@@ -125,6 +126,25 @@ flowchart LR
     EI --> PR
 ```
 
+## Product Screenshots
+
+### Taxonomy Management
+
+![Taxonomy Management](docs/assets/screenshots/Screenshot_5.png)
+
+### Dashboard Views
+
+<table>
+  <tr>
+    <td><img src="docs/assets/screenshots/Screenshot_1.png" alt="Dashboard view 1" width="100%"></td>
+    <td><img src="docs/assets/screenshots/Screenshot_2.png" alt="Dashboard view 2" width="100%"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/screenshots/Screenshot_3.png" alt="Dashboard view 3" width="100%"></td>
+    <td><img src="docs/assets/screenshots/Screenshot_4.png" alt="Dashboard view 4" width="100%"></td>
+  </tr>
+</table>
+
 ### Why “AI-Enhanced”?
 
 - **LLM-driven queue triage** – `llm-worker` summarizes risky events, proposes verdicts, and captures reviewer rationales.
@@ -186,7 +206,8 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    ```bash
    docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate event-ingester squid haproxy
    ```
-   - Verify on fresh traffic that `client.ip` reflects the LAN client and `od.client_ip_source` is `forwarded` or `x-forwarded-for`.
+    - Verify on fresh traffic that `client.ip` reflects the LAN client and `od.client_ip_source` is `forwarded` or `x-forwarded-for`.
+    - For Linux host kernel/sysctl baseline and compose runtime sizing guidance, see `docs/infra-config-reference.md#7-linux-host-kernel-and-sysctl-tuning-linux`.
 4. **Start stack (policy + AI workers)**:
    ```bash
    make compose-up                 # equivalent to docker compose up --build

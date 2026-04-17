@@ -230,7 +230,153 @@ Adjust retention to legal and storage requirements.
 
 This file is an import payload, not a service runtime config. It seeds baseline traffic/SOC dashboard objects against `traffic-events-*`.
 
-## 7) Infra Drift Checklist
+## 7) Linux Host Kernel and Sysctl Tuning (Linux)
+
+These settings matter most on Linux hosts running Elasticsearch + proxy/log ingest containers under sustained traffic.
+
+## 7.1 Baseline sysctl targets
+
+| Setting | Recommended baseline | Why it matters here |
+| --- | --- | --- |
+| `vm.max_map_count` | `262144` (minimum for Elasticsearch) | Prevents Elasticsearch bootstrap/runtime mmap failures. |
+| `fs.file-max` | `200000`+ | Raises host-wide file descriptor ceiling for proxy/log-heavy workloads. |
+| `net.core.somaxconn` | `1024`+ | Improves accept queue headroom during connection bursts. |
+| `vm.swappiness` | `1` to `10` | Reduces swap pressure and latency spikes under memory load. |
+
+Apply immediately (until reboot):
+
+```bash
+sudo sysctl -w vm.max_map_count=262144
+sudo sysctl -w fs.file-max=200000
+sudo sysctl -w net.core.somaxconn=1024
+sudo sysctl -w vm.swappiness=1
+```
+
+Persist across reboot:
+
+```bash
+cat <<'EOF' | sudo tee /etc/sysctl.d/99-open-defender.conf
+vm.max_map_count=262144
+fs.file-max=200000
+net.core.somaxconn=1024
+vm.swappiness=1
+EOF
+sudo sysctl --system
+```
+
+Verify:
+
+```bash
+sysctl vm.max_map_count fs.file-max net.core.somaxconn vm.swappiness
+```
+
+## 7.2 Transparent Huge Pages (THP) note
+
+Elasticsearch is generally more stable with THP disabled.
+
+Temporary (until reboot):
+
+```bash
+echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag
+```
+
+Verify THP state:
+
+```bash
+cat /sys/kernel/mm/transparent_hugepage/enabled
+cat /sys/kernel/mm/transparent_hugepage/defrag
+```
+
+Use your distro's startup mechanism (`systemd` unit, `rc.local`, or cloud-init) if you need THP disabled persistently.
+
+## 7.3 Symptom-to-knob quick map
+
+- Elasticsearch bootstrap errors mentioning `max virtual memory areas` -> increase `vm.max_map_count`.
+- Frequent `too many open files` in proxy/log components -> raise container `ulimits.nofile` and confirm host `fs.file-max`.
+- Burst traffic drops/reset behavior at ingress -> increase `net.core.somaxconn` and check HAProxy/Squid FD limits.
+- Latency spikes under memory pressure -> reduce `vm.swappiness` and right-size container heap/memory limits.
+
+## 8) Compose Runtime Tuning Patterns
+
+Keep the base compose file unchanged; place host-specific tuning in an override passed as an extra `-f`.
+
+Example invocation from repo root:
+
+```bash
+docker compose --env-file .env -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.override.yml up -d
+```
+
+## 8.1 Example override snippet
+
+```yaml
+services:
+  elasticsearch:
+    environment:
+      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  logstash:
+    environment:
+      LS_JAVA_OPTS: "-Xms512m -Xmx512m"
+
+  kibana:
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=1024"
+
+  postgres:
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+
+  haproxy:
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  squid:
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+```
+
+Tune these values to host capacity:
+
+- Elasticsearch heap (`ES_JAVA_OPTS`) should stay below available RAM after accounting for all other services.
+- Logstash and Kibana heap can stay modest for low-volume dev, but should be increased for high ingest/query volume.
+- Postgres memory knobs must fit remaining memory budget after Elasticsearch/JVM services.
+- `nofile` is a high-impact knob for proxy + log pipeline stability under concurrent traffic.
+
+## 8.2 Runtime verification
+
+Check effective container config:
+
+```bash
+docker compose --env-file .env -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.override.yml config
+```
+
+Check service health and capacity signals:
+
+```bash
+curl -s http://localhost:9200/_cluster/health?pretty
+curl -s http://localhost:9200/_cat/nodes?v
+docker compose --env-file .env -f deploy/docker/docker-compose.yml logs --tail=120 elasticsearch logstash kibana
+```
+
+## 9) Infra Drift Checklist
 
 Use this when validating deployment consistency:
 
@@ -241,7 +387,7 @@ Use this when validating deployment consistency:
 - Stream names across runtime config and compose env still match (`classification-jobs`, `page-fetch-jobs`).
 - Prometheus targets correspond to enabled service set/profile.
 
-## 8) Production Hardening Notes
+## 10) Production Hardening Notes
 
 - Replace all `changeme-*` values before deployment.
 - Restrict published ports to required interfaces only (especially proxy and data-plane ports).
