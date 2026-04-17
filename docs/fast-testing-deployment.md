@@ -99,15 +99,21 @@ Before first startup:
 
 1. Create env file:
    ```bash
-    cp .env.example .env
-    ```
-    - Treat root `/.env` as canonical; avoid `deploy/docker/.env` to prevent precedence drift.
-   - Timezone defaults to `OD_TIMEZONE=Asia/Dubai`; keep `OD_REPORTING_TIMEZONE=Asia/Dubai` unless you intentionally want a different dashboard bucket timezone.
-2. Generate Squid certs:
+     cp .env.example .env
+     ```
+     - Treat root `/.env` as canonical; avoid `deploy/docker/.env` to prevent precedence drift.
+    - Timezone defaults to `OD_TIMEZONE=Asia/Dubai`; keep `OD_REPORTING_TIMEZONE=Asia/Dubai` unless you intentionally want a different dashboard bucket timezone.
+2. Create runtime bind-mount directories:
+   ```bash
+   sudo mkdir -p data/{redis,postgres,elasticsearch,squid-logs,filebeat} logs
+   ```
+   - Keep `data/` and `logs/` readable by your local user; restrictive ownership can cause build-context errors like `failed to solve ... open .../data/postgres: permission denied`.
+   - If hit, run `sudo chown -R "$USER":"$USER" data logs` and retry.
+3. Generate Squid certs:
    ```bash
    make gen-certs
    ```
-3. Verify config files exist and reflect your target test profile:
+4. Verify config files exist and reflect your target test profile:
    - `config/icap.json`
    - `config/policy-engine.json`
    - `config/admin-api.json`

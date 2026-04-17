@@ -153,24 +153,17 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    make gen-certs                  # one-time Squid + web-admin TLS cert generation
    ```
    - Canonical stack env lives at repo root (`.env`); avoid using `deploy/docker/.env`.
-3. **Prepare bind-mount ownership and permissions (Linux/WSL2 hosts)**:
+3. **Prepare bind-mount directories (Linux/WSL2 hosts)**:
    ```bash
-   mkdir -p data/{redis,postgres,elasticsearch,squid-logs,filebeat} logs
-
-   # Elasticsearch writes as uid 1000 in this stack.
-   sudo chown -R 1000:0 data/elasticsearch
-   sudo chmod -R u+rwX,g+rwX data/elasticsearch
-
-   # Postgres 15 alpine writes as uid 70 and expects 0700 on data dir.
-   sudo chown -R 70:0 data/postgres
-   sudo chmod 700 data/postgres
-
-   # Redis, Squid logs, Filebeat registry, and worker logs are root-written in this compose profile.
-   sudo chown -R 0:0 data/redis data/squid-logs data/filebeat logs
-   sudo chmod -R u+rwX,g+rwX data/redis data/squid-logs data/filebeat logs
+   sudo mkdir -p data/{redis,postgres,elasticsearch,squid-logs,filebeat} logs
    ```
-   - Most first-boot failures are ownership issues on `data/elasticsearch` and `data/postgres`.
-   - If startup still fails, inspect service logs and fix only the failing mount path before retrying.
+   - Keep these directories readable by your local user. Restrictive ownership (for example `data/postgres` as `0700` under uid 70) can cause Docker build-context errors such as `failed to solve ... open .../data/postgres: permission denied`.
+   - If that happens, restore local ownership/readability and retry:
+   ```bash
+   sudo chown -R "$USER":"$USER" data logs
+   chmod -R u+rwX data logs
+   ```
+   - If runtime containers then report permission issues, fix only the failing mount path using container logs and service-specific ownership adjustments.
 4. **Start stack (policy + AI workers)**:
    ```bash
    make compose-up                 # equivalent to docker compose up --build

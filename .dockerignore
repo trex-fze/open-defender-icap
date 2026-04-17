@@ -1,0 +1,12 @@
+# Runtime bind-mount state (never needed in image build context)
+data/
+logs/
+
+# Local build/cache outputs
+target/
+web-admin/node_modules/
+web-admin/dist/
+
+# VCS/editor artifacts
+.git/
+.DS_Store
