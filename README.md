@@ -1,4 +1,4 @@
-# Open Defender ICAP – AI-Enhanced Edition
+# Open Defender ICAP
 
 Open Defender is an **AI-enhanced, open-source ICAP stack** that blends deterministic policy engines with LLM-assisted investigations, automated overrides, and full observability. The repo includes Rust microservices (`services/` & `workers/`), a React admin console (`web-admin/`), k6 performance suites, and Docker Compose environments for local and CI validation.
 
@@ -9,6 +9,8 @@ Open Defender is an **AI-enhanced, open-source ICAP stack** that blends determin
 - Runtime endpoints: [Useful URLs](#useful-urls)
 - Environment Variable Catalog: [Environment Variables Reference](docs/env-vars-reference.md)
 - Proxy architecture rationale: [Why HAProxy + Squid](#why-haproxy--squid)
+- Client proxy auto-onboarding: [DHCP Auto Proxy Configuration](docs/deployment/dhcp-proxy-auto-configuration.md)
+- Client proxy manual setup: [Manual Proxy Setup (Linux, macOS, Windows)](docs/deployment/manual-proxy-setup-clients.md)
 - Runtime config deep dive: [Config Files Reference](docs/config-files-reference.md)
 - Infra/deployment config deep dive: [Infra Config Reference](docs/infra-config-reference.md)
 - Validation commands: [Testing & Quality Pipelines](#testing--quality-pipelines)
@@ -211,6 +213,8 @@ Timezone migration note: Postgres init scripts set database/role timezone to `As
 - [Environment Variables Reference](docs/env-vars-reference.md) - complete runtime/frontend/test variable map with grouping and intent.
 - [Config Files Reference](docs/config-files-reference.md) - detailed parameter-by-parameter runtime config reference for `config/*.json`, precedence, validation, and coupling guidance.
 - [Infra Config Reference](docs/infra-config-reference.md) - detailed deployment/config reference for compose, proxy, ingest pipeline, observability, and Elastic/Kibana assets under `deploy/`.
+- [DHCP Auto Proxy Configuration](docs/deployment/dhcp-proxy-auto-configuration.md) - research-grade guide for PAC/WPAD DHCP delivery (including `local-pac-server` style option mapping), security hardening, and staged rollout.
+- [Manual Proxy Setup (Linux, macOS, Windows)](docs/deployment/manual-proxy-setup-clients.md) - quick operator steps to configure, validate, and rollback manual proxy settings per client OS.
 - [Proxy 403 RCA (Docker Desktop)](docs/evidence/proxy-403-docker-desktop-rca-2026-04-09.md) - root cause analysis, remediation, and validation evidence for LAN client `403` on macOS Docker Desktop.
 - [Frontend Management Parity RFC](rfc/stage-10-frontend-management-parity.md) - proposed UI scope to cover all current management features exposed by Admin API/CLI.
 - [Frontend Management Parity Plan](implementation-plan/stage-10-frontend-management-parity.md) - phased implementation plan with task breakdown, quality gates, and rollout steps.
