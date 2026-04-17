@@ -107,8 +107,8 @@ Before first startup:
    ```bash
    sudo mkdir -p data/{redis,postgres,elasticsearch,squid-logs,filebeat} logs
    ```
-   - Keep `data/` and `logs/` readable by your local user; restrictive ownership can cause build-context errors like `failed to solve ... open .../data/postgres: permission denied`.
-   - If hit, run `sudo chown -R "$USER":"$USER" data logs` and retry.
+   - Set appropriate ownership and permissions for `data/` and `logs/` based on your host OS, Docker mode, and security policy.
+   - Restrictive ownership can cause build-context errors like `failed to solve ... open .../data/postgres: permission denied`; if hit, adjust the failing path and retry.
 3. Generate Squid certs:
    ```bash
    make gen-certs

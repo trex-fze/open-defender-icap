@@ -157,13 +157,8 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    ```bash
    sudo mkdir -p data/{redis,postgres,elasticsearch,squid-logs,filebeat} logs
    ```
-   - Keep these directories readable by your local user. Restrictive ownership (for example `data/postgres` as `0700` under uid 70) can cause Docker build-context errors such as `failed to solve ... open .../data/postgres: permission denied`.
-   - If that happens, restore local ownership/readability and retry:
-   ```bash
-   sudo chown -R "$USER":"$USER" data logs
-   chmod -R u+rwX data logs
-   ```
-   - If runtime containers then report permission issues, fix only the failing mount path using container logs and service-specific ownership adjustments.
+   - Set appropriate ownership and permissions for all bind-mounted paths under `data/` and `logs/` based on your host OS, Docker mode, and security policy.
+   - If you see errors such as `failed to solve ... open .../data/postgres: permission denied`, inspect logs for the failing service/path and adjust permissions for that path only, then retry.
 4. **Start stack (policy + AI workers)**:
    ```bash
    make compose-up                 # equivalent to docker compose up --build
