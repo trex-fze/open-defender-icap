@@ -66,6 +66,13 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
      ```
 3. Run `make gen-certs` once to generate Squid and web-admin certificates (`deploy/docker/squid/certs/`, `deploy/docker/web-admin/certs/`).
 4. `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d postgres redis` and wait for healthchecks, or just run `docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build` / `make compose-up` to start everything.
+   - If Kibana remains in "server is not ready yet", bootstrap a new service token and set it in root `.env`:
+     ```bash
+     curl -u elastic:${ELASTIC_PASSWORD:-changeme-elastic} -s -X POST \
+       "http://localhost:9200/_security/service/elastic/kibana/credential/token/od-stack?pretty"
+     ```
+     - Set `ELASTICSEARCH_SERVICEACCOUNTTOKEN=<token.value>` in root `.env`.
+     - Recreate Kibana: `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate kibana`.
 5. Run migrations/seeds as needed:
    - Shared DB default (`.env.example`): `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl migrate run admin`
    - Use `odctl migrate run all` only when `OD_ADMIN_DATABASE_URL` and `OD_POLICY_DATABASE_URL` point to different databases.
@@ -86,6 +93,7 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
 - **Migration mismatch (`failed to execute policy-engine migrations` with `migration ... missing in the resolved migrations`)**: this happens when `migrate run all` is used against a shared admin/policy database. In shared-DB mode, run `odctl migrate run admin`.
 - **Admin API exits with local-auth secret error**: if logs show `OD_LOCAL_AUTH_JWT_SECRET appears to use a default/test value`, generate a strong secret (`openssl rand -base64 48`), set `OD_LOCAL_AUTH_JWT_SECRET` in root `.env`, then restart `admin-api` and `web-admin`.
 - **Proxy returns `403` for all requests (`TCP_DENIED/403`)**: verify `OD_SQUID_ALLOWED_CLIENT_CIDRS` includes the HAProxy->Squid Docker bridge subnet in addition to LAN client CIDRs, then recreate proxy services (`docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate squid haproxy`) and confirm `/tmp/squid.generated.conf` contains expected `acl localnet src ...` entries.
+- **Kibana not ready (`Unable to retrieve version information` / `.security` auth/index errors)**: create a new service token (`/_security/service/elastic/kibana/credential/token/od-stack`), set `ELASTICSEARCH_SERVICEACCOUNTTOKEN` in root `.env`, and recreate `kibana`.
 - **Healthcheck retries**: Postgres/Elasticsearch may take >30s on first boot. Check `docker compose logs <service>` and confirm the expected passwords match `.env`.
 - **Port conflicts**: adjust published ports by overriding the compose file (e.g., `docker compose -f docker-compose.yml -f overrides.yml up`).
 - **Proxy `403` despite reachable `:3128` on Docker Desktop/macOS**: this is often source ACL mismatch caused by Desktop NAT rewrite before HAProxy/Squid evaluate `src`. For dev, set `OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0`, recreate `haproxy` + `squid`, and enforce LAN-only access to `3128` at host/router firewall.

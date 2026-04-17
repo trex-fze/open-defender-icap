@@ -200,14 +200,28 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    - `.env.example` defaults `OD_ADMIN_DATABASE_URL` and `OD_POLICY_DATABASE_URL` to the same database (`defender_admin`).
    - In shared-DB mode, use `odctl migrate run admin`.
    - Use `odctl migrate run all` only when admin and policy databases are separate.
-7. **Run health & smoke checks**:
+7. **If Kibana shows "server is not ready yet", bootstrap a fresh service token**:
+   ```bash
+   curl -u elastic:${ELASTIC_PASSWORD:-changeme-elastic} -s -X POST \
+     "http://localhost:9200/_security/service/elastic/kibana/credential/token/od-stack?pretty"
+   ```
+   - Copy `token.value` from the response into root `.env` as `ELASTICSEARCH_SERVICEACCOUNTTOKEN=<token.value>`.
+   - Recreate Kibana:
+   ```bash
+   docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate kibana
+   ```
+   - Verify readiness:
+   ```bash
+   curl -s "http://localhost:5601/api/status"
+   ```
+8. **Run health & smoke checks**:
    ```bash
    tests/unit.sh                   # workspace + React unit tests
    tests/integration.sh            # docker-compose smoke (odctl + ingest)
    tests/security/authz-smoke.sh   # optional authZ verification
    odctl policy validate --file config/policies.json
    ```
-8. **Stop stack**:
+9. **Stop stack**:
    ```bash
    make compose-down               # docker compose down
    ```

@@ -127,8 +127,18 @@ Before first startup:
 4. Verify config files exist and reflect your target test profile:
    - `config/icap.json`
    - `config/policy-engine.json`
-   - `config/admin-api.json`
-   - `config/llm-worker.json`
+    - `config/admin-api.json`
+    - `config/llm-worker.json`
+
+If Kibana stays in "server is not ready yet", bootstrap a fresh Kibana service token:
+
+```bash
+curl -u elastic:${ELASTIC_PASSWORD:-changeme-elastic} -s -X POST \
+  "http://localhost:9200/_security/service/elastic/kibana/credential/token/od-stack?pretty"
+```
+
+- Set `ELASTICSEARCH_SERVICEACCOUNTTOKEN=<token.value>` in root `.env`.
+- Recreate Kibana: `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate kibana`.
 
 Compose defaults the LLM worker to a **real-first** profile: LM Studio at `http://192.168.1.170:1234` with OpenAI (`gpt-4o-mini`) as fallback.
 - Ensure the host running docker can reach `192.168.1.170`. If not, set `OPENAI_API_KEY` before running smokes so fallback has credentials.
