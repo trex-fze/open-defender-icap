@@ -107,6 +107,13 @@ Before first startup:
      ```bash
      openssl rand -base64 48
      ```
+   - Set `OD_SQUID_ALLOWED_CLIENT_CIDRS` to include both client LAN CIDR(s) and HAProxy->Squid Docker bridge CIDR(s); otherwise Squid can return `TCP_DENIED/403` for all requests.
+   - Discover bridge CIDR from repo root:
+     ```bash
+     HAPROXY_ID=$(docker compose --env-file .env -f deploy/docker/docker-compose.yml ps -q haproxy)
+     NET_NAME=$(docker inspect "$HAPROXY_ID" --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}')
+     docker network inspect "$NET_NAME" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
+     ```
 2. Create runtime bind-mount directories:
    ```bash
    sudo mkdir -p data/{redis,postgres,elasticsearch,squid-logs,filebeat} logs

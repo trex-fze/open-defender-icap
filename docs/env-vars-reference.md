@@ -60,9 +60,23 @@ OD_LOCAL_AUTH_JWT_SECRET=<paste-generated-secret>
 | --- | --- |
 | `OD_HAPROXY_BIND_HOST`, `OD_HAPROXY_BIND_PORT` | Host-published HAProxy listener. |
 | `OD_HAPROXY_BACKEND_HOST`, `OD_HAPROXY_BACKEND_PORT`, `OD_HAPROXY_LISTEN_PORT` | HAProxy render template internals. |
-| `OD_SQUID_ALLOWED_CLIENT_CIDRS` | Source CIDR allow-list at HAProxy/Squid edge. |
+| `OD_SQUID_ALLOWED_CLIENT_CIDRS` | Source CIDR allow-list at HAProxy/Squid edge. Include client LAN CIDRs and HAProxy->Squid Docker bridge CIDR(s) (for example `192.168.1.0/24,172.18.0.0/16`). |
 | `OD_TRUST_PROXY_HEADERS` | Enable/disable forwarded-header trust for ingress identity. |
 | `OD_TRUSTED_PROXY_CIDRS` | CIDRs allowed to supply trusted forwarded headers. |
+
+CIDR discovery for `OD_SQUID_ALLOWED_CLIENT_CIDRS` (run from repo root):
+
+```bash
+HAPROXY_ID=$(docker compose --env-file .env -f deploy/docker/docker-compose.yml ps -q haproxy)
+NET_NAME=$(docker inspect "$HAPROXY_ID" --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}')
+docker network inspect "$NET_NAME" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
+```
+
+After updating root `.env`, recreate proxy services:
+
+```bash
+docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate squid haproxy
+```
 
 ## LLM and pending-queue controls
 

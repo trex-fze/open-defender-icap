@@ -165,6 +165,20 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    ```
    - Set appropriate ownership and permissions for all bind-mounted paths under `data/` and `logs/` based on your host OS, Docker mode, and security policy.
    - If you see errors such as `failed to solve ... open .../data/postgres: permission denied`, inspect logs for the failing service/path and adjust permissions for that path only, then retry.
+   - Configure proxy client allow-list CIDRs in root `.env` via `OD_SQUID_ALLOWED_CLIENT_CIDRS`.
+     - Include your client LAN CIDR (for example `192.168.1.0/24`).
+     - Include the Docker bridge CIDR used by HAProxy -> Squid (for example `172.18.0.0/16`), otherwise Squid can return `TCP_DENIED/403` for all requests.
+   ```bash
+   HAPROXY_ID=$(docker compose --env-file .env -f deploy/docker/docker-compose.yml ps -q haproxy)
+   NET_NAME=$(docker inspect "$HAPROXY_ID" --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}')
+   docker network inspect "$NET_NAME" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
+   ```
+   - Example `.env` value: `OD_SQUID_ALLOWED_CLIENT_CIDRS=192.168.1.0/24,172.18.0.0/16`
+   - After updating `.env`, recreate proxy services and verify rendered ACLs:
+   ```bash
+   docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate squid haproxy
+   docker compose --env-file .env -f deploy/docker/docker-compose.yml exec -T squid sh -lc 'grep -n "acl localnet src" /tmp/squid.generated.conf'
+   ```
 4. **Start stack (policy + AI workers)**:
    ```bash
    make compose-up                 # equivalent to docker compose up --build

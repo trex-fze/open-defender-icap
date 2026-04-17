@@ -57,6 +57,13 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
 1. Ensure Docker Desktop/Engine is running and ports 1344, 19000, 19001, 19005, 19010, 3128, 5432, 6379, 9200, 5601, 9090 are free.
 2. Copy `.env.example` → `.env` (edit tokens/passwords as needed).
    - Timezone defaults to `OD_TIMEZONE=Asia/Dubai`; keep `OD_REPORTING_TIMEZONE` aligned unless you intentionally want different dashboard bucket timezone.
+   - Set `OD_SQUID_ALLOWED_CLIENT_CIDRS` to include both client LAN CIDR(s) and the Docker bridge CIDR used by HAProxy -> Squid. Example: `OD_SQUID_ALLOWED_CLIENT_CIDRS=192.168.1.0/24,172.18.0.0/16`.
+   - Discover the active HAProxy docker-network subnet from repo root:
+     ```bash
+     HAPROXY_ID=$(docker compose --env-file .env -f deploy/docker/docker-compose.yml ps -q haproxy)
+     NET_NAME=$(docker inspect "$HAPROXY_ID" --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}')
+     docker network inspect "$NET_NAME" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
+     ```
 3. Run `make gen-certs` once to generate Squid and web-admin certificates (`deploy/docker/squid/certs/`, `deploy/docker/web-admin/certs/`).
 4. `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d postgres redis` and wait for healthchecks, or just run `docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build` / `make compose-up` to start everything.
 5. Run migrations/seeds as needed:
@@ -78,6 +85,7 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
 - **Build failures (workspace compile)**: ensure `cargo build --release` succeeds locally; the multi-service image relies on the workspace compiling cleanly.
 - **Migration mismatch (`failed to execute policy-engine migrations` with `migration ... missing in the resolved migrations`)**: this happens when `migrate run all` is used against a shared admin/policy database. In shared-DB mode, run `odctl migrate run admin`.
 - **Admin API exits with local-auth secret error**: if logs show `OD_LOCAL_AUTH_JWT_SECRET appears to use a default/test value`, generate a strong secret (`openssl rand -base64 48`), set `OD_LOCAL_AUTH_JWT_SECRET` in root `.env`, then restart `admin-api` and `web-admin`.
+- **Proxy returns `403` for all requests (`TCP_DENIED/403`)**: verify `OD_SQUID_ALLOWED_CLIENT_CIDRS` includes the HAProxy->Squid Docker bridge subnet in addition to LAN client CIDRs, then recreate proxy services (`docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate squid haproxy`) and confirm `/tmp/squid.generated.conf` contains expected `acl localnet src ...` entries.
 - **Healthcheck retries**: Postgres/Elasticsearch may take >30s on first boot. Check `docker compose logs <service>` and confirm the expected passwords match `.env`.
 - **Port conflicts**: adjust published ports by overriding the compose file (e.g., `docker compose -f docker-compose.yml -f overrides.yml up`).
 - **Proxy `403` despite reachable `:3128` on Docker Desktop/macOS**: this is often source ACL mismatch caused by Desktop NAT rewrite before HAProxy/Squid evaluate `src`. For dev, set `OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0`, recreate `haproxy` + `squid`, and enforce LAN-only access to `3128` at host/router firewall.
