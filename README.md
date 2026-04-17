@@ -153,20 +153,46 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    make gen-certs                  # one-time Squid + web-admin TLS cert generation
    ```
    - Canonical stack env lives at repo root (`.env`); avoid using `deploy/docker/.env`.
-3. **Start stack (policy + AI workers)**:
+3. **Prepare bind-mount ownership and permissions (Linux/WSL2 hosts)**:
+   ```bash
+   mkdir -p data/{redis,postgres,elasticsearch,squid-logs,filebeat} logs
+
+   # Elasticsearch writes as uid 1000 in this stack.
+   sudo chown -R 1000:0 data/elasticsearch
+   sudo chmod -R u+rwX,g+rwX data/elasticsearch
+
+   # Postgres 15 alpine writes as uid 70 and expects 0700 on data dir.
+   sudo chown -R 70:0 data/postgres
+   sudo chmod 700 data/postgres
+
+   # Redis, Squid logs, Filebeat registry, and worker logs are root-written in this compose profile.
+   sudo chown -R 0:0 data/redis data/squid-logs data/filebeat logs
+   sudo chmod -R u+rwX,g+rwX data/redis data/squid-logs data/filebeat logs
+   ```
+   - Most first-boot failures are ownership issues on `data/elasticsearch` and `data/postgres`.
+   - If startup still fails, inspect service logs and fix only the failing mount path before retrying.
+4. **Start stack (policy + AI workers)**:
    ```bash
    make compose-up                 # equivalent to docker compose up --build
    ```
    - Docker compose defaults `llm-worker` routing to local LM Studio with OpenAI fallback (see `config/llm-worker.json`).
    - To use LM Studio/Ollama/OpenAI instead, edit `config/llm-worker.json` providers/routing and restart `llm-worker`.
-4. **Run health & smoke checks**:
+5. **Configure LLM provider access (required for AI operations)**:
+   - At least one reachable LLM provider is required for classification workflows (`ContentPending` resolution and AI verdict generation).
+   - Configure provider and routing settings in `config/llm-worker.json` (`providers[]`, `routing.default`, `routing.fallback`).
+   - For online providers, set credentials in `.env` (for example `OPENAI_API_KEY`).
+   - Verify worker/provider readiness:
+   ```bash
+   docker compose --env-file .env -f deploy/docker/docker-compose.yml logs --tail=100 llm-worker
+   ```
+6. **Run health & smoke checks**:
    ```bash
    tests/unit.sh                   # workspace + React unit tests
    tests/integration.sh            # docker-compose smoke (odctl + ingest)
    tests/security/authz-smoke.sh   # optional authZ verification
    odctl policy validate --file config/policies.json
    ```
-5. **Stop stack**:
+7. **Stop stack**:
    ```bash
    make compose-down               # docker compose down
    ```
