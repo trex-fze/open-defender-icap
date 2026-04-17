@@ -7,7 +7,9 @@ Open Defender is an **AI-enhanced, open-source ICAP stack** that blends determin
 - New operator path: [Quick Start (Docker Compose)](#quick-start-docker-compose)
 - Frontend HTTPS setup: [Frontend TLS (local/dev default)](#frontend-tls-localdev-default)
 - Runtime endpoints: [Useful URLs](#useful-urls)
-- Config catalog: [Key Environment Variables](#key-environment-variables)
+- Environment Variable Catalog: [Environment Variables Reference](docs/env-vars-reference.md)
+- Runtime config deep dive: [Config Files Reference](docs/config-files-reference.md)
+- Infra/deployment config deep dive: [Infra Config Reference](docs/infra-config-reference.md)
 - Validation commands: [Testing & Quality Pipelines](#testing--quality-pipelines)
 
 ## Official project resources
@@ -149,6 +151,7 @@ flowchart LR
    tests/unit.sh                   # workspace + React unit tests
    tests/integration.sh            # docker-compose smoke (odctl + ingest)
    tests/security/authz-smoke.sh   # optional authZ verification
+   odctl policy validate --file config/policies.json
    ```
 5. **Stop stack**:
    ```bash
@@ -179,53 +182,13 @@ flowchart LR
 | Prometheus + Alerts | http://localhost:9090 |
 | Web Admin UI (LLM insights) | https://localhost:19001 |
 
-## Key Environment Variables
+## Environment Variable Catalog
 
-| Variable | Description |
-| --- | --- |
-| `OD_ADMIN_TOKEN` | Shared secret for Admin API/CLI auth (used by `odctl` and tests). Required for AI-assisted dashboards/CLI. |
-| `OD_ADMIN_DATABASE_URL` / `DATABASE_URL` | Postgres connection string for Admin API (`OD_ADMIN_DATABASE_URL` preferred for compose stacks). |
-| `OD_POLICY_DATABASE_URL` | Postgres URL for Policy Engine (compose defaults this to the shared `defender_admin` DB; override only when intentionally separating runtime storage). |
-| `OD_ADMIN_CORS_ALLOW_ORIGIN` | Allowed browser origin for Admin API CORS responses (default `https://localhost:19001` for local web-admin). |
-| `OD_CACHE_REDIS_URL` | Redis address for cache invalidation. |
-| `OD_CACHE_CHANNEL` | Redis pub/sub channel for cache busting. |
-| `OD_TIMEZONE` | Platform timezone propagated to compose services (`TZ`) and used as the default reporting timezone baseline (default `Asia/Dubai`). |
-| `OD_OIDC_ISSUER` / `OD_OIDC_AUDIENCE` / `OD_OIDC_HS256_SECRET` | Enables HS256 or OIDC device flow auth so AI tooling honors RBAC. |
-| `OD_REVIEW_SLA_SECONDS` | SLA threshold for review metrics (default 14,400s). |
-| `OD_ELASTIC_URL` / `OD_ELASTIC_INDEX_PREFIX` | Event-ingester destination and index prefix (default prefix `traffic-events`). |
-| `OD_ELASTIC_USERNAME` / `OD_ELASTIC_PASSWORD` / `OD_ELASTIC_API_KEY` | Event-ingester auth to Elasticsearch. |
-| `OD_FILEBEAT_SECRET` | Shared secret between Filebeat and event-ingester. |
-| `OD_REPORTING_ELASTIC_URL` / `OD_REPORTING_INDEX_PATTERN` | Reporting backend used by `/api/v1/reporting/*`. |
-| `OD_REPORTING_ELASTIC_USERNAME` / `OD_REPORTING_ELASTIC_PASSWORD` / `OD_REPORTING_ELASTIC_API_KEY` | Reporting query auth (password defaults to `ELASTIC_PASSWORD` in compose). |
-| `OD_REPORTING_TIMEZONE` | Dashboard/report aggregation timezone for Elasticsearch date histograms (default `Asia/Dubai`). |
-| `OD_PROMETHEUS_URL` | Prometheus base URL used by Admin API operations telemetry rollups (`/api/v1/reporting/ops-summary`) shown in Dashboard. |
-| `OD_OPS_HEALTH_ENABLED` / `OD_OPS_HEALTH_TTL_SECS` / `OD_OPS_HEALTH_TIMEOUT_MS` | Controls Admin API aggregated platform-health endpoint (`/api/v1/ops/platform-health`) used by Dashboard component availability panel. |
-| `OD_POLICY_ENGINE_URL` | Admin API -> Policy Engine URL override (default `http://policy-engine:19010`). |
-| `OD_HAPROXY_BIND_HOST` / `OD_HAPROXY_BIND_PORT` | External proxy listener published by HAProxy (default `0.0.0.0:3128`); clients connect to this endpoint. |
-| `OD_SQUID_ALLOWED_CLIENT_CIDRS` | Comma-separated client CIDRs allowed at the HAProxy edge before forwarding to Squid. On Docker Desktop/macOS, container-visible peer IP can be rewritten; in that dev profile use `0.0.0.0/0` with LAN firewall restrictions on port `3128`. |
-| `OD_TRUST_PROXY_HEADERS` | Enables forwarded header trust in event-ingester (`true`/`false`, default `false`). Keep `false` unless ingress headers are overwritten and trusted by CIDR. |
-| `OD_TRUSTED_PROXY_CIDRS` | Comma-separated trusted ingress CIDRs used by Squid `follow_x_forwarded_for` and event-ingester header trust gating. |
-| `OD_LOG_DIR` | Local directory for worker JSON logs (default `logs`; llm-worker writes `logs/llm-worker/llm-worker.log`). |
-| `OD_LLM_FAILOVER_POLICY` | Provider failover policy override: `safe`, `aggressive`, or `disabled` (default runtime fallback is `aggressive`; config can set `safe`). |
-| `OD_LLM_PRIMARY_RETRY_MAX` / `OD_LLM_PRIMARY_RETRY_BACKOFF_MS` / `OD_LLM_PRIMARY_RETRY_MAX_BACKOFF_MS` | Primary-provider retry budget and backoff controls. |
-| `OD_LLM_RETRYABLE_STATUS_CODES` / `OD_LLM_FALLBACK_COOLDOWN_SECS` / `OD_LLM_FALLBACK_MAX_PER_MIN` | Retry classification + fallback cooldown/rate limiting. |
-| `OD_LLM_PROVIDERS_URL` | Admin API upstream provider-catalog URL for dashboard ops status proxy (`/api/v1/ops/llm/providers`); defaults to `http://llm-worker:19015/providers`. |
-| `OD_LLM_PROVIDER_HEALTH_TTL_SECS` / `OD_LLM_PROVIDER_HEALTH_TIMEOUT_MS` | LLM worker provider-health probe cache TTL and HTTP probe timeout for `/providers` status fields. |
-| `OPENAI_API_KEY` | API key for OpenAI-compatible providers (used when `type=openai/openai_compatible`). |
-| `LLM_API_KEY` | Legacy fallback for single-endpoint deployments. |
-| `VITE_ADMIN_API_URL` / `VITE_ADMIN_API_FALLBACK` / `VITE_ADMIN_TOKEN_MODE` | Frontend API base + auth header mode from `web-admin/.env` (leave API URL empty for same-origin `/api/*`). |
-| `VITE_ADMIN_API_PROXY_TARGET` | Vite dev-server proxy target for `/api/*` in standalone frontend development (recommended `http://localhost:19000`). |
-| `VITE_HTTPS_ENABLED` / `VITE_HTTPS_CERT_FILE` / `VITE_HTTPS_KEY_FILE` | Optional standalone Vite HTTPS controls when not using nginx compose frontend. |
-| `VITE_LLM_PROVIDERS_URL` | Optional frontend override for direct dashboard provider-status fetch; leave unset to use Admin API proxy by default. |
-| `INGEST_URL`, `ELASTIC_URL`, `ADMIN_URL` | Overrides used by Stage 6/7 smoke scripts. |
+The complete environment variable catalog now lives in `docs/env-vars-reference.md`.
 
-### Proxy ACL deployment profiles
-
-- **Docker Desktop/macOS (development)**: source IP can be NAT-rewritten before HAProxy/Squid ACL evaluation; use `OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0` and restrict `3128` to LAN via host/router firewall.
-- **Linux-hosted proxy (production-like)**: preserve strict source ACLs such as `OD_SQUID_ALLOWED_CLIENT_CIDRS=192.168.1.0/24` (or tighter `/32`) and validate with `tests/proxy-production-linux-e2e.sh`.
-- **Filtering chain caution**: avoid placing upstream block/warning page injectors ahead of this stack for classified traffic; interstitial content can be misclassified as the destination.
-
-> See `docs/env-vars-reference.md` for the complete runtime/frontend/test variable catalog and `web-admin/.env.example` for standalone frontend defaults.
+- Use `docs/env-vars-reference.md` for runtime, frontend, test, and compose variable definitions.
+- Use `web-admin/.env.example` for standalone frontend defaults.
+- For proxy ACL profiles and trust-header guidance, see `docs/env-vars-reference.md` and `docs/infra-config-reference.md`.
 
 Timezone migration note: Postgres init scripts set database/role timezone to `Asia/Dubai` for new volumes. Existing Postgres data directories keep prior timezone until you run `ALTER DATABASE ... SET timezone` and reconnect sessions.
 
@@ -235,6 +198,8 @@ Timezone migration note: Postgres init scripts set database/role timezone to `As
 - [Fast Testing Deployment Guide](docs/fast-testing-deployment.md) - quick setup for end-to-end local testing, including client proxy config, env vars, startup/shutdown, and FAQ.
 - [Environment File Organization Plan](docs/env-file-organization-plan.md) - canonical `.env` strategy and migration checklist to avoid compose precedence drift.
 - [Environment Variables Reference](docs/env-vars-reference.md) - complete runtime/frontend/test variable map with grouping and intent.
+- [Config Files Reference](docs/config-files-reference.md) - detailed parameter-by-parameter runtime config reference for `config/*.json`, precedence, validation, and coupling guidance.
+- [Infra Config Reference](docs/infra-config-reference.md) - detailed deployment/config reference for compose, proxy, ingest pipeline, observability, and Elastic/Kibana assets under `deploy/`.
 - [Proxy 403 RCA (Docker Desktop)](docs/evidence/proxy-403-docker-desktop-rca-2026-04-09.md) - root cause analysis, remediation, and validation evidence for LAN client `403` on macOS Docker Desktop.
 - [Frontend Management Parity RFC](rfc/stage-10-frontend-management-parity.md) - proposed UI scope to cover all current management features exposed by Admin API/CLI.
 - [Frontend Management Parity Plan](implementation-plan/stage-10-frontend-management-parity.md) - phased implementation plan with task breakdown, quality gates, and rollout steps.

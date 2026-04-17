@@ -1,5 +1,5 @@
 {
-  "version": "2026-03-22",
+  "version": "2026-04-17-default",
   "rules": [
     {
       "id": "block-malware",
@@ -7,16 +7,26 @@
       "priority": 5,
       "action": "Block",
       "conditions": {
-        "categories": ["Malware / Phishing / Fraud"]
+        "domains": null,
+        "categories": ["Malware / Phishing / Fraud"],
+        "users": null,
+        "groups": null,
+        "source_ips": null,
+        "risk_levels": null
       }
     },
     {
-      "id": "monitor-social",
-      "description": "Monitor social media",
+      "id": "block-adult-sexual-content",
+      "description": "Block Adult / Sexual Content",
       "priority": 50,
-      "action": "Monitor",
+      "action": "Block",
       "conditions": {
-        "categories": ["Social Media"]
+        "domains": null,
+        "categories": ["Adult / Sexual Content"],
+        "users": null,
+        "groups": null,
+        "source_ips": null,
+        "risk_levels": null
       }
     },
     {
@@ -24,7 +34,14 @@
       "description": "Allow everything else",
       "priority": 1000,
       "action": "Allow",
-      "conditions": {}
+      "conditions": {
+        "domains": null,
+        "categories": null,
+        "users": null,
+        "groups": null,
+        "source_ips": null,
+        "risk_levels": null
+      }
     }
   ]
 }

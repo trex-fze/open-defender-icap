@@ -33,6 +33,64 @@ This guide targets administrators, SOC analysts, DevOps/SRE, and support enginee
 - Policies reside in `config/policies.json`; `GET /api/v1/policies` lists active rules, `POST /api/v1/policies/reload` hot-reloads from the DSL/DB, `POST /api/v1/policies` (DB mode only) creates a new policy document, and `POST /api/v1/policies/simulate` evaluates a sample request without enforcing it (`mode=runtime` by default, `mode=policy_only` optional for pure rule debugging).
 - Action semantics on the ICAP hot path: `Allow`/`Monitor` pass through, `Block`/`Warn`/`RequireApproval` block, `Review` blocks with review-specific messaging, and `ContentPending` serves the holding page while pending/job orchestration runs.
 - Policy condition keys are strict: use only `domains`, `categories`, `users`, `groups`, `source_ips`, and `risk_levels` (unknown keys are rejected by validation).
+- Default policy rules example (for `config/policies.json`):
+
+```json
+{
+  "version": "2026-04-17-default",
+  "rules": [
+    {
+      "id": "block-malware",
+      "description": "Block domains tagged as malware",
+      "priority": 5,
+      "action": "Block",
+      "conditions": {
+        "domains": null,
+        "categories": ["Malware / Phishing / Fraud"],
+        "users": null,
+        "groups": null,
+        "source_ips": null,
+        "risk_levels": null
+      }
+    },
+    {
+      "id": "block-adult-sexual-content",
+      "description": "Block Adult / Sexual Content",
+      "priority": 50,
+      "action": "Block",
+      "conditions": {
+        "domains": null,
+        "categories": ["Adult / Sexual Content"],
+        "users": null,
+        "groups": null,
+        "source_ips": null,
+        "risk_levels": null
+      }
+    },
+    {
+      "id": "allow-default",
+      "description": "Allow everything else",
+      "priority": 1000,
+      "action": "Allow",
+      "conditions": {
+        "domains": null,
+        "categories": null,
+        "users": null,
+        "groups": null,
+        "source_ips": null,
+        "risk_levels": null
+      }
+    }
+  ]
+}
+```
+
+- For schema details and authoring notes, see `docs/config-files-reference.md` (`config/policies.json` section).
+- Validate your policy file before publish/import:
+
+```bash
+odctl policy validate --file config/policies.json
+```
 - Policy-engine policy mutation/admin endpoints are compatibility-only and emit deprecation headers; use Admin API `/api/v1/policies*` for operator workflows.
 - Policy updates: `PUT /api/v1/policies/<policy_id|current>` accepts a JSON body (`version`, `status=draft|archived`, optional `notes`, optional `rules`) and requires the `policy-editor` role. Promotion to active is only via `POST /api/v1/policies/:id/publish` (`policy-admin`). Hard delete is `DELETE /api/v1/policies/:id` (`policy-admin`). Every create/update stores a snapshot in `policy_versions` for audit/history.
 - Active-policy continuity guard: disabling (`status=archived`) or deleting the currently active policy is rejected with `409 ACTIVE_POLICY_GUARD`; activate another policy first.
