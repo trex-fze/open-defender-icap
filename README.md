@@ -179,6 +179,14 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate squid haproxy
    docker compose --env-file .env -f deploy/docker/docker-compose.yml exec -T squid sh -lc 'grep -n "acl localnet src" /tmp/squid.generated.conf'
    ```
+   - If dashboard traffic identity still shows Docker bridge IPs (for example `172.18.x.x`) instead of real client LAN IPs, enable trusted proxy header promotion in root `.env`:
+     - `OD_TRUST_PROXY_HEADERS=true`
+     - `OD_TRUSTED_PROXY_CIDRS=172.18.0.0/16`
+   - Recreate identity-path services after updating `.env`:
+   ```bash
+   docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate event-ingester squid haproxy
+   ```
+   - Verify on fresh traffic that `client.ip` reflects the LAN client and `od.client_ip_source` is `forwarded` or `x-forwarded-for`.
 4. **Start stack (policy + AI workers)**:
    ```bash
    make compose-up                 # equivalent to docker compose up --build
