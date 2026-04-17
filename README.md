@@ -214,14 +214,40 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    ```bash
    curl -s "http://localhost:5601/api/status"
    ```
-8. **Run health & smoke checks**:
+8. **If Dashboard Usage charts do not update, verify Filebeat -> ingest pipeline**:
+   - This validates data flow for Usage graphs such as `Frequently Accessed Domains` and `Blocked Domains`.
+   - Fix Filebeat config ownership/permissions:
+   ```bash
+   sudo chown root:root deploy/docker/filebeat/filebeat.yml
+   sudo chmod 644 deploy/docker/filebeat/filebeat.yml
+   ```
+   - Recreate Filebeat (and optionally Logstash):
+   ```bash
+   docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate filebeat logstash
+   ```
+   - Verify Filebeat is healthy and publishing:
+   ```bash
+   docker compose --env-file .env -f deploy/docker/docker-compose.yml logs --tail=120 filebeat
+   ```
+   - Expected: no ownership error, active harvester/publish activity.
+   - Verify event ingestion path:
+   ```bash
+   docker compose --env-file .env -f deploy/docker/docker-compose.yml logs --tail=120 event-ingester
+   ```
+   - Verify Elasticsearch has fresh traffic docs:
+   ```bash
+   curl -u elastic:${ELASTIC_PASSWORD:-changeme-elastic} -s "http://localhost:9200/_cat/indices/traffic-events-*?v&s=docs.count:desc"
+   curl -u elastic:${ELASTIC_PASSWORD:-changeme-elastic} -s "http://localhost:9200/traffic-events-*/_search?size=1&sort=@timestamp:desc"
+   ```
+   - Optional follow-up: if docs are present but UI is stale, switch dashboard range to `24h` and hard refresh the browser.
+9. **Run health & smoke checks**:
    ```bash
    tests/unit.sh                   # workspace + React unit tests
    tests/integration.sh            # docker-compose smoke (odctl + ingest)
    tests/security/authz-smoke.sh   # optional authZ verification
    odctl policy validate --file config/policies.json
    ```
-9. **Stop stack**:
+10. **Stop stack**:
    ```bash
    make compose-down               # docker compose down
    ```
