@@ -16,7 +16,7 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `OD_ADMIN_DATABASE_URL`, `OD_POLICY_DATABASE_URL`, `OD_TAXONOMY_DATABASE_URL`, `DATABASE_URL` | Database URLs used by admin/policy services. |
 | `OD_ADMIN_URL`, `OD_POLICY_URL`, `OD_POLICY_ENGINE_URL` | Internal service URLs used by tooling and service-to-service calls. |
 | `OD_AUTH_MODE` | Admin auth mode (`local`, `hybrid`, `oidc`). |
-| `OD_LOCAL_AUTH_JWT_SECRET`, `OD_DEFAULT_ADMIN_PASSWORD` | Local auth bootstrap secrets. |
+| `OD_LOCAL_AUTH_JWT_SECRET`, `OD_DEFAULT_ADMIN_PASSWORD` | Local auth bootstrap secrets (`OD_LOCAL_AUTH_JWT_SECRET` must be strong/non-default in local/hybrid mode). |
 | `OD_LOCAL_AUTH_TTL_SECONDS`, `OD_LOCAL_AUTH_MAX_FAILED_ATTEMPTS`, `OD_LOCAL_AUTH_LOCKOUT_SECONDS`, `OD_LOCAL_AUTH_REFRESH_TTL_SECONDS`, `OD_LOCAL_AUTH_REFRESH_MAX_SESSIONS` | Local auth access-token/refresh-token and lockout controls. |
 | `OD_IAM_SERVICE_TOKEN_TTL_DAYS` | Default service-account token expiry window in days (used when `expires_at` is omitted on create/rotate). |
 | `OD_OIDC_ISSUER`, `OD_OIDC_AUDIENCE`, `OD_OIDC_HS256_SECRET` | OIDC/JWT validation parameters. |
@@ -24,6 +24,21 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `OD_TIMEZONE` | Platform timezone baseline propagated to compose services (`TZ`) and used as default reporting timezone (`Asia/Dubai`). |
 
 ## Reporting, ingest, and telemetry
+
+## Local auth secret requirements
+
+- `OD_LOCAL_AUTH_JWT_SECRET` is required when `OD_AUTH_MODE=local` or `OD_AUTH_MODE=hybrid`.
+- Use a strong random value (recommended: 32+ characters).
+- Do not use placeholder-like values such as `changeme`, `default`, or `test`.
+- Generate a strong secret with OpenSSL and set it in root `/.env`:
+
+```bash
+openssl rand -base64 48
+```
+
+```env
+OD_LOCAL_AUTH_JWT_SECRET=<paste-generated-secret>
+```
 
 | Variable | Purpose |
 | --- | --- |

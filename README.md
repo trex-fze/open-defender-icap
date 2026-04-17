@@ -153,6 +153,12 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    make gen-certs                  # one-time Squid + web-admin TLS cert generation
    ```
    - Canonical stack env lives at repo root (`.env`); avoid using `deploy/docker/.env`.
+   - Set a strong local auth JWT secret in root `.env` (required for `OD_AUTH_MODE=local|hybrid`):
+   ```bash
+   openssl rand -base64 48
+   ```
+   - Set `OD_LOCAL_AUTH_JWT_SECRET=<generated-secret>` in `.env`.
+   - If `admin-api` logs `OD_LOCAL_AUTH_JWT_SECRET appears to use a default/test value`, rotate this value and restart `admin-api` then `web-admin`.
 3. **Prepare bind-mount directories (Linux/WSL2 hosts)**:
    ```bash
    sudo mkdir -p data/{redis,postgres,elasticsearch,squid-logs,filebeat} logs

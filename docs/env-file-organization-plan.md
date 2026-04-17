@@ -29,7 +29,7 @@ Eliminate environment file ambiguity across local development, docker compose, t
 
 ## Enforced behavior
 
-- All compose entrypoints should explicitly pass `--env-file ../../.env` (or absolute root env path in scripts).
+- All compose entrypoints should explicitly pass root env (`--env-file .env` with `-f deploy/docker/docker-compose.yml` from repo root, or an absolute root env path in scripts).
 - Test scripts should default to root `/.env` when invoking compose.
 - Docs should consistently point to root `/.env` as the compose runtime source.
 

@@ -103,6 +103,10 @@ Before first startup:
      ```
      - Treat root `/.env` as canonical; avoid `deploy/docker/.env` to prevent precedence drift.
     - Timezone defaults to `OD_TIMEZONE=Asia/Dubai`; keep `OD_REPORTING_TIMEZONE=Asia/Dubai` unless you intentionally want a different dashboard bucket timezone.
+   - Set a strong `OD_LOCAL_AUTH_JWT_SECRET` in root `.env` (required for local/hybrid auth). Generate one with:
+     ```bash
+     openssl rand -base64 48
+     ```
 2. Create runtime bind-mount directories:
    ```bash
    sudo mkdir -p data/{redis,postgres,elasticsearch,squid-logs,filebeat} logs

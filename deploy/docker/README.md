@@ -4,7 +4,7 @@ This directory contains the compose stacks used for local development, CI-style 
 
 Canonical env policy:
 - Use only `/.env` (repo root) for compose/service runtime values.
-- Do not rely on `deploy/docker/.env`; compose commands should pass `--env-file ../../.env` explicitly.
+- Do not rely on `deploy/docker/.env`; compose commands should pass `--env-file .env -f deploy/docker/docker-compose.yml` from repo root.
 - For the complete variable catalog (runtime + frontend + test controls), see `docs/env-vars-reference.md`.
 
 ## Compose files
@@ -18,21 +18,20 @@ Canonical env policy:
 ## Common commands
 ```bash
 # Start the full developer topology (requires .env)
-cd deploy/docker
-docker compose --env-file ../../.env up --build
+docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build
 
 # Tail logs for the ICAP adaptor
-docker compose --env-file ../../.env logs -f icap-adaptor
+docker compose --env-file .env -f deploy/docker/docker-compose.yml logs -f icap-adaptor
 
 # Run the minimal smoke stack
-docker compose --env-file ../../.env -f docker-compose.smoke.yml up --build --abort-on-container-exit
+docker compose --env-file .env -f deploy/docker/docker-compose.smoke.yml up --build --abort-on-container-exit
 
 # Execute odctl commands inside the runner container
-docker compose --env-file ../../.env run --rm odctl-runner odctl override list
+docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl override list
 
 # Stage 24 golden profile verify
-PROFILE=golden-local bash ../../tests/ops/golden-profile.sh verify
-PROFILE=golden-prodlike bash ../../tests/ops/golden-profile.sh verify
+PROFILE=golden-local bash tests/ops/golden-profile.sh verify
+PROFILE=golden-prodlike bash tests/ops/golden-profile.sh verify
 ```
 
 ### Helper targets
@@ -59,12 +58,12 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
 2. Copy `.env.example` → `.env` (edit tokens/passwords as needed).
    - Timezone defaults to `OD_TIMEZONE=Asia/Dubai`; keep `OD_REPORTING_TIMEZONE` aligned unless you intentionally want different dashboard bucket timezone.
 3. Run `make gen-certs` once to generate Squid and web-admin certificates (`deploy/docker/squid/certs/`, `deploy/docker/web-admin/certs/`).
-4. `docker compose --env-file ../../.env up -d postgres redis` and wait for healthchecks, or just run `docker compose --env-file ../../.env up --build` / `make compose-up` to start everything.
+4. `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d postgres redis` and wait for healthchecks, or just run `docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build` / `make compose-up` to start everything.
 5. Run migrations/seeds as needed:
-   - Shared DB default (`.env.example`): `docker compose --env-file ../../.env run --rm odctl-runner odctl migrate run admin`
+   - Shared DB default (`.env.example`): `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl migrate run admin`
    - Use `odctl migrate run all` only when `OD_ADMIN_DATABASE_URL` and `OD_POLICY_DATABASE_URL` point to different databases.
-   - `docker compose --env-file ../../.env run --rm odctl-runner odctl seed policies config/policies.json default compose`
-6. Once services are healthy, run `docker compose --env-file ../../.env run --rm odctl-runner odctl smoke icap-adaptor:1344` (already performed automatically in the test/smoke stacks).
+   - `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl seed policies config/policies.json default compose`
+6. Once services are healthy, run `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl smoke icap-adaptor:1344` (already performed automatically in the test/smoke stacks).
 7. Access:
     - Admin API: http://localhost:19000/health/ready
     - Policy Engine: http://localhost:19010/health/ready
@@ -78,6 +77,7 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
 - **Build failures (`failed to solve ... open .../data/postgres: permission denied`)**: this is typically bind-mount ownership/permission mismatch on host runtime paths (`data/`, `logs/`) during build context send. Set appropriate ownership/permissions for your environment, then retry `docker compose ... up --build`.
 - **Build failures (workspace compile)**: ensure `cargo build --release` succeeds locally; the multi-service image relies on the workspace compiling cleanly.
 - **Migration mismatch (`failed to execute policy-engine migrations` with `migration ... missing in the resolved migrations`)**: this happens when `migrate run all` is used against a shared admin/policy database. In shared-DB mode, run `odctl migrate run admin`.
+- **Admin API exits with local-auth secret error**: if logs show `OD_LOCAL_AUTH_JWT_SECRET appears to use a default/test value`, generate a strong secret (`openssl rand -base64 48`), set `OD_LOCAL_AUTH_JWT_SECRET` in root `.env`, then restart `admin-api` and `web-admin`.
 - **Healthcheck retries**: Postgres/Elasticsearch may take >30s on first boot. Check `docker compose logs <service>` and confirm the expected passwords match `.env`.
 - **Port conflicts**: adjust published ports by overriding the compose file (e.g., `docker compose -f docker-compose.yml -f overrides.yml up`).
 - **Proxy `403` despite reachable `:3128` on Docker Desktop/macOS**: this is often source ACL mismatch caused by Desktop NAT rewrite before HAProxy/Squid evaluate `src`. For dev, set `OD_SQUID_ALLOWED_CLIENT_CIDRS=0.0.0.0/0`, recreate `haproxy` + `squid`, and enforce LAN-only access to `3128` at host/router firewall.
