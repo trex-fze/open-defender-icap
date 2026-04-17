@@ -8,6 +8,7 @@ Open Defender is an **AI-enhanced, open-source ICAP stack** that blends determin
 - Frontend HTTPS setup: [Frontend TLS (local/dev default)](#frontend-tls-localdev-default)
 - Runtime endpoints: [Useful URLs](#useful-urls)
 - Environment Variable Catalog: [Environment Variables Reference](docs/env-vars-reference.md)
+- Proxy architecture rationale: [Why HAProxy + Squid](#why-haproxy--squid)
 - Runtime config deep dive: [Config Files Reference](docs/config-files-reference.md)
 - Infra/deployment config deep dive: [Infra Config Reference](docs/infra-config-reference.md)
 - Validation commands: [Testing & Quality Pipelines](#testing--quality-pipelines)
@@ -130,6 +131,16 @@ flowchart LR
 - **Hybrid AI routing** – configure offline engines (Ollama/LM Studio/vLLM) or online SaaS (OpenAI/Claude) with automatic failover per policy.
 - **Content-first blocking** – `ContentPending` serves a holding page until Crawl4AI captures homepage HTML context and the LLM worker produces a canonical-taxonomy verdict. The fetch path is strict Crawl4AI-only (no HTTP fallback), and non-canonical LLM outputs are retried before persistence.
 - **Policy action outcomes** – ICAP currently enforces `Allow`/`Monitor` as pass-through, `Block`/`Warn`/`RequireApproval` as blocked, `Review` as blocked with review-specific messaging, and `ContentPending` as holding-page flow with queue follow-up.
+
+## Why HAProxy + Squid
+
+Open Defender intentionally uses both HAProxy and Squid in the proxy path. They solve different problems and create cleaner operational boundaries.
+
+- **HAProxy (edge ingress)**: first external entrypoint for proxy clients; enforces source CIDR allowlists before traffic reaches the proxy core; normalizes forwarded headers; and provides stable external bind settings (`OD_HAPROXY_BIND_HOST` / `OD_HAPROXY_BIND_PORT`).
+- **Squid (proxy + ICAP integration)**: handles forward-proxy semantics (`HTTP` + `CONNECT`), executes ICAP `REQMOD` adaptation to `icap-adaptor`, emits access logs for telemetry ingestion, and applies trusted proxy/header-following behavior.
+- **Why both layers**: HAProxy is the ingress control boundary; Squid is the web-proxy and ICAP adaptation boundary. This separation improves security posture (early edge rejection), troubleshooting clarity, and independent tuning of ACL vs proxy/ICAP behavior.
+- **Deployment note**: Docker Desktop/macOS can expose different client source IP behavior than Linux hosts. Local dev may require broader CIDRs, while Linux production-like deployments should keep strict CIDR allowlists.
+- For exact configuration knobs, see `docs/infra-config-reference.md`.
 
 ## Quick Start (Docker Compose)
 
