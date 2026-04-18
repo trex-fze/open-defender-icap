@@ -208,16 +208,17 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    ```
     - Verify on fresh traffic that `client.ip` reflects the LAN client and `od.client_ip_source` is `forwarded` or `x-forwarded-for`.
     - For Linux host kernel/sysctl baseline and compose runtime sizing guidance, see `docs/infra-config-reference.md#7-linux-host-kernel-and-sysctl-tuning-linux`.
-4. **Start stack (policy + AI workers)**:
+4. **Configure LLM provider access (required for AI operations)**:
+   - Configure this before first `make compose-up` to avoid `ContentPending` stalls and missing AI verdict generation.
+   - At least one reachable LLM provider is required for classification workflows (`ContentPending` resolution and AI verdict generation).
+   - Configure provider and routing settings in `config/llm-worker.json` (`providers[]`, `routing.default`, `routing.fallback`).
+   - For online providers, set credentials in `.env` (for example `OPENAI_API_KEY`).
+5. **Start stack (policy + AI workers)**:
    ```bash
    make compose-up                 # equivalent to docker compose up --build
    ```
    - Docker compose defaults `llm-worker` routing to local LM Studio with OpenAI fallback (see `config/llm-worker.json`).
    - To use LM Studio/Ollama/OpenAI instead, edit `config/llm-worker.json` providers/routing and restart `llm-worker`.
-5. **Configure LLM provider access (required for AI operations)**:
-   - At least one reachable LLM provider is required for classification workflows (`ContentPending` resolution and AI verdict generation).
-   - Configure provider and routing settings in `config/llm-worker.json` (`providers[]`, `routing.default`, `routing.fallback`).
-   - For online providers, set credentials in `.env` (for example `OPENAI_API_KEY`).
    - Verify worker/provider readiness:
    ```bash
    docker compose --env-file .env -f deploy/docker/docker-compose.yml logs --tail=100 llm-worker
