@@ -129,6 +129,10 @@ Before first startup:
    - `config/policy-engine.json`
     - `config/admin-api.json`
     - `config/llm-worker.json`
+5. Configure LLM provider access before first startup:
+   - Configure this before first `make compose-up` to avoid `ContentPending` stalls and missing AI verdict generation.
+   - Ensure at least one reachable provider in `config/llm-worker.json` (`providers[]`, `routing.default`, `routing.fallback`).
+   - For online fallback/provider usage, set credentials in root `.env` (for example `OPENAI_API_KEY`).
 
 If Kibana stays in "server is not ready yet", bootstrap a fresh Kibana service token:
 
@@ -256,6 +260,7 @@ Readiness checks:
 curl -sf http://localhost:19000/health/ready
 curl -sf http://localhost:19010/health/ready
 curl -sf http://localhost:19100/health/ready
+docker compose --env-file .env -f deploy/docker/docker-compose.yml logs --tail=100 llm-worker
 ```
 
 Recommended quick validation pass:
