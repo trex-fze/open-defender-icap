@@ -461,6 +461,22 @@ Set `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all` to allow metadata-only fallback for o
 **Q: Why might a domain remain in Pending Sites after restarts?**  
 Missed queue replay can leave orphan `waiting_content` rows. Keep `OD_PENDING_RECONCILE_ENABLED=true` so the reconciler periodically re-enqueues stale keys (or clears rows if already classified).
 
+**Q: Why did previously classified sites return to "Site Under Classification" after restart or the next day?**  
+This is usually expected with the default content-first + refresh settings, not necessarily data loss:
+
+- `config/icap.json` defaults `require_content=true`, so unknown/no-verdict paths are forced into `ContentPending`.
+- `llm-worker` persists classifications with `ttl_seconds=3600` (`workers/llm-worker/src/main.rs`), and refresh scheduling uses this TTL after planner cycles.
+- `reclass-worker` requeues keys when `next_refresh_at <= NOW()` (`workers/reclass-worker/src/main.rs`).
+- Reclassification dispatch currently sends jobs with `requires_content=true` (`workers/reclass-worker/src/main.rs`), so refreshed keys still depend on content availability.
+- Page-content TTL defaults to `21600` (6h) via `config/icap.json` and `config/reclass-worker.json`, so excerpts can expire overnight before the next access/refresh.
+
+How to tune this behavior:
+
+- Keep security-first behavior but reduce repeat pending loops: `OD_LLM_CONTENT_REQUIRED_MODE=auto`, `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all`, and tune `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD`.
+- Relax strict content gating: set `config/icap.json` `require_content=false` (this can reduce `ContentPending`, but changes enforcement posture).
+- Keep content fresh longer: increase `page_fetch_queue.ttl_seconds` in both `config/icap.json` and `config/reclass-worker.json` (and align `config/page-fetcher.json` `ttl_seconds`).
+- Current classification TTL (`ttl_seconds=3600`) and reclass `requires_content=true` are code-level defaults today; changing those requires source changes, not only `.env` updates.
+
 **Q: Local LLM is up, but no requests seem to reach it. Why?**  
 If jobs are still waiting for page content, the worker can requeue before invoking any provider. For local-first/hybrid deployments, use `OD_LLM_CONTENT_REQUIRED_MODE=auto` and `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all` (with `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2`) so classification can move forward when excerpt fetch repeatedly fails.
 

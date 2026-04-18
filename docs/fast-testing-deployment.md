@@ -362,6 +362,17 @@ Use `down -v` only when you explicitly need a clean local data state.
   - If online verification is unavailable or fails, the key is terminalized as `unknown-unclassified / insufficient-evidence` and pending is cleared.
 - Why does a domain stay in Pending Sites even when it looks inactive?
   - If a prior queue event was missed/restarted, the pending row can become orphaned. Keep `OD_PENDING_RECONCILE_ENABLED=true` so stale rows are auto-healed (re-enqueued or cleared).
+- Why did sites that were classified yesterday go back to `Site Under Classification` today?
+  - This is often expected with default content-first and refresh settings, not only restart behavior.
+  - `config/icap.json` defaults `require_content=true`, so unknown/no-verdict paths are forced into `ContentPending`.
+  - `llm-worker` persists classifications with `ttl_seconds=3600` (see `workers/llm-worker/src/main.rs`), and refresh cycles use TTL-driven scheduling.
+  - `reclass-worker` republishes when `next_refresh_at <= NOW()` and currently dispatches reclass jobs with `requires_content=true` (see `workers/reclass-worker/src/main.rs`).
+  - Page-content TTL defaults to `21600` (6h) in `config/icap.json` and `config/reclass-worker.json`, so excerpt content can expire overnight.
+  - Tuning options:
+    - Keep security-first posture but reduce repeat pending: `OD_LLM_CONTENT_REQUIRED_MODE=auto`, `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all`, tune `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD`.
+    - Reduce strict content gating: set `config/icap.json` `require_content=false` (changes enforcement posture).
+    - Increase content freshness window: raise `page_fetch_queue.ttl_seconds` in `config/icap.json` and `config/reclass-worker.json` (and align `config/page-fetcher.json` `ttl_seconds`).
+    - `ttl_seconds=3600` (classification) and reclass `requires_content=true` are code-level defaults today; changing them needs source updates.
 - Local LLM is healthy but I still see no local requests — why?
   - Most often the queue is blocked in `waiting_content` (content excerpt not ready), so no provider call happens yet.
   - Recommended baseline for local-first/hybrid deployments:
