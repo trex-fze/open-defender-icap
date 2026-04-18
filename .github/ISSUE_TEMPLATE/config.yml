@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Reporting
+    url: https://github.com/trex-fze/open-defender-icap/blob/main/SECURITY.md
+    about: Do not file public issues for vulnerabilities. Use the private reporting path in SECURITY.md.
+  - name: Contribution Guide
+    url: https://github.com/trex-fze/open-defender-icap/blob/main/CONTRIBUTING.md
+    about: Review contribution expectations before opening issues or PRs.

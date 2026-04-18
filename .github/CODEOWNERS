@@ -1,0 +1,7 @@
+# Default ownership
+* @arul-trex-fze
+
+# Sensitive paths
+.github/workflows/* @arul-trex-fze
+config/* @arul-trex-fze
+deploy/** @arul-trex-fze

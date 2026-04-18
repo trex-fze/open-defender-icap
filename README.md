@@ -30,6 +30,7 @@ The open source license applies to the source code and other material expressly 
 ## Contributing
 
 Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) before submitting issues or pull requests.
+All community participation is governed by [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
 ## Security
 

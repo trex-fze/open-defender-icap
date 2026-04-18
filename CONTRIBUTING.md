@@ -7,6 +7,7 @@ Thank you for your interest in contributing to open-defender-icap.
 Please review:
 
 - `README.md`
+- `CODE_OF_CONDUCT.md`
 - `SECURITY.md`
 - `TRADEMARKS.md`
 

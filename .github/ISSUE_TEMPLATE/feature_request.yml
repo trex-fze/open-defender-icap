@@ -1,0 +1,56 @@
+name: Feature Request
+description: Propose an enhancement or new capability.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please explain the problem and expected outcome.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What user/operator problem does this solve?
+      placeholder: Describe current limitations and why they matter.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe your preferred solution.
+      placeholder: Include behavior, UX, API, and operational expectations.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any fallback or alternate approaches?
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and Impact
+      description: Which components are affected?
+      placeholder: services/, workers/, web-admin/, docs/, deploy/
+
+  - type: textarea
+    id: success
+    attributes:
+      label: Success Criteria
+      description: How should maintainers verify this feature is complete?
+      placeholder: Test cases, metrics, expected CLI/API behavior.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this request is not already tracked.
+          required: true

@@ -1,0 +1,81 @@
+name: Bug Report
+description: Report a reproducible defect in behavior.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug report. Please include concrete reproduction details.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is the bug?
+      placeholder: Short description of the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, deployment mode, versions, and relevant config profile.
+      placeholder: |
+        - OS:
+        - Deployment: (docker compose / bare-metal)
+        - Commit/tag:
+        - Browser/client:
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Provide deterministic steps.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs and Evidence
+      description: Paste relevant logs, traces, screenshots, or artifact links.
+      placeholder: Include redacted output from health checks, service logs, and failing command output.
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Who/what is affected and how severe is the impact?
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I redacted secrets, tokens, and private data from logs.
+          required: true
