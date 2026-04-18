@@ -167,8 +167,13 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
 
 ## Quick Start (Docker Compose)
 
-1. **Prerequisites**: Docker Desktop/Engine, `make`, Node 20+, Rust toolchain.
-2. **Bootstrap**:
+1. **Clone repository**:
+   ```bash
+   git clone https://github.com/trex-fze/open-defender-icap.git
+   cd open-defender-icap
+   ```
+2. **Prerequisites**: Docker Desktop/Engine, `make`, Node 20+, Rust toolchain.
+3. **Bootstrap**:
    ```bash
    cp .env.example .env            # set secrets: OD_ADMIN_TOKEN, ELASTIC_PASSWORD, etc.
    make gen-certs                  # one-time Squid + web-admin TLS cert generation
@@ -180,7 +185,7 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    ```
    - Set `OD_LOCAL_AUTH_JWT_SECRET=<generated-secret>` in `.env`.
    - If `admin-api` logs `OD_LOCAL_AUTH_JWT_SECRET appears to use a default/test value`, rotate this value and restart `admin-api` then `web-admin`.
-3. **Prepare bind-mount directories (Linux/WSL2 hosts)**:
+4. **Prepare bind-mount directories (Linux/WSL2 hosts)**:
    ```bash
    sudo mkdir -p data/{redis,postgres,elasticsearch,squid-logs,filebeat} logs
    ```
@@ -209,12 +214,12 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    ```
     - Verify on fresh traffic that `client.ip` reflects the LAN client and `od.client_ip_source` is `forwarded` or `x-forwarded-for`.
     - For Linux host kernel/sysctl baseline and compose runtime sizing guidance, see `docs/infra-config-reference.md#7-linux-host-kernel-and-sysctl-tuning-linux`.
-4. **Configure LLM provider access (required for AI operations)**:
+5. **Configure LLM provider access (required for AI operations)**:
    - Configure this before first `make compose-up` to avoid `ContentPending` stalls and missing AI verdict generation.
    - At least one reachable LLM provider is required for classification workflows (`ContentPending` resolution and AI verdict generation).
    - Configure provider and routing settings in `config/llm-worker.json` (`providers[]`, `routing.default`, `routing.fallback`).
    - For online providers, set credentials in `.env` (for example `OPENAI_API_KEY`).
-5. **Start stack (policy + AI workers)**:
+6. **Start stack (policy + AI workers)**:
    ```bash
    make compose-up                 # equivalent to docker compose up --build
    ```
@@ -224,14 +229,14 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    ```bash
    docker compose --env-file .env -f deploy/docker/docker-compose.yml logs --tail=100 llm-worker
    ```
-6. **Run DB migrations (shared DB default in `.env.example`)**:
+7. **Run DB migrations (shared DB default in `.env.example`)**:
    ```bash
    docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl migrate run admin
    ```
    - `.env.example` defaults `OD_ADMIN_DATABASE_URL` and `OD_POLICY_DATABASE_URL` to the same database (`defender_admin`).
    - In shared-DB mode, use `odctl migrate run admin`.
    - Use `odctl migrate run all` only when admin and policy databases are separate.
-7. **If Kibana shows "server is not ready yet", bootstrap a fresh service token**:
+8. **If Kibana shows "server is not ready yet", bootstrap a fresh service token**:
    ```bash
    curl -u elastic:${ELASTIC_PASSWORD:-changeme-elastic} -s -X POST \
      "http://localhost:9200/_security/service/elastic/kibana/credential/token/od-stack?pretty"
@@ -245,7 +250,7 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    ```bash
    curl -s "http://localhost:5601/api/status"
    ```
-8. **If Dashboard Usage charts do not update, verify Filebeat -> ingest pipeline**:
+9. **If Dashboard Usage charts do not update, verify Filebeat -> ingest pipeline**:
    - This validates data flow for Usage graphs such as `Frequently Accessed Domains` and `Blocked Domains`.
    - Fix Filebeat config ownership/permissions:
    ```bash
@@ -271,14 +276,14 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    curl -u elastic:${ELASTIC_PASSWORD:-changeme-elastic} -s "http://localhost:9200/traffic-events-*/_search?size=1&sort=@timestamp:desc"
    ```
    - Optional follow-up: if docs are present but UI is stale, switch dashboard range to `24h` and hard refresh the browser.
-9. **Run health & smoke checks**:
+10. **Run health & smoke checks**:
    ```bash
    tests/unit.sh                   # workspace + React unit tests
    tests/integration.sh            # docker-compose smoke (odctl + ingest)
    tests/security/authz-smoke.sh   # optional authZ verification
    odctl policy validate --file config/policies.json
    ```
-10. **Stop stack**:
+11. **Stop stack**:
    ```bash
    make compose-down               # docker compose down
    ```
