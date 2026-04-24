@@ -2,6 +2,8 @@
 
 Open Defender is an **AI-enhanced, open-source ICAP stack** that blends deterministic policy engines with LLM-assisted investigations, automated overrides, and full observability. The repo includes Rust microservices (`services/` & `workers/`), a React admin console (`web-admin/`), k6 performance suites, and Docker Compose environments for local and CI validation.
 
+Classifications and allow/deny override lists (for both domains and subdomains) support import and export workflows, enabling teams to compute decisions once and share curated intelligence across deployments.
+
 ## Start here
 
 - New operator path: [Quick Start (Docker Compose)](#quick-start-docker-compose)
