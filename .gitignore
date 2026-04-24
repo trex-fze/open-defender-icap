@@ -13,3 +13,5 @@ web-admin/.env
 logs/
 deploy/docker/squid/certs/*
 !deploy/docker/squid/certs/.gitkeep
+**/__pycache__/
+*.pyc
