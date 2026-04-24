@@ -3,13 +3,19 @@ COMPOSE ?= docker compose
 COMPOSE_ENV ?= ../../.env
 ROOT_DIR := $(CURDIR)
 
-.PHONY: start build-start stop compose-up compose-down compose-smoke compose-test compose-logs gen-certs compose-golden-local compose-golden-prodlike compose-golden-down
+.PHONY: start build-start build-target stop compose-up compose-down compose-smoke compose-test compose-logs gen-certs compose-golden-local compose-golden-prodlike compose-golden-down
 
 start:
 	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" up -d
 
 build-start:
 	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" up --build
+
+build-target:
+ifndef SERVICE
+	$(error SERVICE is required. Usage: make build-target SERVICE=crawl4ai)
+endif
+	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" up -d --build $(SERVICE)
 
 stop:
 	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" down

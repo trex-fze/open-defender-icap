@@ -10,7 +10,7 @@ from typing import Optional
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl, Field
-from extraction import extract_visible_text
+from app.extraction import extract_visible_text
 
 
 def bool_env(key: str, default: str = "true") -> bool:

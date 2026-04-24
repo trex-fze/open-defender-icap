@@ -3,11 +3,11 @@ import unittest
 from pathlib import Path
 
 
-APP_DIR = Path(__file__).resolve().parents[1] / "app"
-if str(APP_DIR) not in sys.path:
-    sys.path.insert(0, str(APP_DIR))
+SERVICE_DIR = Path(__file__).resolve().parents[1]
+if str(SERVICE_DIR) not in sys.path:
+    sys.path.insert(0, str(SERVICE_DIR))
 
-from extraction import extract_visible_text
+from app.extraction import extract_visible_text
 
 
 class ExtractionTests(unittest.TestCase):
