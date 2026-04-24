@@ -173,7 +173,7 @@ Traffic IP enrichment note: ingester persists `source.ip` as the immediate Squid
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/providers` | Lists configured LLM providers plus live health snapshot fields (`health_status`, latency/check timestamp, optional HTTP status/detail) for operator dashboards and tests. |
-| `GET` | `/metrics` | Prometheus metrics covering `llm_jobs_*` (including duplicate suppression), DLQ growth (`llm_dlq_published_total`), per-provider latency, failover counters, stale-pending diversion counters (`llm_stale_pending_*`), and online context/guardrail counters (`llm_context_mode_total`, `llm_metadata_only_guardrail_total`, `llm_metadata_only_requeue_total`, `llm_metadata_only_reason_total`, `llm_fetch_failure_fallback_total`, `llm_primary_output_invalid_total`, `llm_online_verification_total`, `llm_terminal_insufficient_evidence_total`). |
+| `GET` | `/metrics` | Prometheus metrics covering `llm_jobs_*` (including duplicate suppression), DLQ growth (`llm_dlq_published_total`), per-provider latency, failover counters, stale-pending diversion counters (`llm_stale_pending_*`), online context/guardrail counters (`llm_context_mode_total`, `llm_metadata_only_guardrail_total`, `llm_metadata_only_requeue_total`, `llm_metadata_only_reason_total`, `llm_fetch_failure_fallback_total`, `llm_primary_output_invalid_total`, `llm_online_verification_total`, `llm_terminal_insufficient_evidence_total`), and Stage 25 prompt-injection counters (`llm_prompt_injection_marker_total`, `llm_prompt_injection_guardrail_total`). |
 
 ### Reclass Worker (`reclass-worker`)
 

@@ -92,6 +92,7 @@ docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force
 | `OD_LLM_ONLINE_CONTEXT_MODE`, `OD_LLM_CONTENT_REQUIRED_MODE`, `OD_LLM_METADATA_ONLY_ALLOWED_FOR` | Context and content-gating modes. |
 | `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD`, `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES` | Metadata-only fallback trigger tuning. |
 | `OD_LLM_METADATA_ONLY_FORCE_ACTION`, `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`, `OD_LLM_METADATA_ONLY_REQUEUE_FOR_CONTENT` | Metadata-only guardrails and queue behavior. |
+| `OD_PROMPT_INJECTION_GUARDRAIL_ENABLED`, `OD_PROMPT_INJECTION_REVIEW_THRESHOLD`, `OD_PROMPT_INJECTION_CONFIDENCE_CAP` | Stage 25 prompt-injection guardrail controls (enable/disable guardrail, score threshold for forced `Review`, and max confidence cap when triggered). Defaults: `true`, `3`, `0.40`. |
 | `OD_PENDING_RECONCILE_ENABLED`, `OD_PENDING_RECONCILE_INTERVAL_SECS`, `OD_PENDING_RECONCILE_STALE_MINUTES`, `OD_PENDING_RECONCILE_BATCH` | Background pending reconciliation loop controls. |
 | `OD_LLM_JOB_REQUEUE_MAX` | Per-job requeue attempt cap. |
 | `OD_LLM_STREAM_GROUP`, `OD_LLM_STREAM_CONSUMER`, `OD_LLM_STREAM_GROUP_START_ID`, `OD_LLM_STREAM_DEAD_LETTER`, `OD_LLM_STREAM_CLAIM_IDLE_MS`, `OD_LLM_STREAM_CLAIM_BATCH` | LLM worker Redis Stream group/claim tuning. |

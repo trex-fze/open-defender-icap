@@ -85,7 +85,7 @@ flowchart LR
     CSTREAM --> H
     G -->|Pending and context-mode state| PEND
     G -->|Verdict update| F
-    G -->|Cache update| E
+    G -->|Cache invalidation publish| E
     H -->|TTL refresh| CSTREAM
     H -->|TTL refresh| PSTREAM
     H -->|Override writes| F
@@ -157,7 +157,7 @@ flowchart LR
 - Future: keyspace notifications to invalidate adaptor caches on updates.
 
 ### 2.4 Classification & Reclassification Workers
-- **LLM Worker**: Consumes Redis Streams, builds prompts, calls LLM, validates JSON, persists classification, updates caches, emits audit events. When `requires_content` is set, the worker waits until `page_contents` has a fresh homepage excerpt (stored as markdown text) before finalizing the verdict.
+- **LLM Worker**: Consumes Redis Streams, builds prompts, calls LLM, validates JSON, persists classification, publishes cache invalidation events, and emits audit events. When `requires_content` is set, the worker waits until `page_contents` has a fresh homepage excerpt (stored as markdown text) before finalizing the verdict.
 - **Reclass Worker**: Scheduled jobs for TTL expiry, taxonomy/model version upgrades, manual reclass triggers. Every refresh job now republishes both the classification and base-URL crawl job so repeated validations are still content-aware.
 - **Canonicalization & fallback**: Both workers load the canonical taxonomy at startup, remap legacy/alias labels, and fall back to `Unknown / Unclassified` with `taxonomy_fallback_reason` metadata before persisting rows. The LLM prompt explicitly embeds canonical taxonomy IDs and retries non-canonical responses before persisting. Activation state is periodically refreshed so workers block verdicts automatically when operators disable categories.
 
@@ -192,7 +192,7 @@ The workflow for an unclassified site emphasizes “content-first” verificatio
    - `ClassificationJob` with `requires_content=true`, `base_url`, and `trace_id` metadata.
 
 
-2. **Page Fetcher + Crawl4AI** – The page-fetcher worker consumes the `PageFetchJob`, iterates candidate URLs, runs DNS preflight per candidate host, then invokes `services/crawl4ai-service` headless Chromium instance for resolvable candidates only. It extracts a homepage excerpt and writes markdown/plain excerpt + metadata into `page_contents` (raw HTML bytes are not persisted). This path is strict Crawl4AI-only (no direct HTTP fallback). Both success and terminal failures are persisted (`fetch_status`, `fetch_reason`) so downstream no-content progression has durable state; `source_url`, `resolved_url`, and `attempt_summary` capture why a key has empty/noisy content. When all candidates fail DNS preflight, the terminal reason is persisted as `unsupported:dns_unresolvable` to prevent repeated crawl churn. Crawl4AI also emits structured per-request audit logs (`logs/crawl4ai/crawl-audit.jsonl`) with `success|failed|blocked|unsupported` reports and reasons for operator diagnostics.
+2. **Page Fetcher + Crawl4AI** – The page-fetcher worker consumes the `PageFetchJob`, iterates candidate URLs, runs DNS preflight per candidate host, then invokes `services/crawl4ai-service` headless Chromium instance for resolvable candidates only. It extracts a homepage excerpt and writes markdown/plain excerpt + metadata into `page_contents` (raw HTML bytes are not persisted). Excerpt generation is strict visible-only: hidden/invisible DOM nodes are stripped before text extraction. This path is strict Crawl4AI-only (no direct HTTP fallback). Both success and terminal failures are persisted (`fetch_status`, `fetch_reason`) so downstream no-content progression has durable state; `source_url`, `resolved_url`, and `attempt_summary` capture why a key has empty/noisy content. When all candidates fail DNS preflight, the terminal reason is persisted as `unsupported:dns_unresolvable` to prevent repeated crawl churn. Crawl4AI also emits structured per-request audit logs (`logs/crawl4ai/crawl-audit.jsonl`) with `success|failed|blocked|unsupported` reports and reasons for operator diagnostics.
 
 3. **LLM Worker Gating** – When the LLM worker reads the `requires_content` job, it updates `classification_requests` (`status = waiting_content`) and polls Postgres until fresh `page_contents` exist for that canonical domain key. If no content is ready, the worker requeues the job (or sleeps) instead of generating a metadata-only verdict.
 
@@ -202,7 +202,7 @@ The workflow for an unclassified site emphasizes “content-first” verificatio
 
 6. **Output-Invalid Recovery Path** – If the local provider returns output that fails JSON/schema contract checks, the worker attempts online verification using metadata-only context (domain key + taxonomy + strict prompt contract). If online verification is unavailable or fails, the worker terminalizes the key as `unknown-unclassified / insufficient-evidence` and clears pending, preventing infinite requeue loops.
 
-7. **Content-Backed Verdict** – Once content is available, the worker builds the prompt with canonical taxonomy IDs, normalized domain key, and homepage HTML context/hash, then calls the configured LLM provider(s). Non-canonical outputs are logged and retried before persistence. Valid JSON is then persisted to `classifications` + `classification_versions`, written into Redis (cache + invalidation channel), and the pending row is deleted.
+7. **Content-Backed Verdict** – Once content is available, the worker builds the prompt with canonical taxonomy IDs, normalized domain key, and homepage HTML context/hash, then calls the configured LLM provider(s). Non-canonical outputs are logged and retried before persistence. Valid JSON is then persisted to `classifications` + `classification_versions`; the worker publishes Redis cache invalidation (rather than direct enforcement cache writes), and the pending row is deleted.
 
 8. **Pending Reconciliation Loop** – A background reconciler scans stale `classification_requests` (`waiting_content` older than configured threshold) and heals orphaned rows by either clearing already-classified keys or re-enqueuing classification/page-fetch jobs. This prevents pending rows from getting stranded after restarts or missed stream entries.
 
