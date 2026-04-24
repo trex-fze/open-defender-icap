@@ -306,9 +306,9 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
 
 | Service | URL |
 | --- | --- |
-| Admin API (AI-aware RBAC) | http://localhost:19000/health/ready |
+| Admin API (IAM/RBAC) | http://localhost:19000/health/ready |
 | Policy Engine | http://localhost:19010/health/ready |
-| Event Ingester (AI analytics feed) | http://localhost:19100/health/ready |
+| Event Ingester (Telemetry Ingest) | http://localhost:19100/health/ready |
 | Kibana Dashboards | http://localhost:5601 |
 | Prometheus + Alerts | http://localhost:9090 |
 | Web Admin UI (LLM insights) | https://localhost:19001 |
