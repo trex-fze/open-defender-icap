@@ -447,7 +447,13 @@ Run `odctl auth login --client-id ...` to trigger the device code flow, or pass 
 Import `deploy/kibana/dashboards/ip-analytics.ndjson` into Kibana. Prometheus scrapes http://localhost:9090 with alert rules from `prometheus-rules.yml`.
 
 **Q: How are AI models used safely?**  
-The crawl pipeline now uses strict visible-only extraction (hidden/invisible DOM nodes are removed before excerpt generation), and llm-worker applies prompt-injection guardrails that force suspicious content to `Review` with capped confidence. Runtime enforcement remains policy-engine authoritative (llm-worker invalidates cache entries rather than writing direct LLM-derived enforcement decisions). Prompt-injection smoke tests are documented in `docs/testing/security-plan.md`.
+Stage 25 hardening applies strict visible-only extraction before classification (hidden/invisible DOM content is removed), then enforces prompt-injection guardrails in `llm-worker`: high-suspicion content is forced to `Review` and confidence is capped. Runtime enforcement remains policy-engine authoritative; `llm-worker` only invalidates classification cache entries and does not write direct enforcement decisions. Prompt-injection smoke tests are documented in `docs/testing/security-plan.md`.
+
+**Q: How do I validate Stage 25 in a live stack?**  
+Run `make start`, then run `tests/security/llm-prompt-smoke.sh`. A passing run stores a classification with forced action `Review` when the injection payload is detected. Capture evidence under `tests/artifacts/security/`.
+
+**Q: Which metrics confirm Stage 25 prompt-injection hardening?**  
+Track `llm_prompt_injection_marker_total` (detected markers) and `llm_prompt_injection_guardrail_total` (applied guardrails such as forced review). Use `llm_provider_invocations_total` alongside them for provider activity context.
 
 **Q: How does stale pending diversion work with OFFLINE + ONLINE models?**  
 Primary routing still starts with your configured default provider (commonly offline/local). For keys that stay in `waiting_content` longer than `OD_LLM_STALE_PENDING_MINUTES`, the worker may attempt `OD_LLM_STALE_PENDING_ONLINE_PROVIDER` first when provider health checks pass. Existing fallback retry/cooldown controls remain active, and stale diversion has its own cap via `OD_LLM_STALE_PENDING_MAX_PER_MIN`.

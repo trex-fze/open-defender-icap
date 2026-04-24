@@ -63,6 +63,7 @@ This verification confirms that Stage 25 changes:
 | 2026-04-24 | `bash tests/security/llm-prompt-smoke.sh` | Blocked (env) | Initial attempt failed before rebuild (`/providers` endpoint unavailable). |
 | 2026-04-24 | `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --build llm-worker` + `bash tests/security/llm-prompt-smoke.sh` | Pass | Smoke now passes with forced guardrail action `Review` via `local-lmstudio`. |
 | 2026-04-24 | `tests/security/llm-prompt-smoke.sh` | Pass | Re-run after `make start` also passed; classification persisted with forced guardrail action `Review` via `local-lmstudio`. |
+| 2026-04-24 | `make start` + `tests/security/llm-prompt-smoke.sh` | Pass | Live-stack smoke passed; captured artifact: `tests/artifacts/security/stage25-prompt-smoke-20260424T114000Z.md`. |
 
 ## 6) Sign-off Criteria
 
