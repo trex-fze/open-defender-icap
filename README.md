@@ -7,6 +7,7 @@ Open Defender is an **AI-enhanced, open-source ICAP stack** that blends determin
 - New operator path: [Quick Start (Docker Compose)](#quick-start-docker-compose)
 - Frontend HTTPS setup: [Frontend TLS (local/dev default)](#frontend-tls-localdev-default)
 - Runtime endpoints: [Useful URLs](#useful-urls)
+- Operator Q&A and troubleshooting: [FAQ](docs/faq.md)
 - Environment Variable Catalog: [Environment Variables Reference](docs/env-vars-reference.md)
 - Proxy architecture rationale: [Why HAProxy + Squid](#why-haproxy--squid)
 - Client proxy auto-onboarding: [DHCP Auto Proxy Configuration](docs/deployment/dhcp-proxy-auto-configuration.md)
@@ -437,90 +438,11 @@ INTEGRATION_BUILD=1 INTEGRATION_BUILD_RETRIES=3 tests/integration.sh
 
 ## FAQ
 
-**Q: How do I log in to the Admin UI?**  
-Run the stack and sign in on `/login` with local credentials (default username `admin`, password from `OD_DEFAULT_ADMIN_PASSWORD` in `/.env`). In compose HTTPS mode (`https://localhost:19001`), keep `VITE_ADMIN_API_URL` empty so browser calls stay same-origin (`/api/*`) through nginx. For standalone frontend dev, point `VITE_ADMIN_API_URL` to Admin API and keep `VITE_ADMIN_TOKEN_MODE=auto` unless you need explicit bearer/header behavior.
+The full operator FAQ now lives in `docs/faq.md`.
 
-**Q: Why does `odctl` say "No stored session"?**  
-Run `odctl auth login --client-id ...` to trigger the device code flow, or pass `--token $OD_ADMIN_TOKEN` explicitly.
-
-**Q: Where do observability dashboards live?**  
-Import `deploy/kibana/dashboards/ip-analytics.ndjson` into Kibana. Prometheus scrapes http://localhost:9090 with alert rules from `prometheus-rules.yml`.
-
-**Q: How are AI models used safely?**  
-Stage 25 hardening applies strict visible-only extraction before classification (hidden/invisible DOM content is removed), then enforces prompt-injection guardrails in `llm-worker`: high-suspicion content is forced to `Review` and confidence is capped. Runtime enforcement remains policy-engine authoritative; `llm-worker` only invalidates classification cache entries and does not write direct enforcement decisions. Prompt-injection smoke tests are documented in `docs/testing/security-plan.md`.
-
-**Q: How do I validate Stage 25 in a live stack?**  
-Run `make start`, then run `tests/security/llm-prompt-smoke.sh`. A passing run stores a classification with forced action `Review` when the injection payload is detected. Capture evidence under `tests/artifacts/security/`.
-
-**Q: Which metrics confirm Stage 25 prompt-injection hardening?**  
-Track `llm_prompt_injection_marker_total` (detected markers) and `llm_prompt_injection_guardrail_total` (applied guardrails such as forced review). Use `llm_provider_invocations_total` alongside them for provider activity context.
-
-**Q: How does stale pending diversion work with OFFLINE + ONLINE models?**  
-Primary routing still starts with your configured default provider (commonly offline/local). For keys that stay in `waiting_content` longer than `OD_LLM_STALE_PENDING_MINUTES`, the worker may attempt `OD_LLM_STALE_PENDING_ONLINE_PROVIDER` first when provider health checks pass. Existing fallback retry/cooldown controls remain active, and stale diversion has its own cap via `OD_LLM_STALE_PENDING_MAX_PER_MIN`.
-
-**Q: How does stale pending diversion behave with ONLINE-only models?**  
-If the online provider is already primary, stale diversion is effectively skipped (`provider_is_primary`) and the worker continues normal primary processing with existing retry/backoff/failover logic.
-
-**Q: Can operators choose whether scraped excerpts are sent to online providers?**  
-Yes. `OD_LLM_ONLINE_CONTEXT_MODE` controls this behavior (`required|preferred|metadata_only`). `metadata_only` never sends excerpt text to online providers and applies conservative guardrails via `OD_LLM_METADATA_ONLY_FORCE_ACTION` and `OD_LLM_METADATA_ONLY_MAX_CONFIDENCE`.
-
-**Q: What about API-like destinations that never return renderable page content?**  
-Use `OD_LLM_CONTENT_REQUIRED_MODE=auto` with `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2` (default) so repeated terminal fetch failures can fall back to metadata-only classification. Tune terminal statuses via `OD_LLM_METADATA_ONLY_NO_CONTENT_STATUSES`.
-
-**Q: What if an operator uses offline-only models?**  
-Set `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all` to allow metadata-only fallback for offline providers as well. Guardrails still force conservative action/confidence limits.
-
-**Q: Why might a domain remain in Pending Sites after restarts?**  
-Missed queue replay can leave orphan `waiting_content` rows. Keep `OD_PENDING_RECONCILE_ENABLED=true` so the reconciler periodically re-enqueues stale keys (or clears rows if already classified).
-
-**Q: Why did previously classified sites return to "Site Under Classification" after restart or the next day?**  
-This is usually expected with the default content-first + refresh settings, not necessarily data loss:
-
-- `config/icap.json` defaults `require_content=true`, so unknown/no-verdict paths are forced into `ContentPending`.
-- `llm-worker` persists classifications with `ttl_seconds=3600` (`workers/llm-worker/src/main.rs`), and refresh scheduling uses this TTL after planner cycles.
-- `reclass-worker` requeues keys when `next_refresh_at <= NOW()` (`workers/reclass-worker/src/main.rs`).
-- Reclassification dispatch currently sends jobs with `requires_content=true` (`workers/reclass-worker/src/main.rs`), so refreshed keys still depend on content availability.
-- Page-content TTL defaults to `21600` (6h) via `config/icap.json` and `config/reclass-worker.json`, so excerpts can expire overnight before the next access/refresh.
-
-How to tune this behavior:
-
-- Keep security-first behavior but reduce repeat pending loops: `OD_LLM_CONTENT_REQUIRED_MODE=auto`, `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all`, and tune `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD`.
-- Relax strict content gating: set `config/icap.json` `require_content=false` (this can reduce `ContentPending`, but changes enforcement posture).
-- Keep content fresh longer: increase `page_fetch_queue.ttl_seconds` in both `config/icap.json` and `config/reclass-worker.json` (and align `config/page-fetcher.json` `ttl_seconds`).
-- Current classification TTL (`ttl_seconds=3600`) and reclass `requires_content=true` are code-level defaults today; changing those requires source changes, not only `.env` updates.
-
-**Q: Local LLM is up, but no requests seem to reach it. Why?**  
-If jobs are still waiting for page content, the worker can requeue before invoking any provider. For local-first/hybrid deployments, use `OD_LLM_CONTENT_REQUIRED_MODE=auto` and `OD_LLM_METADATA_ONLY_ALLOWED_FOR=all` (with `OD_LLM_METADATA_ONLY_FETCH_FAILURE_THRESHOLD=2`) so classification can move forward when excerpt fetch repeatedly fails.
-
-**Q: What happens if local LLM returns invalid JSON for a domain?**  
-The worker attempts online verification using metadata-only context (domain key + taxonomy + strict prompt contract). If online verification is unavailable or fails, the key is terminalized as `unknown-unclassified / insufficient-evidence` so it does not loop in pending.
-
-**Q: Why did a site move to `unknown-unclassified / insufficient-evidence` automatically?**  
-This is the safe terminal fallback for repeated no-content/crawl failures or output-invalid verification failures. It prevents infinite `waiting_content` loops while preserving conservative policy enforcement.
-
-**Q: What is the recommended local-first fallback profile?**  
-Use `OD_LLM_FAILOVER_POLICY=safe`, disable stale online diversion (`OD_LLM_STALE_PENDING_MINUTES=0`), keep `OD_LLM_CONTENT_REQUIRED_MODE=auto`, and allow metadata fallback for all providers (`OD_LLM_METADATA_ONLY_ALLOWED_FOR=all`). This keeps local LLM first and only uses online fallback when local invocation fails.
-
-**Q: Where can I see crawl outcomes (success/failed/blocked) for a URL?**  
-Check `logs/crawl4ai/crawl-audit.jsonl` on the host. Each line includes UTC timestamp, normalized key, URL, report (`success|failed|blocked`), reason, status code, duration, and truncated error detail. The compose stack binds this path via `../../logs:/app/logs`.
-
-**Q: How do I block an entire domain including subdomains?**  
-Use Allow / Deny and create one active `block` override for the apex domain (for example `example.com`). That single domain override applies to `example.com` plus all subdomains like `www.example.com`, `api.example.com`, and deeper hosts.
-
-**Q: Can I set a different decision for one subdomain under a blocked domain?**  
-Yes. Add a more-specific override for that host (for example `safe.example.com`). Override matching uses most-specific scope first, so the specific subdomain rule wins over the parent domain rule.
-
-**Q: Why do Pending Sites / Classifications show `domain:example.com` when traffic came from `www.example.com`?**  
-The platform now runs in domain-first classification mode. Subdomain traffic is deduplicated to canonical `domain:<registered_domain>` keys for pending rows, page-content fetches, and persisted classifications to reduce queue latency.
-
-**Q: Can subdomain-specific controls still be applied?**  
-Yes. Allow / Deny overrides remain fine-grained and still accept both domain and subdomain scopes. A more-specific subdomain override wins over the parent domain override.
-
-**Q: How do I discover CLI commands for overrides (`odctl help`)?**  
-Run `odctl --help` for top-level commands, `odctl override --help` for override subcommands, and `odctl override create --help` for create flags. Example full-domain block command: `odctl override create --scope domain:example.com --action block --reason "Block entire domain"`.
-
-**Q: Where is evidence tracked?**  
-Stage 7 checklists live in `docs/evidence/stage07-checklist.md`. Follow Stage 6 instructions for dashboards.
+- FAQ: `docs/faq.md`
+- Security smoke details: `docs/testing/security-plan.md`
+- Environment knobs: `docs/env-vars-reference.md`
 
 ## PR Readiness Checklist
 
@@ -536,4 +458,4 @@ Quick checklist before opening a PR:
 
 John 3:16 - "For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life."
 
-`><>`
+ΙΧΘΥΣ
