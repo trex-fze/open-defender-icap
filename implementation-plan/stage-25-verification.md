@@ -1,6 +1,6 @@
 # Stage 25 Verification - Prompt Injection Hardening
 
-**Status**: In Progress  
+**Status**: Complete  
 **Stage plan**: `implementation-plan/stage-25-prompt-injection-hardening.md`  
 **Checklist**: `implementation-plan/stage-25-checklist.md`
 
@@ -60,11 +60,12 @@ This verification confirms that Stage 25 changes:
 | 2026-04-24 | `cargo test -p llm-worker` | Pass | 15 passed, 0 failed (includes forced-review guardrail + no direct cache entry assertion). |
 | 2026-04-24 | `python3 -m py_compile services/crawl4ai-service/app/main.py services/crawl4ai-service/app/extraction.py` | Pass | Syntax validation for crawl service strict extraction modules. |
 | 2026-04-24 | `python3 -m unittest discover services/crawl4ai-service/tests -p test_*.py` | Pass | 3 tests passed (hidden-div stripping, marker counting, empty-input handling). |
-| 2026-04-24 | `bash tests/security/llm-prompt-smoke.sh` | Blocked (env) | Local stack/provider endpoint unavailable (`/providers` not reachable from test host). |
+| 2026-04-24 | `bash tests/security/llm-prompt-smoke.sh` | Blocked (env) | Initial attempt failed before rebuild (`/providers` endpoint unavailable). |
+| 2026-04-24 | `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --build llm-worker` + `bash tests/security/llm-prompt-smoke.sh` | Pass | Smoke now passes with forced guardrail action `Review` via `local-lmstudio`. |
 
 ## 6) Sign-off Criteria
 
-- [ ] All Stage 25 checklist items complete.
-- [ ] Command matrix executed with passing results (or documented exceptions).
-- [ ] Evidence artifacts stored and referenced.
-- [ ] No open high-severity regressions in classification/enforcement flow.
+- [x] All Stage 25 checklist items complete.
+- [x] Command matrix executed with passing results (or documented exceptions).
+- [x] Evidence artifacts stored and referenced.
+- [x] No open high-severity regressions in classification/enforcement flow.

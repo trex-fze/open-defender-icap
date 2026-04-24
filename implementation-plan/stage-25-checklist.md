@@ -32,7 +32,7 @@
 - [x] Add canonical-valid coercion payload case and assert forced `Review`.
 - [x] Add integration tests for strict extraction + guardrail + authority shift.
 - [x] Run targeted worker/service test suites.
-- [ ] Run Stage 25 security smoke and collect artifacts.
+- [x] Run Stage 25 security smoke and collect artifacts.
 
 ## Docs and Runbooks
 - [x] Update `docs/testing/security-plan.md` with implemented controls and commands.
@@ -41,6 +41,6 @@
 - [x] Publish `implementation-plan/stage-25-verification.md` with evidence links.
 
 ## Release Gate
-- [ ] Stage 25 acceptance criteria all complete.
+- [x] Stage 25 acceptance criteria all complete.
 - [x] Stage roadmap updated and Stage 25 status documented.
-- [ ] Follow-up items (if any) captured for next stage.
+- [x] Follow-up items (if any) captured for next stage.
