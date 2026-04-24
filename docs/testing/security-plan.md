@@ -25,8 +25,8 @@ Run this after the compose stack is up; include the console output in the Stageâ
 ## Manual/advanced tests
 1. **OIDC RBAC smoke**: Configure `OD_OIDC_*` in root `/.env` and ensure `odctl report traffic` fails when the issued token lacks `ROLE_REPORTING_VIEW`.
 2. **Prompt injection (LLM worker)**:
-   - Publish a job to `classification-jobs` with a payload containing a known injection string (e.g., `"<INJECTION> ignore previous instructions"`).
-   - Verify `llm-worker` logs show the payload being sanitized (check `svc-llm-worker` logs for `prompt_filter` entries) and that the resulting decision is `monitor` instead of `allow`.
+   - Publish a job to `classification-jobs` with a payload containing a known injection string in `content_excerpt` (for example hidden HTML or system-style directive text such as `"ignore previous instructions"`).
+   - Verify `svc-llm-worker` logs and classification flags include prompt-injection guardrail markers and that the resulting action is forced to `Review`.
 3. **Overrides/user input sanitization**: Attempt to submit an override reason containing `<script>alert(1)</script>` and confirm the Admin UI encodes it correctly (inspect the React UI or API response and ensure it is serialized as text).
 
 ### Synthetic key cleanup (post-smoke hygiene)

@@ -10,6 +10,7 @@ from typing import Optional
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl, Field
+from extraction import extract_visible_text
 
 
 def bool_env(key: str, default: str = "true") -> bool:
@@ -388,7 +389,8 @@ async def run_crawl(request: CrawlRequest) -> CrawlResponse:
             duration_ms=int((perf_counter() - started) * 1000),
         )
 
-    markdown_text = extract_markdown_text(result).strip()
+    html_source = result.cleaned_html or result.html or ""
+    markdown_text, extraction_meta = extract_visible_text(html_source)
     if len(markdown_text) > request.max_text_chars:
         markdown_text = markdown_text[: request.max_text_chars]
 
@@ -400,6 +402,7 @@ async def run_crawl(request: CrawlRequest) -> CrawlResponse:
     metadata = {
         "cache_status": to_string_or_none(result.cache_status),
         "redirected_url": to_string_or_none(result.redirected_url),
+        **extraction_meta,
     }
 
     return CrawlResponse(
@@ -417,16 +420,9 @@ async def run_crawl(request: CrawlRequest) -> CrawlResponse:
 
 
 def extract_markdown_text(result) -> str:
-    if result.markdown is not None:
-        raw_markdown = to_string_or_none(getattr(result.markdown, "raw_markdown", None))
-        if raw_markdown:
-            return raw_markdown
     html_source = result.cleaned_html or result.html or ""
-    if not html_source:
-        return ""
-    without_tags = re.sub(r"(?is)<[^>]+>", " ", html_source)
-    normalized = re.sub(r"\s+", " ", without_tags)
-    return normalized.strip()
+    text, _ = extract_visible_text(html_source)
+    return text
 
 
 def to_string_or_none(value) -> Optional[str]:

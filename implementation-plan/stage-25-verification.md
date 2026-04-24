@@ -1,6 +1,6 @@
 # Stage 25 Verification - Prompt Injection Hardening
 
-**Status**: Planned  
+**Status**: In Progress  
 **Stage plan**: `implementation-plan/stage-25-prompt-injection-hardening.md`  
 **Checklist**: `implementation-plan/stage-25-checklist.md`
 
@@ -56,11 +56,11 @@ This verification confirms that Stage 25 changes:
 
 | Date | Verification Item | Result | Notes |
 | --- | --- | --- | --- |
-| TBD | Workspace tests | TBD | |
-| TBD | Crawl extraction tests | TBD | |
-| TBD | LLM guardrail tests | TBD | |
-| TBD | Enforcement authority checks | TBD | |
-| TBD | Security smoke | TBD | |
+| 2026-04-24 | `cargo test --workspace` | Pass | Full Rust workspace tests passed. |
+| 2026-04-24 | `cargo test -p llm-worker` | Pass | 15 passed, 0 failed (includes forced-review guardrail + no direct cache entry assertion). |
+| 2026-04-24 | `python3 -m py_compile services/crawl4ai-service/app/main.py services/crawl4ai-service/app/extraction.py` | Pass | Syntax validation for crawl service strict extraction modules. |
+| 2026-04-24 | `python3 -m unittest discover services/crawl4ai-service/tests -p test_*.py` | Pass | 3 tests passed (hidden-div stripping, marker counting, empty-input handling). |
+| 2026-04-24 | `bash tests/security/llm-prompt-smoke.sh` | Blocked (env) | Local stack/provider endpoint unavailable (`/providers` not reachable from test host). |
 
 ## 6) Sign-off Criteria
 

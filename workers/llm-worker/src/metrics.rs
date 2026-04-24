@@ -346,6 +346,24 @@ static TERMINAL_INSUFFICIENT_EVIDENCE: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap()
 });
 
+static PROMPT_INJECTION_MARKER: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_prompt_injection_marker_total",
+        "Prompt-injection marker hits observed in content excerpts",
+        &["marker"]
+    )
+    .unwrap()
+});
+
+static PROMPT_INJECTION_GUARDRAIL: Lazy<IntCounterVec> = Lazy::new(|| {
+    prometheus::register_int_counter_vec!(
+        "llm_prompt_injection_guardrail_total",
+        "Prompt-injection guardrail applications by type",
+        &["type"]
+    )
+    .unwrap()
+});
+
 pub fn record_job_started() {
     JOBS_STARTED.inc();
 }
@@ -523,6 +541,16 @@ pub fn record_online_verification(result: &str) {
 
 pub fn record_terminal_insufficient_evidence() {
     TERMINAL_INSUFFICIENT_EVIDENCE.inc();
+}
+
+pub fn record_prompt_injection_marker(marker: &str) {
+    PROMPT_INJECTION_MARKER.with_label_values(&[marker]).inc();
+}
+
+pub fn record_prompt_injection_guardrail(guardrail_type: &str) {
+    PROMPT_INJECTION_GUARDRAIL
+        .with_label_values(&[guardrail_type])
+        .inc();
 }
 
 async fn metrics_handler() -> String {
