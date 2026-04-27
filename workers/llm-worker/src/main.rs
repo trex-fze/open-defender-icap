@@ -1016,6 +1016,66 @@ fn validate_config(cfg: &WorkerConfig) -> Result<()> {
         Some(cfg.database_url.as_str()),
         "set database_url in config/llm-worker.json",
     );
+    validator.require_auth_url(
+        "llm-worker.redis_url",
+        Some(cfg.redis_url.as_str()),
+        false,
+        true,
+        16,
+        "set redis_url in config/llm-worker.json with password-authenticated Redis credentials",
+    );
+    validator.require_auth_url(
+        "llm-worker.database_url",
+        Some(cfg.database_url.as_str()),
+        true,
+        true,
+        12,
+        "set database_url in config/llm-worker.json with non-default DB credentials",
+    );
+
+    for provider in &cfg.providers {
+        let provider_key = format!("llm-worker.providers.{}.api_key", provider.name);
+        let resolved_key = provider
+            .api_key
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| value.to_string())
+            .or_else(|| {
+                provider
+                    .api_key_env
+                    .as_deref()
+                    .and_then(|key| env::var(key).ok())
+                    .filter(|value| !value.trim().is_empty())
+            });
+        match provider.kind {
+            ProviderKind::Openai | ProviderKind::Anthropic | ProviderKind::OpenaiCompatible => {
+                validator.require_strong_secret(
+                    provider_key.as_str(),
+                    resolved_key.as_deref(),
+                    16,
+                    "set provider api_key/api_key_env with a strong non-default API key",
+                );
+            }
+            ProviderKind::LmStudio
+            | ProviderKind::Ollama
+            | ProviderKind::Vllm
+            | ProviderKind::CustomJson => {
+                validator.validate_optional_secret(
+                    provider_key.as_str(),
+                    resolved_key.as_deref(),
+                    16,
+                    "if set, provider api_key/api_key_env must be strong and non-default",
+                );
+            }
+        }
+    }
+
+    validator.validate_optional_secret(
+        "LLM_API_KEY",
+        cfg.llm_api_key.as_deref(),
+        16,
+        "if using legacy llm_api_key, set a strong non-default API key",
+    );
     validator.finish()?;
     cfg.resolve_router()
         .context("failed to resolve LLM providers for startup")?;
@@ -4888,6 +4948,62 @@ CREATE INDEX IF NOT EXISTS page_contents_expires_idx
             ],
         )?;
         Ok((container, port))
+    }
+
+    fn base_worker_cfg_for_validation() -> WorkerConfig {
+        WorkerConfig {
+            queue_name: "classification-jobs".into(),
+            redis_url: "redis://:redis-prod-secret-1234@redis:6379".into(),
+            cache_channel: "od:cache:invalidate".into(),
+            stream: "classification-jobs".into(),
+            page_fetch_stream: "page-fetch-jobs".into(),
+            database_url: "postgres://svc_llm:prod-db-password-123@postgres:5432/defender_admin"
+                .into(),
+            llm_endpoint: None,
+            llm_api_key: None,
+            providers: vec![ProviderConfig {
+                name: "openai-fallback".into(),
+                kind: ProviderKind::Openai,
+                endpoint: "https://api.openai.com/v1/chat/completions".into(),
+                model: Some("gpt-4o-mini".into()),
+                timeout_ms: Some(5_000),
+                headers: HashMap::new(),
+                api_key: Some("openai-prod-key-0123456789".into()),
+                api_key_env: None,
+            }],
+            routing: RoutingConfig {
+                default: Some("openai-fallback".into()),
+                ..RoutingConfig::default()
+            },
+            metrics_host: "0.0.0.0".into(),
+            metrics_port: 19015,
+        }
+    }
+
+    #[test]
+    fn config_rejects_default_values_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let mut cfg = base_worker_cfg_for_validation();
+        cfg.providers[0].api_key = Some("changeme-openai-key".into());
+        let err = validate_config(&cfg).expect_err("default provider key should fail");
+        assert!(format!("{err:#}").contains("llm-worker.providers.openai-fallback.api_key"));
+    }
+
+    #[test]
+    fn config_accepts_strong_values_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let cfg = base_worker_cfg_for_validation();
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn config_allows_default_values_only_in_explicit_dev_mode() {
+        std::env::set_var("OD_ALLOW_INSECURE_DEV_SECRETS", "true");
+        let mut cfg = base_worker_cfg_for_validation();
+        cfg.redis_url = "redis://redis:6379".into();
+        cfg.providers[0].api_key = Some("changeme-openai-key".into());
+        assert!(validate_config(&cfg).is_ok());
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
     }
 
     fn test_host() -> String {

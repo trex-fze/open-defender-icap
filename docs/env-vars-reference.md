@@ -13,6 +13,7 @@ This file tracks environment variables consumed by runtime services, frontend, a
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Postgres bootstrap values for compose. |
 | `ELASTIC_PASSWORD`, `ELASTICSEARCH_SERVICEACCOUNTTOKEN` | Elasticsearch/Kibana bootstrap credentials. |
 | `OD_ADMIN_TOKEN`, `OD_POLICY_ADMIN_TOKEN` | Admin and policy control-plane shared tokens. |
+| `OD_ALLOW_INSECURE_DEV_SECRETS` | Explicit development override (`true` only for local/dev). When unset/false, services fail startup on insecure secrets/defaults. |
 | `OD_ADMIN_DATABASE_URL`, `OD_POLICY_DATABASE_URL`, `OD_TAXONOMY_DATABASE_URL`, `DATABASE_URL` | Database URLs used by admin/policy services. |
 | `OD_ADMIN_URL`, `OD_POLICY_URL`, `OD_POLICY_ENGINE_URL` | Internal service URLs used by tooling and service-to-service calls. |
 | `OD_AUTH_MODE` | Admin auth mode (`local`, `hybrid`, `oidc`). |
@@ -30,6 +31,7 @@ This file tracks environment variables consumed by runtime services, frontend, a
 - `OD_LOCAL_AUTH_JWT_SECRET` is required when `OD_AUTH_MODE=local` or `OD_AUTH_MODE=hybrid`.
 - Use a strong random value (recommended: 32+ characters).
 - Do not use placeholder-like values such as `changeme`, `default`, or `test`.
+- In non-development mode (`OD_ALLOW_INSECURE_DEV_SECRETS` unset/false), startup validation rejects empty/short/default/example secret values.
 - Generate a strong secret with OpenSSL and set it in root `/.env`:
 
 ```bash

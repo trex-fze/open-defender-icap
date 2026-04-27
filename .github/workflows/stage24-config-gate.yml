@@ -10,10 +10,14 @@ jobs:
   config-preflight:
     runs-on: ubuntu-latest
     env:
-      OD_ADMIN_DATABASE_URL: postgres://defender:defender@localhost:5432/defender_admin
-      OD_POLICY_DATABASE_URL: postgres://defender:defender@localhost:5432/defender_policy
-      OD_TAXONOMY_DATABASE_URL: postgres://defender:defender@localhost:5432/defender_admin
-      OD_LOCAL_AUTH_JWT_SECRET: stage24-ci-local-auth-secret-0123456789
+      OD_ADMIN_DATABASE_URL: postgres://svc_admin:stage24-ci-db-password-012345@localhost:5432/defender_admin
+      OD_POLICY_DATABASE_URL: postgres://svc_policy:stage24-ci-db-password-012345@localhost:5432/defender_policy
+      OD_TAXONOMY_DATABASE_URL: postgres://svc_taxonomy:stage24-ci-db-password-012345@localhost:5432/defender_admin
+      OD_LOCAL_AUTH_JWT_SECRET: stage24-ci-local-auth-secret-0123456789abcdef
+      OD_ADMIN_TOKEN: stage24-ci-admin-token-0123456789
+      OD_POLICY_ADMIN_TOKEN: stage24-ci-policy-token-0123456789
+      OD_FILEBEAT_SECRET: stage24-ci-filebeat-secret-0123456789
+      OD_ELASTIC_PASSWORD: stage24-ci-elastic-password-012345
       OD_ELASTIC_URL: http://localhost:9200
       OPENAI_API_KEY: stage24-ci-openai-placeholder
     steps:
@@ -24,15 +28,32 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build check targets
-        run: cargo check -p config-core -p odctl -p admin-api -p policy-engine -p event-ingester -p llm-worker -p page-fetcher
+        run: cargo check -p config-core -p odctl -p admin-api -p policy-engine -p icap-adaptor -p event-ingester -p llm-worker -p reclass-worker -p page-fetcher
+
+      - name: Run secret validation unit tests
+        run: |
+          cargo test -p config-core
+          cargo test -p admin-api config_rejects_default_secret_values_when_dev_mode_disabled
+          cargo test -p policy-engine config_rejects_default_database_credentials_when_dev_mode_disabled
+          cargo test -p event-ingester config_rejects_default_secret_values_when_dev_mode_disabled
+          cargo test -p icap-adaptor config_rejects_default_values_when_dev_mode_disabled
+          cargo test -p reclass-worker config_rejects_default_credentials_when_dev_mode_disabled
+          cargo test -p llm-worker config_rejects_default_values_when_dev_mode_disabled
+          cargo test -p page-fetcher config_rejects_redis_without_auth_in_production_mode
 
       - name: Run doctor config preflight
+        env:
+          OD_ALLOW_INSECURE_DEV_SECRETS: "true"
         run: cargo run -p odctl -- doctor config
 
       - name: Run service check-config modes
+        env:
+          OD_ALLOW_INSECURE_DEV_SECRETS: "true"
         run: |
           cargo run -p admin-api -- --check-config
           cargo run -p policy-engine -- --check-config
+          cargo run -p icap-adaptor -- --check-config
           cargo run -p event-ingester -- --check-config
           cargo run -p llm-worker -- --check-config
+          cargo run -p reclass-worker -- --check-config
           cargo run -p page-fetcher -- --check-config

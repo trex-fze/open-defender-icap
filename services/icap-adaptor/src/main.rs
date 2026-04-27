@@ -26,6 +26,63 @@ use pending_client::PendingClient;
 use policy_client::PolicyClient;
 use url::Url;
 
+fn check_config_mode_enabled() -> bool {
+    std::env::args().any(|arg| arg == "--check-config")
+}
+
+fn validate_config(cfg: &config::IcapConfig) -> Result<()> {
+    let mut validator = config_core::ConfigValidator::new("icap-adaptor");
+    validator.require_non_empty(
+        "icap.host",
+        Some(cfg.host.as_str()),
+        "set host in config/icap.json",
+    );
+    if let Some(redis_url) = cfg.redis_url.as_deref() {
+        validator.require_auth_url(
+            "icap.redis_url",
+            Some(redis_url),
+            false,
+            true,
+            16,
+            "set redis_url in config/icap.json with password-authenticated Redis credentials",
+        );
+    }
+    if let Some(queue) = cfg.job_queue.as_ref() {
+        validator.require_auth_url(
+            "icap.job_queue.redis_url",
+            Some(queue.redis_url.as_str()),
+            false,
+            true,
+            16,
+            "set job_queue.redis_url with password-authenticated Redis credentials",
+        );
+    }
+    if let Some(queue) = cfg.page_fetch_queue.as_ref() {
+        validator.require_auth_url(
+            "icap.page_fetch_queue.redis_url",
+            Some(queue.redis_url.as_str()),
+            false,
+            true,
+            16,
+            "set page_fetch_queue.redis_url with password-authenticated Redis credentials",
+        );
+    }
+    if let Some(admin) = cfg.admin_api.as_ref() {
+        validator.require_non_empty(
+            "icap.admin_api.admin_token",
+            admin.admin_token.as_deref(),
+            "set admin_api.admin_token in config/icap.json or OD_ADMIN_TOKEN",
+        );
+        validator.require_strong_secret(
+            "icap.admin_api.admin_token",
+            admin.admin_token.as_deref(),
+            16,
+            "set admin_api.admin_token to a strong non-default token",
+        );
+    }
+    validator.finish()
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::FmtSubscriber::builder()
@@ -35,6 +92,11 @@ async fn main() -> Result<()> {
         .init();
 
     let cfg = config::load()?;
+    validate_config(&cfg)?;
+    if check_config_mode_enabled() {
+        println!("icap-adaptor config check passed");
+        return Ok(());
+    }
     let addr = format!("{}:{}", cfg.host, cfg.port);
     let canonicalization_policy = Arc::new(CanonicalizationPolicy::from_tenant_exceptions(
         cfg.canonicalization.tenant_domain_exceptions.clone(),
@@ -734,5 +796,60 @@ mod icap_response_tests {
                 "https://docs.example.com/"
             ]
         );
+    }
+
+    fn base_icap_cfg() -> config::IcapConfig {
+        config::IcapConfig {
+            host: "0.0.0.0".into(),
+            port: 1344,
+            preview_size: 4096,
+            redis_url: Some("redis://:redis-prod-secret-1234@redis:6379".into()),
+            policy_endpoint: Some("http://policy-engine:19010".into()),
+            metrics_host: "0.0.0.0".into(),
+            metrics_port: 19005,
+            cache_channel: "od:cache:invalidate".into(),
+            require_content: true,
+            pending_cache_ttl_seconds: 60,
+            job_queue: Some(config::JobQueueConfig {
+                redis_url: "redis://:redis-prod-secret-1234@redis:6379".into(),
+                stream: "classification-jobs".into(),
+            }),
+            page_fetch_queue: Some(config::PageFetchQueueConfig {
+                redis_url: "redis://:redis-prod-secret-1234@redis:6379".into(),
+                stream: "page-fetch-jobs".into(),
+                ttl_seconds: 21_600,
+            }),
+            admin_api: Some(config::AdminApiConfig {
+                base_url: "http://admin-api:19000".into(),
+                admin_token: Some("prod-admin-token-1234567890".into()),
+            }),
+            canonicalization: config::CanonicalizationConfig::default(),
+        }
+    }
+
+    #[test]
+    fn config_rejects_default_values_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let mut cfg = base_icap_cfg();
+        cfg.admin_api.as_mut().expect("admin api").admin_token = Some("changeme-admin".into());
+        let err = validate_config(&cfg).expect_err("default token should fail");
+        assert!(format!("{err:#}").contains("icap.admin_api.admin_token"));
+    }
+
+    #[test]
+    fn config_accepts_strong_values_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let cfg = base_icap_cfg();
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn config_allows_defaults_only_with_explicit_dev_mode() {
+        std::env::set_var("OD_ALLOW_INSECURE_DEV_SECRETS", "true");
+        let mut cfg = base_icap_cfg();
+        cfg.redis_url = Some("redis://redis:6379".into());
+        cfg.admin_api.as_mut().expect("admin api").admin_token = Some("changeme-admin".into());
+        assert!(validate_config(&cfg).is_ok());
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
     }
 }

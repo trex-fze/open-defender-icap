@@ -186,11 +186,19 @@ pub async fn platform_health(
     Ok(Json(snapshot))
 }
 
-async fn collect_platform_health(state: &AppState, cfg: &OpsHealthConfig) -> PlatformHealthResponse {
+async fn collect_platform_health(
+    state: &AppState,
+    cfg: &OpsHealthConfig,
+) -> PlatformHealthResponse {
     let mut components = Vec::new();
     let mut errors = Vec::new();
 
-    components.push(local_component("admin-api", "control_plane", HealthState::Healthy, "self process running"));
+    components.push(local_component(
+        "admin-api",
+        "control_plane",
+        HealthState::Healthy,
+        "self process running",
+    ));
 
     components.push(
         probe_http(
@@ -198,7 +206,10 @@ async fn collect_platform_health(state: &AppState, cfg: &OpsHealthConfig) -> Pla
             cfg,
             "policy-engine",
             "control_plane",
-            &format!("{}/health/ready", state.policy_engine_url().trim_end_matches('/')),
+            &format!(
+                "{}/health/ready",
+                state.policy_engine_url().trim_end_matches('/')
+            ),
         )
         .await,
     );
@@ -208,7 +219,10 @@ async fn collect_platform_health(state: &AppState, cfg: &OpsHealthConfig) -> Pla
             cfg,
             "event-ingester",
             "pipeline",
-            &env_or_default("OD_EVENT_INGESTER_URL", "http://event-ingester:19100/health/ready"),
+            &env_or_default(
+                "OD_EVENT_INGESTER_URL",
+                "http://event-ingester:19100/health/ready",
+            ),
         )
         .await,
     );
@@ -228,7 +242,10 @@ async fn collect_platform_health(state: &AppState, cfg: &OpsHealthConfig) -> Pla
             cfg,
             "page-fetcher",
             "workers",
-            &env_or_default("OD_PAGE_FETCH_METRICS_URL", "http://page-fetcher:19025/metrics"),
+            &env_or_default(
+                "OD_PAGE_FETCH_METRICS_URL",
+                "http://page-fetcher:19025/metrics",
+            ),
         )
         .await,
     );
@@ -238,7 +255,10 @@ async fn collect_platform_health(state: &AppState, cfg: &OpsHealthConfig) -> Pla
             cfg,
             "reclass-worker",
             "workers",
-            &env_or_default("OD_RECLASS_METRICS_URL", "http://reclass-worker:19016/metrics"),
+            &env_or_default(
+                "OD_RECLASS_METRICS_URL",
+                "http://reclass-worker:19016/metrics",
+            ),
         )
         .await,
     );
@@ -305,13 +325,19 @@ async fn collect_platform_health(state: &AppState, cfg: &OpsHealthConfig) -> Pla
 
     for component in &components {
         metrics::record_ops_health_probe(&component.name, health_state_label(&component.status));
-        metrics::observe_ops_health_probe_duration(&component.name, component.latency_ms as f64 / 1000.0);
+        metrics::observe_ops_health_probe_duration(
+            &component.name,
+            component.latency_ms as f64 / 1000.0,
+        );
         if !matches!(component.status, HealthState::Healthy) {
             errors.push(format!(
                 "{} reported {:?}: {}",
                 component.name,
                 component.status,
-                component.detail.clone().unwrap_or_else(|| "no details".to_string())
+                component
+                    .detail
+                    .clone()
+                    .unwrap_or_else(|| "no details".to_string())
             ));
         }
     }
@@ -350,7 +376,8 @@ async fn probe_elasticsearch(state: &AppState, cfg: &OpsHealthConfig) -> Platfor
     match request.send().await {
         Ok(response) => {
             let http_status = response.status().as_u16();
-            let (status, detail) = map_elasticsearch_probe_result(http_status, auth.has_credentials());
+            let (status, detail) =
+                map_elasticsearch_probe_result(http_status, auth.has_credentials());
             PlatformHealthComponent {
                 name: "elasticsearch".to_string(),
                 category: "observability".to_string(),
@@ -441,11 +468,8 @@ async fn probe_http(
 async fn probe_postgres(state: &AppState, cfg: &OpsHealthConfig) -> PlatformHealthComponent {
     let checked_at_ms = unix_timestamp_ms();
     let start = Instant::now();
-    let probe = tokio::time::timeout(
-        cfg.timeout,
-        sqlx::query("SELECT 1").fetch_one(state.pool()),
-    )
-    .await;
+    let probe =
+        tokio::time::timeout(cfg.timeout, sqlx::query("SELECT 1").fetch_one(state.pool())).await;
 
     match probe {
         Ok(Ok(_)) => PlatformHealthComponent {
@@ -562,7 +586,12 @@ async fn probe_redis(state: &AppState, cfg: &OpsHealthConfig) -> PlatformHealthC
     }
 }
 
-fn local_component(name: &str, category: &str, status: HealthState, detail: &str) -> PlatformHealthComponent {
+fn local_component(
+    name: &str,
+    category: &str,
+    status: HealthState,
+    detail: &str,
+) -> PlatformHealthComponent {
     PlatformHealthComponent {
         name: name.to_string(),
         category: category.to_string(),
@@ -666,13 +695,17 @@ fn health_state_label(state: &HealthState) -> &'static str {
     }
 }
 
-fn map_elasticsearch_probe_result(status_code: u16, has_credentials: bool) -> (HealthState, Option<String>) {
+fn map_elasticsearch_probe_result(
+    status_code: u16,
+    has_credentials: bool,
+) -> (HealthState, Option<String>) {
     if (200..=299).contains(&status_code) {
         return (HealthState::Healthy, None);
     }
     if status_code == 401 || status_code == 403 {
         let detail = if has_credentials {
-            "HTTP 401/403 (invalid credentials or insufficient Elasticsearch privileges)".to_string()
+            "HTTP 401/403 (invalid credentials or insufficient Elasticsearch privileges)"
+                .to_string()
         } else {
             "HTTP 401/403 (credentials missing for secured Elasticsearch cluster)".to_string()
         };
@@ -703,7 +736,10 @@ mod tests {
             local_component("b", "x", HealthState::Degraded, "warn"),
             local_component("c", "x", HealthState::Unreachable, "down"),
         ];
-        assert!(matches!(aggregate_status(&components), HealthState::Unreachable));
+        assert!(matches!(
+            aggregate_status(&components),
+            HealthState::Unreachable
+        ));
     }
 
     #[test]
@@ -732,7 +768,8 @@ mod tests {
 
     #[test]
     fn elasticsearch_401_reason_differs_by_credentials_presence() {
-        let (_status_without_creds, detail_without_creds) = map_elasticsearch_probe_result(401, false);
+        let (_status_without_creds, detail_without_creds) =
+            map_elasticsearch_probe_result(401, false);
         assert!(detail_without_creds
             .unwrap_or_default()
             .contains("credentials missing"));

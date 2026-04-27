@@ -617,8 +617,7 @@ fn db_error(err: sqlx::Error) -> (StatusCode, Json<ApiError>) {
 #[cfg(test)]
 mod support {
     use super::*;
-    use common_types::normalizer::CanonicalizationPolicy;
-use crate::{
+    use crate::{
         audit::AuditLogger,
         auth::{AdminAuth, AuthSettings},
         iam::IamService,
@@ -627,6 +626,7 @@ use crate::{
     };
     use ::taxonomy::TaxonomyStore;
     use anyhow::Result;
+    use common_types::normalizer::CanonicalizationPolicy;
     use sqlx::postgres::PgPoolOptions;
     use std::sync::Arc;
 

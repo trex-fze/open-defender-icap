@@ -1186,6 +1186,25 @@ async fn handle_doctor_config() -> Result<()> {
     let mut validator = config_core::ConfigValidator::new("odctl doctor config");
     let mut warnings = Vec::new();
 
+    validator.require_strong_secret(
+        "OD_ADMIN_TOKEN",
+        env::var("OD_ADMIN_TOKEN").ok().as_deref(),
+        16,
+        "set OD_ADMIN_TOKEN to a strong non-default token",
+    );
+    validator.require_strong_secret(
+        "OD_POLICY_ADMIN_TOKEN",
+        env::var("OD_POLICY_ADMIN_TOKEN").ok().as_deref(),
+        16,
+        "set OD_POLICY_ADMIN_TOKEN to a strong non-default token",
+    );
+    validator.require_strong_secret(
+        "OD_FILEBEAT_SECRET",
+        env::var("OD_FILEBEAT_SECRET").ok().as_deref(),
+        16,
+        "set OD_FILEBEAT_SECRET to a strong non-default secret",
+    );
+
     let admin_db_lookup = config_core::lookup_env("OD_ADMIN_DATABASE_URL", &["DATABASE_URL"]);
     let env_admin_db_url = admin_db_lookup.value.clone();
     if let Some(alias) = admin_db_lookup.deprecated_alias {
@@ -1205,6 +1224,14 @@ async fn handle_doctor_config() -> Result<()> {
         admin_db_url,
         "set config/admin-api.json.database_url or OD_ADMIN_DATABASE_URL (fallback DATABASE_URL)",
     );
+    validator.require_auth_url(
+        "OD_ADMIN_DATABASE_URL",
+        admin_db_url,
+        true,
+        true,
+        12,
+        "set OD_ADMIN_DATABASE_URL with non-default username/password credentials",
+    );
 
     let auth_mode = env::var("OD_AUTH_MODE")
         .ok()
@@ -1215,27 +1242,17 @@ async fn handle_doctor_config() -> Result<()> {
         let local_secret = env::var("OD_LOCAL_AUTH_JWT_SECRET")
             .ok()
             .or(admin_cfg.auth.local_jwt_secret.clone());
-        validator.require_non_empty(
-            "OD_LOCAL_AUTH_JWT_SECRET",
-            local_secret.as_deref(),
-            "set OD_LOCAL_AUTH_JWT_SECRET for local/hybrid auth mode",
-        );
-        validator.require_min_len(
+        validator.require_strong_secret_with_blocklist(
             "OD_LOCAL_AUTH_JWT_SECRET",
             local_secret.as_deref(),
             32,
-            "use a strong random secret with at least 32 characters",
-        );
-        validator.forbid_substrings_ci(
-            "OD_LOCAL_AUTH_JWT_SECRET",
-            local_secret.as_deref(),
             &[
                 "changeme",
                 "od-local-dev-secret-change-me",
                 "changeme-local-jwt-secret",
                 "local-jwt-secret",
             ],
-            "replace default/test secret with a strong random value",
+            "set OD_LOCAL_AUTH_JWT_SECRET for local/hybrid auth mode using a strong random secret",
         );
     }
 
@@ -1264,6 +1281,22 @@ async fn handle_doctor_config() -> Result<()> {
         "llm-worker.database_url",
         Some(llm_cfg.database_url.as_str()),
         "set config/llm-worker.json.database_url",
+    );
+    validator.require_auth_url(
+        "llm-worker.redis_url",
+        Some(llm_cfg.redis_url.as_str()),
+        false,
+        true,
+        16,
+        "set config/llm-worker.json.redis_url with password-authenticated Redis credentials",
+    );
+    validator.require_auth_url(
+        "llm-worker.database_url",
+        Some(llm_cfg.database_url.as_str()),
+        true,
+        true,
+        12,
+        "set config/llm-worker.json.database_url with non-default DB credentials",
     );
     let has_provider = llm_cfg
         .providers
@@ -1297,12 +1330,40 @@ async fn handle_doctor_config() -> Result<()> {
         Some(page_fetch_cfg.database_url.as_str()),
         "set config/page-fetcher.json.database_url",
     );
+    validator.require_auth_url(
+        "page-fetcher.redis_url",
+        Some(page_fetch_cfg.redis_url.as_str()),
+        false,
+        true,
+        16,
+        "set config/page-fetcher.json.redis_url with password-authenticated Redis credentials",
+    );
+    validator.require_auth_url(
+        "page-fetcher.database_url",
+        Some(page_fetch_cfg.database_url.as_str()),
+        true,
+        true,
+        12,
+        "set config/page-fetcher.json.database_url with non-default DB credentials",
+    );
 
     let ingest_elastic_url = env::var("OD_ELASTIC_URL").ok();
     validator.require_non_empty(
         "OD_ELASTIC_URL",
         ingest_elastic_url.as_deref(),
         "set OD_ELASTIC_URL for event-ingester startup",
+    );
+    validator.validate_optional_secret(
+        "OD_ELASTIC_PASSWORD",
+        env::var("OD_ELASTIC_PASSWORD").ok().as_deref(),
+        12,
+        "set OD_ELASTIC_PASSWORD to a strong non-default value",
+    );
+    validator.validate_optional_secret(
+        "OD_ELASTIC_API_KEY",
+        env::var("OD_ELASTIC_API_KEY").ok().as_deref(),
+        16,
+        "set OD_ELASTIC_API_KEY to a strong non-default API key",
     );
 
     validator.finish()?;

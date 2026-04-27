@@ -105,6 +105,28 @@ fn validate_config(cfg: &config::PolicyConfig) -> Result<()> {
             "create the policy file path configured in policy_file or configure database_url",
         );
     }
+    let (policy_db_url, _) = resolve_policy_db_url(cfg);
+    if policy_db_url.is_some() {
+        validator.require_auth_url(
+            "OD_POLICY_DATABASE_URL",
+            policy_db_url.as_deref(),
+            true,
+            true,
+            12,
+            "set OD_POLICY_DATABASE_URL with non-default username/password credentials",
+        );
+    }
+    let (activation_db_url, _) = resolve_activation_db_url(cfg, policy_db_url.clone());
+    if activation_db_url.is_some() {
+        validator.require_auth_url(
+            "OD_TAXONOMY_DATABASE_URL",
+            activation_db_url.as_deref(),
+            true,
+            true,
+            12,
+            "set OD_TAXONOMY_DATABASE_URL with non-default username/password credentials",
+        );
+    }
     validator.finish()
 }
 
@@ -979,6 +1001,22 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
+    fn base_policy_cfg() -> config::PolicyConfig {
+        config::PolicyConfig {
+            api_host: "0.0.0.0".into(),
+            api_port: 19010,
+            policy_file: "config/policies.json".into(),
+            database_url: Some(
+                "postgres://svc_policy:prod-db-password-123@db.example:5432/defender_policy".into(),
+            ),
+            activation_database_url: Some(
+                "postgres://svc_policy:prod-db-password-123@db.example:5432/defender_admin".into(),
+            ),
+            admin_token: None,
+            auth: None,
+        }
+    }
+
     fn in_memory_app(doc: PolicyDocument) -> Router {
         let tmp = std::env::temp_dir().join(format!("policy-app-test-{}.json", Uuid::new_v4()));
         fs::write(&tmp, serde_json::to_string(&doc).unwrap()).unwrap();
@@ -1238,7 +1276,10 @@ mod tests {
     #[test]
     fn detects_conflicting_actions_after_normalization() {
         assert_eq!(normalize_override_action(" BLOCK "), "block");
-        assert_ne!(normalize_override_action("allow"), normalize_override_action("block"));
+        assert_ne!(
+            normalize_override_action("allow"),
+            normalize_override_action("block")
+        );
     }
 
     #[test]
@@ -1271,5 +1312,30 @@ mod tests {
             derive_registered_domain("example.com").as_deref(),
             Some("example.com")
         );
+    }
+
+    #[test]
+    fn config_rejects_default_database_credentials_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let mut cfg = base_policy_cfg();
+        cfg.database_url = Some("postgres://defender:defender@postgres:5432/defender_admin".into());
+        let err = validate_config(&cfg).expect_err("default DB credentials must fail");
+        assert!(format!("{err:#}").contains("OD_POLICY_DATABASE_URL"));
+    }
+
+    #[test]
+    fn config_accepts_strong_database_credentials_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let cfg = base_policy_cfg();
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn config_allows_default_database_credentials_in_explicit_dev_mode() {
+        std::env::set_var("OD_ALLOW_INSECURE_DEV_SECRETS", "true");
+        let mut cfg = base_policy_cfg();
+        cfg.database_url = Some("postgres://defender:defender@postgres:5432/defender_admin".into());
+        assert!(validate_config(&cfg).is_ok());
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
     }
 }

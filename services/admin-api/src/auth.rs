@@ -178,25 +178,19 @@ const fn default_refresh_max_sessions() -> i64 {
 }
 
 fn validate_local_jwt_secret(secret: &str) -> anyhow::Result<()> {
-    let trimmed = secret.trim();
-    if trimmed.len() < 32 {
-        anyhow::bail!(
-            "OD_LOCAL_AUTH_JWT_SECRET must be at least 32 characters (strong random secret)"
-        );
-    }
-    let lowered = trimmed.to_ascii_lowercase();
-    let blocked = [
-        "changeme",
-        "od-local-dev-secret-change-me",
-        "changeme-local-jwt-secret",
-        "local-jwt-secret",
-    ];
-    if blocked.iter().any(|needle| lowered.contains(needle)) {
-        anyhow::bail!(
-            "OD_LOCAL_AUTH_JWT_SECRET appears to use a default/test value; set a strong random secret"
-        );
-    }
-    Ok(())
+    let mut validator = config_core::ConfigValidator::new("admin-api.auth");
+    validator.require_strong_secret_with_blocklist(
+        "OD_LOCAL_AUTH_JWT_SECRET",
+        Some(secret),
+        32,
+        &[
+            "od-local-dev-secret-change-me",
+            "changeme-local-jwt-secret",
+            "local-jwt-secret",
+        ],
+        "OD_LOCAL_AUTH_JWT_SECRET must be at least 32 characters and not use default/test values",
+    );
+    validator.finish()
 }
 
 impl AdminAuth {

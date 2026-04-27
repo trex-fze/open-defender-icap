@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::env;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct IcapConfig {
@@ -30,7 +31,20 @@ pub struct IcapConfig {
 }
 
 pub fn load() -> anyhow::Result<IcapConfig> {
-    let cfg = config_core::load_config::<IcapConfig>("config/icap.json")?;
+    let mut cfg = config_core::load_config::<IcapConfig>("config/icap.json")?;
+    if let Some(admin) = cfg.admin_api.as_mut() {
+        if admin
+            .admin_token
+            .as_deref()
+            .map(|value| value.trim().is_empty())
+            .unwrap_or(true)
+        {
+            admin.admin_token = env::var("OD_ADMIN_TOKEN")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+        }
+    }
     Ok(cfg)
 }
 

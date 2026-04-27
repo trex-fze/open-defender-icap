@@ -19,6 +19,53 @@ Classifications and allow/deny override lists (for both domains and subdomains) 
 - Linux kernel/sysctl + runtime tuning: [Infra Config Reference - tuning section](docs/infra-config-reference.md#7-linux-host-kernel-and-sysctl-tuning-linux)
 - Validation commands: [Testing & Quality Pipelines](#testing--quality-pipelines)
 
+## Secure configuration
+
+`.env.example` is intentionally local-dev oriented and **unsafe for production**. Startup validation now blocks placeholder/default secrets unless explicit development override is enabled.
+
+### Required secrets (production)
+
+- Control plane: `OD_ADMIN_TOKEN`, `OD_POLICY_ADMIN_TOKEN`, `OD_LOCAL_AUTH_JWT_SECRET`, `OD_DEFAULT_ADMIN_PASSWORD`
+- Data stores: `POSTGRES_PASSWORD`, `OD_ADMIN_DATABASE_URL`, `OD_POLICY_DATABASE_URL`, `OD_TAXONOMY_DATABASE_URL`
+- Redis (required auth outside dev): `OD_CACHE_REDIS_URL`, `OD_PAGE_FETCH_REDIS_URL`, plus Redis URLs in `config/*.json` for workers/adaptor when used
+- Ingest/Elastic: `OD_FILEBEAT_SECRET`, `ELASTIC_PASSWORD` (or `OD_ELASTIC_API_KEY`), `ELASTICSEARCH_SERVICEACCOUNTTOKEN`
+- LLM providers: `OPENAI_API_KEY` / `LLM_API_KEY` / provider-specific `api_key_env` entries in `config/llm-worker.json`
+
+### Development mode (explicit)
+
+- Set `OD_ALLOW_INSECURE_DEV_SECRETS=true` to allow placeholder/dev values.
+- Services still emit explicit warnings naming each unsafe variable; insecure values are never silently accepted.
+
+### Production mode (default)
+
+- Leave `OD_ALLOW_INSECURE_DEV_SECRETS` unset or `false`.
+- Startup fails hard on empty, short, placeholder, or known example secrets (including `changeme*`, `defender`, `password`, `secret`, `admin`, `test`).
+
+### Generate strong secrets
+
+```bash
+openssl rand -base64 48
+openssl rand -hex 32
+```
+
+Example assignment in `.env`:
+
+```env
+OD_ADMIN_TOKEN=<random-token>
+OD_POLICY_ADMIN_TOKEN=<random-token>
+OD_LOCAL_AUTH_JWT_SECRET=<random-32+-char-secret>
+OD_FILEBEAT_SECRET=<random-token>
+POSTGRES_PASSWORD=<random-password>
+ELASTIC_PASSWORD=<random-password>
+```
+
+### Rotation guidance
+
+1. Generate new secrets and update `.env` (or your secret manager source).
+2. Rotate dependent credentials/tokens (DB users, Elasticsearch service token/API keys, LLM keys).
+3. Restart dependent services in order: data stores/auth providers first, then control-plane and workers.
+4. Verify startup preflight and service `--check-config` pass before opening traffic.
+
 ## Official project resources
 
 - Official website: https://trex.ae/products/open-defender-icap

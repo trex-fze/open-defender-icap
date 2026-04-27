@@ -166,11 +166,25 @@ fn validate_config(cfg: &WorkerConfig) -> Result<()> {
         Some(cfg.database_url.as_str()),
         "set database_url in config/page-fetcher.json",
     );
+    validator.require_auth_url(
+        "page-fetcher.redis_url",
+        Some(cfg.redis_url.as_str()),
+        false,
+        true,
+        16,
+        "set redis_url in config/page-fetcher.json with password-authenticated Redis credentials",
+    );
+    validator.require_auth_url(
+        "page-fetcher.database_url",
+        Some(cfg.database_url.as_str()),
+        true,
+        true,
+        12,
+        "set database_url in config/page-fetcher.json with non-default DB credentials",
+    );
     validator.finish()?;
     if cfg.page_content_max_versions_per_key < 1 {
-        return Err(anyhow!(
-            "page_content_max_versions_per_key must be >= 1"
-        ));
+        return Err(anyhow!("page_content_max_versions_per_key must be >= 1"));
     }
     Ok(())
 }
@@ -765,7 +779,8 @@ impl PageFetcher {
         attempts: &[CrawlAttempt],
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        self.lock_page_content_key(&mut tx, &job.normalized_key).await?;
+        self.lock_page_content_key(&mut tx, &job.normalized_key)
+            .await?;
         let version = self.next_version_tx(&mut tx, &job.normalized_key).await?;
         let attempt_summary = serde_json::to_string(attempts)?;
         sqlx::query(
@@ -822,7 +837,8 @@ impl PageFetcher {
         let hash = Sha256::digest(text_excerpt.as_bytes());
         let hash_hex = format!("{:x}", hash);
         let mut tx = self.pool.begin().await?;
-        self.lock_page_content_key(&mut tx, &job.normalized_key).await?;
+        self.lock_page_content_key(&mut tx, &job.normalized_key)
+            .await?;
         let version = self.next_version_tx(&mut tx, &job.normalized_key).await?;
         let attempt_summary = serde_json::to_string(attempts)?;
         let resolved_host = Url::parse(resolved_url)
@@ -1284,5 +1300,57 @@ mod tests {
     #[test]
     fn default_page_content_versions_cap_is_30() {
         assert_eq!(default_page_content_max_versions_per_key(), 30);
+    }
+
+    fn base_worker_cfg() -> WorkerConfig {
+        WorkerConfig {
+            queue_name: "page-fetcher".into(),
+            stream: "page-fetch-jobs".into(),
+            stream_start_id: "$".into(),
+            redis_url: "redis://:redis-prod-secret-1234@redis:6379".into(),
+            crawl_service_url: "http://crawl4ai:8085".into(),
+            database_url: "postgres://svc_fetch:prod-db-password-123@postgres:5432/defender_admin"
+                .into(),
+            metrics_host: "0.0.0.0".into(),
+            metrics_port: 19025,
+            max_excerpt_chars: 4_000,
+            max_html_context_chars: 120_000,
+            max_html_bytes: 524_288,
+            ttl_seconds: 21_600,
+            page_content_max_versions_per_key: 30,
+            fetch_timeout_seconds: 60,
+            idempotency_ttl_seconds: 86_400,
+            database_pool_size: 5,
+            terminal_retry_cooldown_seconds: 1_200,
+            blocked_retry_cooldown_seconds: 14_400,
+            unsupported_retry_cooldown_seconds: 21_600,
+            unsupported_host_allowlist: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn config_rejects_redis_without_auth_in_production_mode() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let mut cfg = base_worker_cfg();
+        cfg.redis_url = "redis://redis:6379".into();
+        let err = validate_config(&cfg).expect_err("redis auth should be required");
+        assert!(format!("{err:#}").contains("page-fetcher.redis_url"));
+    }
+
+    #[test]
+    fn config_accepts_strong_credentials_in_production_mode() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let cfg = base_worker_cfg();
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn config_allows_insecure_values_only_in_explicit_dev_mode() {
+        std::env::set_var("OD_ALLOW_INSECURE_DEV_SECRETS", "true");
+        let mut cfg = base_worker_cfg();
+        cfg.redis_url = "redis://redis:6379".into();
+        cfg.database_url = "postgres://defender:defender@postgres:5432/defender_admin".into();
+        assert!(validate_config(&cfg).is_ok());
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
     }
 }

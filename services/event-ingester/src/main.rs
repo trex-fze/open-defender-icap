@@ -41,11 +41,46 @@ fn validate_config(config: &IngestConfig) -> anyhow::Result<()> {
         Some(config.elastic_url.as_str()),
         "set OD_ELASTIC_URL before starting event-ingester",
     );
+    validator.validate_optional_secret(
+        "OD_ELASTIC_PASSWORD",
+        config.elastic_password.as_deref(),
+        12,
+        "set OD_ELASTIC_PASSWORD to a strong Elasticsearch password",
+    );
+    validator.validate_optional_secret(
+        "OD_ELASTIC_API_KEY",
+        config.elastic_api_key.as_deref(),
+        16,
+        "set OD_ELASTIC_API_KEY to a non-default API key",
+    );
+    validator.require_strong_secret(
+        "OD_FILEBEAT_SECRET",
+        config.filebeat_secret.as_deref(),
+        16,
+        "set OD_FILEBEAT_SECRET to a strong shared ingest secret",
+    );
+
+    if config.elastic_api_key.is_none() && config.elastic_password.is_none() {
+        validator.require_non_empty(
+            "OD_ELASTIC_PASSWORD|OD_ELASTIC_API_KEY",
+            None,
+            "set OD_ELASTIC_PASSWORD or OD_ELASTIC_API_KEY for authenticated Elasticsearch ingest",
+        );
+    }
+
     if config.page_fetch_redis_url.is_some() {
         validator.require_non_empty(
             "OD_PAGE_FETCH_STREAM",
             Some(config.page_fetch_stream.as_str()),
             "set OD_PAGE_FETCH_STREAM when OD_PAGE_FETCH_REDIS_URL is configured",
+        );
+        validator.require_auth_url(
+            "OD_PAGE_FETCH_REDIS_URL",
+            config.page_fetch_redis_url.as_deref(),
+            false,
+            true,
+            16,
+            "set OD_PAGE_FETCH_REDIS_URL with password-authenticated Redis credentials",
         );
     }
     validator.finish()
@@ -320,5 +355,59 @@ impl PageFetchPublisher {
             .query_async::<_, ()>(&mut conn)
             .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_cfg() -> IngestConfig {
+        IngestConfig {
+            bind_addr: "0.0.0.0:19100".into(),
+            elastic_url: "http://elasticsearch:9200".into(),
+            elastic_index_prefix: "traffic-events".into(),
+            elastic_index_pattern: "traffic-events-*".into(),
+            elastic_template_name: "traffic-events-template".into(),
+            elastic_ilm_name: "traffic-events-ilm".into(),
+            elastic_api_key: Some("prod-api-key-0123456789".into()),
+            elastic_username: Some("elastic".into()),
+            elastic_password: Some("prod-elastic-password-123".into()),
+            filebeat_secret: Some("prod-filebeat-secret-1234".into()),
+            log_level: "info".into(),
+            ingest_retry_attempts: 3,
+            apply_templates: true,
+            page_fetch_redis_url: Some("redis://:redis-prod-secret-1234@redis:6379".into()),
+            page_fetch_stream: "page-fetch-jobs".into(),
+            page_fetch_ttl_seconds: 21600,
+            trust_proxy_headers: false,
+            trusted_proxy_cidrs: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn config_rejects_default_secret_values_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let mut cfg = base_cfg();
+        cfg.filebeat_secret = Some("changeme-ingest".into());
+        let err = validate_config(&cfg).expect_err("default secret must fail");
+        assert!(format!("{err:#}").contains("OD_FILEBEAT_SECRET"));
+    }
+
+    #[test]
+    fn config_accepts_strong_secret_values_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let cfg = base_cfg();
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn config_allows_default_secrets_in_explicit_dev_mode() {
+        std::env::set_var("OD_ALLOW_INSECURE_DEV_SECRETS", "true");
+        let mut cfg = base_cfg();
+        cfg.filebeat_secret = Some("changeme-ingest".into());
+        cfg.page_fetch_redis_url = Some("redis://redis:6379".into());
+        assert!(validate_config(&cfg).is_ok());
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
     }
 }

@@ -66,6 +66,51 @@ fn derive_base_url(full_url: &str, hostname: &str) -> String {
     format!("https://{hostname}/")
 }
 
+fn check_config_mode_enabled() -> bool {
+    std::env::args().any(|arg| arg == "--check-config")
+}
+
+fn validate_config(cfg: &ReclassConfig) -> Result<()> {
+    let mut validator = config_core::ConfigValidator::new("reclass-worker");
+    validator.require_non_empty(
+        "reclass.redis_url",
+        Some(cfg.redis_url.as_str()),
+        "set redis_url in config/reclass-worker.json",
+    );
+    validator.require_non_empty(
+        "reclass.database_url",
+        Some(cfg.database_url.as_str()),
+        "set database_url in config/reclass-worker.json",
+    );
+    validator.require_auth_url(
+        "reclass.redis_url",
+        Some(cfg.redis_url.as_str()),
+        false,
+        true,
+        16,
+        "set redis_url in config/reclass-worker.json with password-authenticated Redis credentials",
+    );
+    validator.require_auth_url(
+        "reclass.database_url",
+        Some(cfg.database_url.as_str()),
+        true,
+        true,
+        12,
+        "set database_url in config/reclass-worker.json with non-default DB credentials",
+    );
+    if let Some(queue) = &cfg.page_fetch_queue {
+        validator.require_auth_url(
+            "reclass.page_fetch_queue.redis_url",
+            Some(queue.redis_url.as_str()),
+            false,
+            true,
+            16,
+            "set page_fetch_queue.redis_url with password-authenticated Redis credentials",
+        );
+    }
+    validator.finish()
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::FmtSubscriber::builder()
@@ -75,6 +120,11 @@ async fn main() -> Result<()> {
         .init();
 
     let cfg: ReclassConfig = config_core::load_config("config/reclass-worker.json")?;
+    validate_config(&cfg)?;
+    if check_config_mode_enabled() {
+        println!("reclass-worker config check passed");
+        return Ok(());
+    }
     info!(
         target = "svc-reclass",
         stream = %cfg.job_stream,
@@ -1042,6 +1092,52 @@ CREATE INDEX IF NOT EXISTS page_contents_expires_idx
             vec!["-p".into(), format!("{}:6379", port)],
         )?;
         Ok((container, port))
+    }
+
+    fn base_reclass_cfg() -> ReclassConfig {
+        ReclassConfig {
+            redis_url: "redis://:redis-prod-secret-1234@redis:6379".into(),
+            job_stream: "classification-jobs".into(),
+            database_url:
+                "postgres://svc_reclass:prod-db-password-123@postgres:5432/defender_admin".into(),
+            planner_interval_seconds: 60,
+            planner_batch_size: 200,
+            dispatcher_batch_size: 200,
+            metrics_host: "0.0.0.0".into(),
+            metrics_port: 19016,
+            db_pool_size: 5,
+            page_fetch_queue: Some(PageFetchQueueConfig {
+                redis_url: "redis://:redis-prod-secret-1234@redis:6379".into(),
+                stream: "page-fetch-jobs".into(),
+                ttl_seconds: 21_600,
+            }),
+        }
+    }
+
+    #[test]
+    fn config_rejects_default_credentials_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let mut cfg = base_reclass_cfg();
+        cfg.redis_url = "redis://redis:6379".into();
+        let err = validate_config(&cfg).expect_err("missing redis auth should fail");
+        assert!(format!("{err:#}").contains("reclass.redis_url"));
+    }
+
+    #[test]
+    fn config_accepts_strong_credentials_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        let cfg = base_reclass_cfg();
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn config_allows_defaults_only_with_explicit_dev_mode() {
+        std::env::set_var("OD_ALLOW_INSECURE_DEV_SECRETS", "true");
+        let mut cfg = base_reclass_cfg();
+        cfg.redis_url = "redis://redis:6379".into();
+        cfg.database_url = "postgres://defender:defender@postgres:5432/defender_admin".into();
+        assert!(validate_config(&cfg).is_ok());
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
     }
 
     fn test_host() -> String {
