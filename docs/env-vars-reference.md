@@ -2,7 +2,8 @@
 
 This file tracks environment variables consumed by runtime services, frontend, and test scripts.
 
-- Canonical runtime source: `/.env` (copy from `/.env.example`).
+- Canonical runtime source: `/.env` (development mode) and `/.env-prod` (production-like mode).
+- Templates: `/.env.example` (dev defaults) and `/.env-prod.example` (prod-like placeholders).
 - Standalone frontend source: `web-admin/.env` (copy from `web-admin/.env.example`).
 - Do not use `deploy/docker/.env` for normal runtime configuration.
 

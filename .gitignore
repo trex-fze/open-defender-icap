@@ -8,6 +8,7 @@ web-admin/dist/
 docker-data/
 data/
 .env
+.env-prod
 deploy/docker/.env
 web-admin/.env
 logs/

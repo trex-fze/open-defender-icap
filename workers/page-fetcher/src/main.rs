@@ -189,6 +189,21 @@ fn validate_config(cfg: &WorkerConfig) -> Result<()> {
     Ok(())
 }
 
+fn apply_env_overrides(cfg: &mut WorkerConfig) {
+    if let Ok(redis_url) = env::var("OD_PAGE_FETCH_REDIS_URL") {
+        let trimmed = redis_url.trim();
+        if !trimmed.is_empty() {
+            cfg.redis_url = trimmed.to_string();
+        }
+    }
+    if let Ok(database_url) = env::var("OD_ADMIN_DATABASE_URL") {
+        let trimmed = database_url.trim();
+        if !trimmed.is_empty() {
+            cfg.database_url = trimmed.to_string();
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct CrawlApiResponse {
@@ -243,7 +258,8 @@ async fn main() -> Result<()> {
         .json()
         .init();
 
-    let cfg: WorkerConfig = load_config("config/page-fetcher.json")?;
+    let mut cfg: WorkerConfig = load_config("config/page-fetcher.json")?;
+    apply_env_overrides(&mut cfg);
     validate_config(&cfg)?;
     if check_config_mode_enabled() {
         println!("page-fetcher config check passed");

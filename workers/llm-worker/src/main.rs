@@ -1087,11 +1087,27 @@ fn validate_config(cfg: &WorkerConfig) -> Result<()> {
     Ok(())
 }
 
+fn apply_env_overrides(cfg: &mut WorkerConfig) {
+    if let Ok(redis_url) = env::var("OD_CACHE_REDIS_URL") {
+        let trimmed = redis_url.trim();
+        if !trimmed.is_empty() {
+            cfg.redis_url = trimmed.to_string();
+        }
+    }
+    if let Ok(database_url) = env::var("OD_ADMIN_DATABASE_URL") {
+        let trimmed = database_url.trim();
+        if !trimmed.is_empty() {
+            cfg.database_url = trimmed.to_string();
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing()?;
 
-    let cfg: WorkerConfig = config_core::load_config("config/llm-worker.json")?;
+    let mut cfg: WorkerConfig = config_core::load_config("config/llm-worker.json")?;
+    apply_env_overrides(&mut cfg);
     validate_config(&cfg)?;
     if check_config_mode_enabled() {
         println!("llm-worker config check passed");

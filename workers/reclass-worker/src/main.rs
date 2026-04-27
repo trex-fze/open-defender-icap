@@ -5,7 +5,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use common_types::PageFetchJob;
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Row, Transaction};
-use std::sync::Arc;
+use std::{env, sync::Arc};
 use taxonomy::TaxonomyStore;
 use tokio::{signal, time::Duration};
 use tracing::{error, info, warn, Level};
@@ -111,6 +111,29 @@ fn validate_config(cfg: &ReclassConfig) -> Result<()> {
     validator.finish()
 }
 
+fn apply_env_overrides(cfg: &mut ReclassConfig) {
+    if let Ok(redis_url) = env::var("OD_CACHE_REDIS_URL") {
+        let trimmed = redis_url.trim();
+        if !trimmed.is_empty() {
+            cfg.redis_url = trimmed.to_string();
+        }
+    }
+    if let Ok(database_url) = env::var("OD_ADMIN_DATABASE_URL") {
+        let trimmed = database_url.trim();
+        if !trimmed.is_empty() {
+            cfg.database_url = trimmed.to_string();
+        }
+    }
+    if let Ok(page_fetch_redis_url) = env::var("OD_PAGE_FETCH_REDIS_URL") {
+        let trimmed = page_fetch_redis_url.trim();
+        if !trimmed.is_empty() {
+            if let Some(queue) = cfg.page_fetch_queue.as_mut() {
+                queue.redis_url = trimmed.to_string();
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::FmtSubscriber::builder()
@@ -119,7 +142,8 @@ async fn main() -> Result<()> {
         .json()
         .init();
 
-    let cfg: ReclassConfig = config_core::load_config("config/reclass-worker.json")?;
+    let mut cfg: ReclassConfig = config_core::load_config("config/reclass-worker.json")?;
+    apply_env_overrides(&mut cfg);
     validate_config(&cfg)?;
     if check_config_mode_enabled() {
         println!("reclass-worker config check passed");

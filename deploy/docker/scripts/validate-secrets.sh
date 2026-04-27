@@ -87,6 +87,7 @@ check_url_auth() {
 check_secret POSTGRES_PASSWORD 12 required
 check_secret ELASTIC_PASSWORD 12 required
 check_secret ELASTICSEARCH_SERVICEACCOUNTTOKEN 24 required
+check_secret REDIS_PASSWORD 12 required
 check_secret OD_ADMIN_TOKEN 16 required
 check_secret OD_POLICY_ADMIN_TOKEN 16 required
 check_secret OD_LOCAL_AUTH_JWT_SECRET 32 required

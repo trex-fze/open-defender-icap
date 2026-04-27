@@ -21,7 +21,7 @@ Classifications and allow/deny override lists (for both domains and subdomains) 
 
 ## Secure configuration
 
-`.env.example` is intentionally local-dev oriented and **unsafe for production**. Startup validation now blocks placeholder/default secrets unless explicit development override is enabled.
+`.env.example` is intentionally local-dev oriented and **unsafe for production**. For production-like local validation, use `.env-prod` (copy from `.env-prod.example`). Startup validation blocks placeholder/default secrets unless explicit development override is enabled.
 
 ### Required secrets (production)
 
@@ -48,7 +48,7 @@ openssl rand -base64 48
 openssl rand -hex 32
 ```
 
-Example assignment in `.env`:
+Example assignment in `.env` or `.env-prod`:
 
 ```env
 OD_ADMIN_TOKEN=<random-token>
@@ -225,7 +225,8 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
 2. **Prerequisites**: Docker Desktop/Engine, `make`, Node 20+, Rust toolchain.
 3. **Bootstrap**:
    ```bash
-   cp .env.example .env            # set secrets: OD_ADMIN_TOKEN, ELASTIC_PASSWORD, etc.
+   cp .env.example .env            # development mode
+   cp .env-prod.example .env-prod  # production-like mode
    make gen-certs                  # one-time Squid + web-admin TLS cert generation
    ```
    - Canonical stack env lives at repo root (`.env`); avoid using `deploy/docker/.env`.
@@ -271,7 +272,8 @@ Open Defender intentionally uses both HAProxy and Squid in the proxy path. They 
    - For online providers, set credentials in `.env` (for example `OPENAI_API_KEY`).
 6. **Start stack (policy + AI workers)**:
    ```bash
-   make compose-up                 # equivalent to docker compose up --build
+   make compose-up                 # equivalent to docker compose up --build (dev mode)
+   make MODE=prod preflight && make MODE=prod start  # production-like mode
    ```
    - Docker compose defaults `llm-worker` routing to local LM Studio with OpenAI fallback (see `config/llm-worker.json`).
    - To use LM Studio/Ollama/OpenAI instead, edit `config/llm-worker.json` providers/routing and restart `llm-worker`.

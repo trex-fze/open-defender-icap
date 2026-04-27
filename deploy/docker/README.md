@@ -1,9 +1,9 @@
 # Docker / Compose Workflows
 
-This directory contains the compose stacks used for local development, CI-style integration tests, and lightweight smoke validation. Copy `.env.example` to `.env` at the repo root (never commit `.env`) and adjust secrets such as `OD_ADMIN_TOKEN` or `ELASTIC_PASSWORD` before starting the stack.
+This directory contains the compose stacks used for local development, CI-style integration tests, and lightweight smoke validation. Use `.env` for development mode and `.env-prod` for production-like mode (never commit either file).
 
 Canonical env policy:
-- Use only `/.env` (repo root) for compose/service runtime values.
+- Use root `/.env` for development mode and root `/.env-prod` for production-like mode.
 - Do not rely on `deploy/docker/.env`; compose commands should pass `--env-file .env -f deploy/docker/docker-compose.yml` from repo root.
 - For the complete variable catalog (runtime + frontend + test controls), see `docs/env-vars-reference.md`.
 - Compose includes a `config-preflight` secret gate. Insecure/default secrets fail startup unless `OD_ALLOW_INSECURE_DEV_SECRETS=true` is explicitly set.
@@ -20,6 +20,9 @@ Canonical env policy:
 ```bash
 # Start the full developer topology (requires .env)
 docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build
+
+# Start production-like mode (requires .env-prod)
+docker compose --env-file .env-prod -f deploy/docker/docker-compose.yml up --build
 
 # Tail logs for the ICAP adaptor
 docker compose --env-file .env -f deploy/docker/docker-compose.yml logs -f icap-adaptor
@@ -46,6 +49,8 @@ make compose-up           # Equivalent to docker compose up --build
 make compose-down         # Stops the stack
 make compose-smoke        # Runs smoke-tests in the minimal smoke stack
 COMPOSE_PROFILES=dev make compose-test  # Runs CI/test stack with dev-profile services available
+make MODE=prod preflight # Validates strict secret gate with .env-prod
+make MODE=prod start     # Starts stack with .env-prod
 make compose-logs SERVICE=admin-api   # Tail logs for a specific service
 make compose-golden-local # Stage 24 golden-local bootstrap + verify
 make compose-golden-prodlike # Stage 24 golden-prodlike bootstrap + verify
@@ -58,7 +63,7 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
 
 ## Startup sequence
 1. Ensure Docker Desktop/Engine is running and ports 1344, 19000, 19001, 19005, 19010, 3128, 5432, 6379, 9200, 5601, 9090 are free.
-2. Copy `.env.example` → `.env` (edit tokens/passwords as needed).
+2. Copy `.env.example` -> `.env` for local development, or `.env-prod.example` -> `.env-prod` for production-like validation.
    - Local dev defaults in `.env.example` require explicit `OD_ALLOW_INSECURE_DEV_SECRETS=true`.
    - For production-like runs, unset `OD_ALLOW_INSECURE_DEV_SECRETS` and provide strong unique secrets.
    - Timezone defaults to `OD_TIMEZONE=Asia/Dubai`; keep `OD_REPORTING_TIMEZONE` aligned unless you intentionally want different dashboard bucket timezone.
@@ -70,7 +75,7 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
      docker network inspect "$NET_NAME" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
      ```
 3. Run `make gen-certs` once to generate Squid and web-admin certificates (`deploy/docker/squid/certs/`, `deploy/docker/web-admin/certs/`).
-4. `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d postgres redis` and wait for healthchecks, or just run `docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build` / `make compose-up` to start everything.
+4. `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d postgres redis` and wait for healthchecks, or run `docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build` / `make compose-up` for dev mode. For production-like validation use `--env-file .env-prod` or `make MODE=prod start`.
    - `config-preflight` runs first and blocks startup on insecure/missing secrets when development override is not enabled.
    - If Kibana remains in "server is not ready yet", bootstrap a new service token and set it in root `.env`:
      ```bash

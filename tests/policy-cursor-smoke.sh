@@ -41,8 +41,8 @@ if [[ -z "$ADMIN_TOKEN" ]]; then
   ADMIN_TOKEN=$(compose_cmd exec -T admin-api printenv OD_ADMIN_TOKEN 2>/dev/null || true)
 fi
 
-if [[ -z "$ADMIN_TOKEN" && -z "$LOCAL_PASSWORD" && -f "$ROOT_DIR/.env" ]]; then
-  LOCAL_PASSWORD=$(grep '^OD_DEFAULT_ADMIN_PASSWORD=' "$ROOT_DIR/.env" | cut -d'=' -f2- || true)
+if [[ -z "$ADMIN_TOKEN" && -z "$LOCAL_PASSWORD" && -f "$COMPOSE_ENV_FILE" ]]; then
+  LOCAL_PASSWORD=$(grep '^OD_DEFAULT_ADMIN_PASSWORD=' "$COMPOSE_ENV_FILE" | cut -d'=' -f2- || true)
 fi
 
 if [[ -z "$ADMIN_TOKEN" ]]; then

@@ -32,6 +32,17 @@ pub struct IcapConfig {
 
 pub fn load() -> anyhow::Result<IcapConfig> {
     let mut cfg = config_core::load_config::<IcapConfig>("config/icap.json")?;
+    if let Some(redis_url) = env_non_empty("OD_CACHE_REDIS_URL") {
+        cfg.redis_url = Some(redis_url.clone());
+        if let Some(job_queue) = cfg.job_queue.as_mut() {
+            job_queue.redis_url = redis_url.clone();
+        }
+    }
+    if let Some(page_fetch_redis_url) = env_non_empty("OD_PAGE_FETCH_REDIS_URL") {
+        if let Some(page_fetch_queue) = cfg.page_fetch_queue.as_mut() {
+            page_fetch_queue.redis_url = page_fetch_redis_url;
+        }
+    }
     if let Some(admin) = cfg.admin_api.as_mut() {
         if admin
             .admin_token
@@ -46,6 +57,13 @@ pub fn load() -> anyhow::Result<IcapConfig> {
         }
     }
     Ok(cfg)
+}
+
+fn env_non_empty(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 const fn default_preview_size() -> usize {
