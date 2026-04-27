@@ -3,7 +3,7 @@
   "port": 19000,
   "database_url": null,
   "admin_token": null,
-  "redis_url": "redis://redis:6379",
+  "redis_url": null,
   "cache_channel": "od:cache:invalidate",
   "policy_engine_url": "http://policy-engine:19010",
   "policy_engine_admin_token": null,

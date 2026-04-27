@@ -103,6 +103,21 @@ fn validate_config(cfg: &AdminApiConfig) -> Result<()> {
         "set OD_ADMIN_DATABASE_URL with non-default username/password credentials",
     );
 
+    let redis_url = env::var("OD_CACHE_REDIS_URL")
+        .ok()
+        .and_then(non_empty_env_value)
+        .or_else(|| cfg.redis_url.clone().and_then(non_empty_env_value));
+    if redis_url.is_some() {
+        validator.require_auth_url(
+            "OD_CACHE_REDIS_URL",
+            redis_url.as_deref(),
+            false,
+            true,
+            16,
+            "set OD_CACHE_REDIS_URL with password-authenticated Redis credentials",
+        );
+    }
+
     let env_admin_token = env::var("OD_ADMIN_TOKEN").ok();
     let admin_token = cfg.admin_token.as_deref().or(env_admin_token.as_deref());
     validator.require_strong_secret(
@@ -660,10 +675,10 @@ async fn main() -> Result<()> {
         .admin_token
         .clone()
         .or_else(|| env::var("OD_ADMIN_TOKEN").ok());
-    let redis_url = cfg
-        .redis_url
-        .clone()
-        .or_else(|| env::var("OD_CACHE_REDIS_URL").ok());
+    let redis_url = env::var("OD_CACHE_REDIS_URL")
+        .ok()
+        .and_then(non_empty_env_value)
+        .or_else(|| cfg.redis_url.clone().and_then(non_empty_env_value));
     let cache_channel = cfg
         .cache_channel
         .clone()
