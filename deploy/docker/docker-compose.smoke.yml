@@ -1,6 +1,9 @@
-version: "3.9"
-
 services:
+  config-preflight:
+    extends:
+      file: docker-compose.yml
+      service: config-preflight
+
   redis:
     extends:
       file: docker-compose.yml

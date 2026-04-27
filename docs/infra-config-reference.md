@@ -31,7 +31,7 @@ Primary local/full stack definition. It includes:
 
 ### `deploy/docker/docker-compose.test.yml`
 
-- Adds `smoke-tests` service (migrate + seed + smoke command chain).
+- Adds `smoke-tests` service (`odctl migrate run admin` + `odctl smoke --profile compose`).
 - Moves heavy observability/UI services behind `dev` profile for CI-like lean runs.
 
 ### `deploy/docker/docker-compose.integration.yml`

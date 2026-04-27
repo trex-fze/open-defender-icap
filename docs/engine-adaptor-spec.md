@@ -292,7 +292,7 @@ For each category: definition, subcategories, sample site types, enterprise acti
   - `odctl classify inspect --key domain:example.com`
   - `odctl reclass trigger --scope domain:example.com`
   - `odctl health check --component all`
-  - `odctl smoke run`
+  - `odctl smoke --profile compose`
   - `odctl migrate run`
   - `odctl report query --ip 10.1.2.3 --range 24h`
   - `odctl audit query --actor user@example.com`
@@ -301,7 +301,7 @@ For each category: definition, subcategories, sample site types, enterprise acti
 - **Output**: Table via `tabled` crate; JSON for automation.
 - **Error Handling**: exit codes per command, descriptive errors, suggestion for `--verbose`. Retries on transient errors.
 - **Tests**: Unit for parser, integration with docker-compose stack, golden tests for outputs.
-- **Docker Usage**: `docker run --rm -v ~/.odctl:/root/.odctl odctl smoke run` hitting compose network.
+- **Docker Usage**: `docker run --rm -v ~/.odctl:/root/.odctl odctl smoke --profile compose` hitting compose network.
 
 # 15. LLM Classification Design
 - **Prompt** (exact):
@@ -427,7 +427,7 @@ Rules:
 - **Compose files**: `docker-compose.yml` (dev), `docker-compose.test.yml` (integration), `docker-compose.smoke.yml` (smoke). Use `depends_on` with healthchecks.
 - **Env management**: `.env` file with non-secret defaults, `.env.secrets` loaded via docker secrets. Secrets (LLM API, OIDC) mounted as files.
 - **Volumes**: persistent for Postgres, Redis, ES, Squid logs, Kibana config.
-- **Startup sequence**: `docker-compose up -d postgres redis elasticsearch`; wait for health; run `odctl migrate run`; verify `config/canonical-taxonomy.json` is mounted/available; start rest services; run smoke tests `odctl smoke run`.
+- **Startup sequence**: `docker-compose up -d postgres redis elasticsearch`; wait for health; run `odctl migrate run`; verify `config/canonical-taxonomy.json` is mounted/available; start rest services; run smoke tests `odctl smoke --profile compose`.
 - **Post-start validation**: check `docker compose ps`, run `curl http://localhost:19000/health/ready`, open Kibana.
 - **CI/CD**: pipeline uses compose to run unit/integration/perf; artifacts stored per build.
 
@@ -611,7 +611,7 @@ Provide table referencing every function (per Section 22). Example entries:
 | ST-10 | First-seen domain async | Request new domain, ensure 202 placeholder + job enqueued | placeholder decision, classification completes | failure -> queue issue | logs |
 | ST-11 | Report query | `odctl report query --ip ...` | JSON data returned | indicates report API down | CLI output |
 | ST-12 | Audit log write/read | Create override -> fetch audit entry | entry exists | indicates audit offline | API log |
-| ST-13 | CLI smoke command | `odctl smoke run` | PASS | CLI misconfig if fail | log |
+| ST-13 | CLI smoke command | `odctl smoke --profile compose` | PASS | CLI misconfig if fail | log |
 | ST-14 | Docker-compose validation | `docker compose ps` all healthy | ensures environment ready | Compose logs |
 | ST-15 | Frontend load/auth | open UI, login via OIDC | Dashboard loads | UI/back-end broken if fail | screenshot |
 
@@ -628,7 +628,7 @@ Provide table referencing every function (per Section 22). Example entries:
 | IT-08 Report API | Report svc, ES | IP query | API request | aggregated data | 500 error or wrong data | API logs |
 | IT-09 Frontend→Backend | UI + Admin API | Review queue workflow | approve item via UI | API call success, state updated | UI error | Cypress video |
 | IT-10 CLI→Backend | CLI + Admin API | Policy import/export | CLI command | success message, data present | CLI failure | CLI log |
-| IT-11 CLI→compose | CLI in container hitting compose network | `odctl smoke run` | PASS | failure indicates network issue | Compose logs |
+| IT-11 CLI→compose | CLI in container hitting compose network | `odctl smoke --profile compose` | PASS | failure indicates network issue | Compose logs |
 
 # 26. Performance Test Plan
 | Test | Workload | KPI Targets | Metrics | Pass/Fail |
@@ -692,7 +692,7 @@ Provide table referencing every function (per Section 22). Example entries:
 | Code Review Records | Team Leads | PR history | All PRs reviewed, approvals present | GitHub |
 | Unit Test Report | QA Lead | CI log | 100% pass, coverage ≥85% | CI artifacts |
 | Integration Test Results | QA Lead | docker-compose IT suite | All tests pass | CI |
-| Smoke Test Logs | DevOps | `odctl smoke run` output | PASS | Runbook attachments |
+| Smoke Test Logs | DevOps | `odctl smoke --profile compose` output | PASS | Runbook attachments |
 | Performance Test Report | Perf Engineer | k6/Gatling results | KPIs met | SharePoint |
 | Security Test Report | Security Engineer | Pen test results | All critical findings resolved | Security vault |
 | Deployment Record | DevOps | Change ticket | Completed with timestamps | ITSM |

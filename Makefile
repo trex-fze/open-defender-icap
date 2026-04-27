@@ -27,10 +27,14 @@ compose-down:
 	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" down
 
 compose-smoke:
-	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" -f docker-compose.smoke.yml up --build --abort-on-container-exit
+	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" -f docker-compose.smoke.yml up -d --build
+	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" -f docker-compose.smoke.yml run --rm smoke-tests
+	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" -f docker-compose.smoke.yml down
 
 compose-test:
-	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" -f docker-compose.yml -f docker-compose.test.yml up --build --abort-on-container-exit
+	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" -f docker-compose.yml -f docker-compose.test.yml up -d --build
+	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" -f docker-compose.yml -f docker-compose.test.yml run --rm smoke-tests
+	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" -f docker-compose.yml -f docker-compose.test.yml down
 
 compose-logs:
 	cd $(COMPOSE_DIR) && $(COMPOSE) --env-file "$(COMPOSE_ENV)" logs -f $(SERVICE)

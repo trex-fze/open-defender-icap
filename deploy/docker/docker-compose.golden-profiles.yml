@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   redis:
     profiles: ["golden-local", "golden-prodlike"]

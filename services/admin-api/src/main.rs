@@ -94,6 +94,77 @@ fn validate_config(cfg: &AdminApiConfig) -> Result<()> {
         db_url.as_deref(),
         "set config/admin-api.json.database_url or OD_ADMIN_DATABASE_URL (fallback: DATABASE_URL)",
     );
+    validator.require_auth_url(
+        "OD_ADMIN_DATABASE_URL",
+        db_url.as_deref(),
+        true,
+        true,
+        12,
+        "set OD_ADMIN_DATABASE_URL with non-default username/password credentials",
+    );
+
+    let env_admin_token = env::var("OD_ADMIN_TOKEN").ok();
+    let admin_token = cfg.admin_token.as_deref().or(env_admin_token.as_deref());
+    validator.require_strong_secret(
+        "OD_ADMIN_TOKEN",
+        admin_token,
+        16,
+        "set OD_ADMIN_TOKEN to a high-entropy value",
+    );
+
+    let env_policy_token = env::var("OD_POLICY_ADMIN_TOKEN").ok();
+    let policy_token = cfg
+        .policy_engine_admin_token
+        .as_deref()
+        .or(env_policy_token.as_deref())
+        .or(admin_token);
+    validator.require_strong_secret(
+        "OD_POLICY_ADMIN_TOKEN",
+        policy_token,
+        16,
+        "set OD_POLICY_ADMIN_TOKEN to a unique strong token",
+    );
+
+    let default_admin_password = env::var("OD_DEFAULT_ADMIN_PASSWORD").ok();
+    validator.validate_optional_secret(
+        "OD_DEFAULT_ADMIN_PASSWORD",
+        default_admin_password.as_deref(),
+        12,
+        "set OD_DEFAULT_ADMIN_PASSWORD to a strong temporary bootstrap password",
+    );
+
+    let oidc_hs256 = env::var("OD_OIDC_HS256_SECRET")
+        .ok()
+        .or(cfg.auth.oidc_hs256_secret.clone());
+    validator.validate_optional_secret(
+        "OD_OIDC_HS256_SECRET",
+        oidc_hs256.as_deref(),
+        24,
+        "set OD_OIDC_HS256_SECRET to a strong random signing secret",
+    );
+
+    let reporting = cfg.reporting.clone().merge_env();
+    validator.validate_optional_secret(
+        "OD_REPORTING_ELASTIC_PASSWORD",
+        reporting.password.as_deref(),
+        12,
+        "use strong Elasticsearch credentials for OD_REPORTING_ELASTIC_PASSWORD",
+    );
+    validator.validate_optional_secret(
+        "OD_REPORTING_ELASTIC_API_KEY",
+        reporting.api_key.as_deref(),
+        16,
+        "set OD_REPORTING_ELASTIC_API_KEY to a non-default API key",
+    );
+
+    let audit = cfg.audit.clone().merge_env();
+    validator.validate_optional_secret(
+        "OD_AUDIT_ELASTIC_API_KEY",
+        audit.api_key.as_deref(),
+        16,
+        "set OD_AUDIT_ELASTIC_API_KEY to a non-default API key",
+    );
+
     validator.finish()?;
     validate_settings_for_startup(cfg.auth.clone())?;
     Ok(())
@@ -137,15 +208,24 @@ struct AuditExportConfig {
 impl AuditExportConfig {
     fn merge_env(mut self) -> Self {
         if let Ok(url) = env::var("OD_AUDIT_ELASTIC_URL") {
-            self.elastic_url = Some(url);
+            self.elastic_url = non_empty_env_value(url);
         }
         if let Ok(index) = env::var("OD_AUDIT_ELASTIC_INDEX") {
-            self.index = Some(index);
+            self.index = non_empty_env_value(index);
         }
         if let Ok(key) = env::var("OD_AUDIT_ELASTIC_API_KEY") {
-            self.api_key = Some(key);
+            self.api_key = non_empty_env_value(key);
         }
         self
+    }
+}
+
+fn non_empty_env_value(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 
@@ -939,7 +1019,10 @@ async fn main() -> Result<()> {
             get(page_contents::list_page_content_history),
         )
         .route("/api/v1/ops/llm/providers", get(list_llm_providers))
-        .route("/api/v1/ops/platform-health", get(ops_health::platform_health))
+        .route(
+            "/api/v1/ops/platform-health",
+            get(ops_health::platform_health),
+        )
         .with_state(state.clone())
         .layer(auth_layer);
 
@@ -1394,8 +1477,9 @@ async fn import_overrides(
                 })?;
                 updated += 1;
                 active_by_scope.insert(scope_value.clone(), (active_id, action.clone()));
-            } else if let Some(existing_id) =
-                latest_by_scope_action.get(&(scope_value.clone(), action.clone())).copied()
+            } else if let Some(existing_id) = latest_by_scope_action
+                .get(&(scope_value.clone(), action.clone()))
+                .copied()
             {
                 sqlx::query(
                     r#"UPDATE overrides
@@ -1808,16 +1892,17 @@ async fn update_override(
         )
     })?;
 
-    let existing = sqlx::query("SELECT scope_type, scope_value, status FROM overrides WHERE id = $1")
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|err| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiError::new("DB_ERROR", err.to_string())),
-            )
-        })?;
+    let existing =
+        sqlx::query("SELECT scope_type, scope_value, status FROM overrides WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|err| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiError::new("DB_ERROR", err.to_string())),
+                )
+            })?;
 
     let Some(existing_row) = existing else {
         return Err((
@@ -2282,6 +2367,28 @@ pub fn validation_error(message: &str) -> (StatusCode, Json<ApiError>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn base_admin_cfg() -> AdminApiConfig {
+        serde_json::from_value(json!({
+            "host": "0.0.0.0",
+            "port": 19000,
+            "database_url": "postgres://svc_admin:prod-db-password-123@db.example:5432/defender_admin",
+            "admin_token": "prod-admin-token-0123456789",
+            "policy_engine_admin_token": "prod-policy-token-0123456789",
+            "auth": {
+              "mode": "local",
+              "local_jwt_secret": "prod-local-jwt-secret-0123456789abcdef"
+            },
+            "reporting": {
+              "elastic_url": "http://elasticsearch:9200",
+              "index_pattern": "traffic-events-*",
+              "username": "elastic",
+              "password": "prod-elastic-password-abcdef"
+            }
+        }))
+        .expect("valid admin config")
+    }
 
     fn base_request() -> OverrideUpsertRequest {
         OverrideUpsertRequest {
@@ -2381,6 +2488,38 @@ mod tests {
             OverrideImportMode::Replace
         ));
         assert!(normalize_override_import_mode(Some("all")).is_err());
+    }
+
+    #[test]
+    fn config_rejects_default_secret_values_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        std::env::set_var("OD_DEFAULT_ADMIN_PASSWORD", "changeme-local-admin-password");
+        let mut cfg = base_admin_cfg();
+        cfg.admin_token = Some("changeme-admin".into());
+        let err = validate_config(&cfg).expect_err("default secrets must fail");
+        let rendered = format!("{err:#}");
+        assert!(rendered.contains("OD_ADMIN_TOKEN"));
+        std::env::remove_var("OD_DEFAULT_ADMIN_PASSWORD");
+    }
+
+    #[test]
+    fn config_accepts_strong_secrets_when_dev_mode_disabled() {
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
+        std::env::set_var("OD_DEFAULT_ADMIN_PASSWORD", "strong-bootstrap-password-123");
+        let cfg = base_admin_cfg();
+        assert!(validate_config(&cfg).is_ok());
+        std::env::remove_var("OD_DEFAULT_ADMIN_PASSWORD");
+    }
+
+    #[test]
+    fn config_allows_default_secrets_only_with_explicit_dev_override() {
+        std::env::set_var("OD_ALLOW_INSECURE_DEV_SECRETS", "true");
+        std::env::set_var("OD_DEFAULT_ADMIN_PASSWORD", "changeme-local-admin-password");
+        let mut cfg = base_admin_cfg();
+        cfg.admin_token = Some("changeme-admin".into());
+        assert!(validate_config(&cfg).is_ok());
+        std::env::remove_var("OD_DEFAULT_ADMIN_PASSWORD");
+        std::env::remove_var("OD_ALLOW_INSECURE_DEV_SECRETS");
     }
 }
 

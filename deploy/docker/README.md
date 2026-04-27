@@ -6,6 +6,7 @@ Canonical env policy:
 - Use only `/.env` (repo root) for compose/service runtime values.
 - Do not rely on `deploy/docker/.env`; compose commands should pass `--env-file .env -f deploy/docker/docker-compose.yml` from repo root.
 - For the complete variable catalog (runtime + frontend + test controls), see `docs/env-vars-reference.md`.
+- Compose includes a `config-preflight` secret gate. Insecure/default secrets fail startup unless `OD_ALLOW_INSECURE_DEV_SECRETS=true` is explicitly set.
 
 ## Compose files
 - `docker-compose.yml`: full developer stack (Redis, Postgres, ICAP adaptor, Policy Engine, Admin API, Squid, Kibana, Elasticsearch, Prometheus, workers, web-admin, odctl runner, **Filebeat + event-ingester** for Stage 6 telemetry). Prometheus loads `prometheus-rules.yml`, including Stage 6 service health alerts plus Stage 24 queue reliability and auth-hardening alerts (pending age, processing stall, DLQ growth, login/refresh failure spikes, lockouts).
@@ -24,7 +25,9 @@ docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build
 docker compose --env-file .env -f deploy/docker/docker-compose.yml logs -f icap-adaptor
 
 # Run the minimal smoke stack
-docker compose --env-file .env -f deploy/docker/docker-compose.smoke.yml up --build --abort-on-container-exit
+docker compose --env-file .env -f deploy/docker/docker-compose.smoke.yml up -d --build
+docker compose --env-file .env -f deploy/docker/docker-compose.smoke.yml run --rm smoke-tests
+docker compose --env-file .env -f deploy/docker/docker-compose.smoke.yml down
 
 # Execute odctl commands inside the runner container
 docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl override list
@@ -41,8 +44,8 @@ For convenience, the repo root exposes a `Makefile` wrapper:
 make gen-certs            # Generate Squid CA/server certs under deploy/docker/squid/certs/
 make compose-up           # Equivalent to docker compose up --build
 make compose-down         # Stops the stack
-make compose-smoke        # Runs the minimal smoke stack (abort on completion)
-make compose-test         # Runs the CI/test stack (docker-compose.yml + test overlay)
+make compose-smoke        # Runs smoke-tests in the minimal smoke stack
+COMPOSE_PROFILES=dev make compose-test  # Runs CI/test stack with dev-profile services available
 make compose-logs SERVICE=admin-api   # Tail logs for a specific service
 make compose-golden-local # Stage 24 golden-local bootstrap + verify
 make compose-golden-prodlike # Stage 24 golden-prodlike bootstrap + verify
@@ -56,6 +59,8 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
 ## Startup sequence
 1. Ensure Docker Desktop/Engine is running and ports 1344, 19000, 19001, 19005, 19010, 3128, 5432, 6379, 9200, 5601, 9090 are free.
 2. Copy `.env.example` → `.env` (edit tokens/passwords as needed).
+   - Local dev defaults in `.env.example` require explicit `OD_ALLOW_INSECURE_DEV_SECRETS=true`.
+   - For production-like runs, unset `OD_ALLOW_INSECURE_DEV_SECRETS` and provide strong unique secrets.
    - Timezone defaults to `OD_TIMEZONE=Asia/Dubai`; keep `OD_REPORTING_TIMEZONE` aligned unless you intentionally want different dashboard bucket timezone.
    - Set `OD_SQUID_ALLOWED_CLIENT_CIDRS` to include both client LAN CIDR(s) and the Docker bridge CIDR used by HAProxy -> Squid. Example: `OD_SQUID_ALLOWED_CLIENT_CIDRS=192.168.1.0/24,172.18.0.0/16`.
    - Discover the active HAProxy docker-network subnet from repo root:
@@ -66,6 +71,7 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
      ```
 3. Run `make gen-certs` once to generate Squid and web-admin certificates (`deploy/docker/squid/certs/`, `deploy/docker/web-admin/certs/`).
 4. `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d postgres redis` and wait for healthchecks, or just run `docker compose --env-file .env -f deploy/docker/docker-compose.yml up --build` / `make compose-up` to start everything.
+   - `config-preflight` runs first and blocks startup on insecure/missing secrets when development override is not enabled.
    - If Kibana remains in "server is not ready yet", bootstrap a new service token and set it in root `.env`:
      ```bash
      curl -u elastic:${ELASTIC_PASSWORD:-changeme-elastic} -s -X POST \
@@ -74,10 +80,9 @@ Run `make gen-certs` once before the first `compose-up`; this generates:
      - Set `ELASTICSEARCH_SERVICEACCOUNTTOKEN=<token.value>` in root `.env`.
      - Recreate Kibana: `docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --force-recreate kibana`.
 5. Run migrations/seeds as needed:
-   - Shared DB default (`.env.example`): `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl migrate run admin`
-   - Use `odctl migrate run all` only when `OD_ADMIN_DATABASE_URL` and `OD_POLICY_DATABASE_URL` point to different databases.
-   - `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl seed policies config/policies.json default compose`
-6. Once services are healthy, run `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl smoke icap-adaptor:1344` (already performed automatically in the test/smoke stacks).
+    - Shared DB default (`.env.example`): `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl migrate run admin`
+    - Use `odctl migrate run all` only when `OD_ADMIN_DATABASE_URL` and `OD_POLICY_DATABASE_URL` point to different databases.
+6. Once services are healthy, run `docker compose --env-file .env -f deploy/docker/docker-compose.yml run --rm odctl-runner odctl smoke --profile compose` (already performed automatically in the test/smoke stacks).
 7. Access:
     - Admin API: http://localhost:19000/health/ready
     - Policy Engine: http://localhost:19010/health/ready

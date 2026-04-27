@@ -30,10 +30,10 @@ This runbook covers the steps we follow to deploy or roll back the Stage 11 IAM 
 5. Run the compose integration suite to exercise the full stack (Admin API, policy engine, ICAP adaptor, workers):
 
    ```bash
-   make compose-test   # defined in the repo Makefile
+   COMPOSE_PROFILES=dev make compose-test   # defined in the repo Makefile
    ```
 
-   The test bundle runs `cargo test`, `npm run build`, and the ICAP→policy happy path inside Docker.
+   The test bundle runs the ICAP->policy smoke harness inside Docker (`up -d --build`, `run --rm smoke-tests`, then `down`).
 
 ## Compatibility Settings
 

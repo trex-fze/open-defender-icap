@@ -42,8 +42,8 @@ This document records the design for the next iteration of the containerized dev
 2. **`deploy/docker/docker-compose.test.yml` (CI integration)**
    - Extends base service definitions via YAML anchors or Compose `extends`.
    - Replaces React dev server with production build container, disables Kibana/Prometheus for speed (optional, but keep ability to toggle via profiles).
-   - Adds `smoke-tests` service that runs `odctl smoke localhost:1344` plus API health checks, failing the compose run if any command exits non-zero.
-   - Provides target for `docker compose -f ... up --abort-on-container-exit` in CI.
+   - Adds `smoke-tests` service that runs `odctl migrate run admin`, basic override listing, then `odctl smoke --profile compose`.
+   - Provides target for detached `up -d`, `run --rm smoke-tests`, and `down` CI flow.
 
 3. **`deploy/docker/docker-compose.smoke.yml` (local quick validation)**
    - Minimal: Redis, Postgres, ICAP adaptor, Policy engine, Admin API, odctl runner.
@@ -66,10 +66,10 @@ This document records the design for the next iteration of the containerized dev
 - **Kibana/Elasticsearch**: built-in health endpoints.
 - Compose docs describe running:
   1. `docker compose up -d postgres redis` → wait for health.
-  2. Shared DB default (`.env.example`): `docker compose run --rm odctl-runner odctl migrate run admin`, then `... odctl seed policies config/policies.json default compose`.
+  2. Shared DB default (`.env.example`): `docker compose run --rm odctl-runner odctl migrate run admin`.
   3. Use `odctl migrate run all` only when admin and policy DB URLs are different.
   4. `docker compose up icap-adaptor policy-engine admin-api`.
-  5. `docker compose run --rm odctl-runner odctl smoke icap-adaptor:1344`.
+  5. `docker compose run --rm odctl-runner odctl smoke --profile compose`.
 
 ## Open Questions / Future Work
 - Do we need Squid in the initial stack or can ICAP adaptor be called directly? (Assumption: include Squid now to align with spec.)

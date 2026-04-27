@@ -18,7 +18,7 @@
 ## Traceability Plan
 | Requirement | Section | Artifact |
 | --- | --- | --- |
-| Smoke tests | Spec §27 | `odctl smoke run` logs |
+| Smoke tests | Spec §27 | `odctl smoke --profile compose` logs |
 | Performance KPIs | Spec §29 | k6/Gatling reports |
 | Security validation | Spec §30 | Pen test findings, remediation evidence |
 | DoD per component | Spec §32 | Signoff forms, dashboards |

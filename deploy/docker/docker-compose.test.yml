@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   smoke-tests:
     extends:
@@ -11,13 +9,11 @@ services:
       - |
         set -euo pipefail
         echo "Running database migrations..."
-        odctl migrate run all
-        echo "Seeding default policies..."
-        odctl seed policies config/policies.json default compose
+        odctl migrate run admin
         echo "Waiting for services before smoke test..."
         sleep 10
         odctl override list || true
-        odctl smoke icap-adaptor:1344
+        odctl smoke --profile compose
     depends_on:
       icap-adaptor:
         condition: service_started
